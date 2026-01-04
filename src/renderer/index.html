@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Playlist Lab</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { 
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #0d1117;
+        color: #fff;
+      }
+      button, input, select, a { -webkit-app-region: no-drag; }
+      .titlebar-drag-region {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 32px;
+        -webkit-app-region: drag;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        padding-left: 10px;
+        gap: 8px;
+        background: rgba(13, 17, 23, 0.85);
+      }
+      .titlebar-logo {
+        width: 18px;
+        height: 18px;
+        -webkit-app-region: no-drag;
+      }
+      .titlebar-title {
+        font-size: 12px;
+        font-weight: 500;
+        color: #e6edf3;
+        -webkit-app-region: drag;
+      }
+      #root {
+        padding-top: 32px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="titlebar-drag-region">
+      <img src="./logo.png" alt="" class="titlebar-logo" />
+      <span class="titlebar-title">Playlist Lab</span>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
