@@ -5,10 +5,22 @@
 import { useState, useEffect, useCallback } from 'react';
 import { MatchedPlaylist, matchPlaylistToPlex } from './discovery';
 
+export interface ImportProgress {
+  playlistName: string;
+  playlistImage?: string;
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz';
+  current: number;
+  total: number;
+  currentTrack: string;
+  matchedCount: number;
+}
+
 interface ImportPageProps {
   serverUrl: string;
   onBack: () => void;
   onPlaylistSelect: (playlist: MatchedPlaylist) => void;
+  importProgress: ImportProgress | null;
+  setImportProgress: React.Dispatch<React.SetStateAction<ImportProgress | null>>;
 }
 
 interface SpotifyPlaylist {
@@ -34,28 +46,18 @@ interface ExternalTrack {
   album?: string;
 }
 
-interface ImportProgress {
-  playlistName: string;
-  playlistImage?: string;
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal';
-  current: number;
-  total: number;
-  currentTrack: string;
-  matchedCount: number;
-}
-
-type Tab = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'plex';
-
 interface PreImportPlaylist {
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal';
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz';
   id: string;
   name: string;
   image?: string;
   trackCount: number;
-  url?: string; // For Apple Music and Tidal
+  url?: string;
 }
 
-export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: ImportPageProps) {
+type Tab = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'plex';
+
+export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, importProgress, setImportProgress }: ImportPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('deezer');
   
   // Spotify state
@@ -64,6 +66,37 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
   const [showSpotifySetup, setShowSpotifySetup] = useState(false);
   const [spotifyPlaylists, setSpotifyPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [isLoadingSpotify, setIsLoadingSpotify] = useState(false);
+  
+  // Deezer state (with optional login)
+  const [deezerAuth, setDeezerAuth] = useState<{ user: any; accessToken: string | null } | null>(null);
+  const [deezerCredentials, setDeezerCredentials] = useState<{ appId: string; appSecret: string }>({ appId: '', appSecret: '' });
+  const [showDeezerSetup, setShowDeezerSetup] = useState(false);
+  const [deezerUserPlaylists, setDeezerUserPlaylists] = useState<DeezerPlaylist[]>([]);
+  const [isLoadingDeezerUser, setIsLoadingDeezerUser] = useState(false);
+  
+  // Tidal state (with optional login)
+  const [tidalAuth, setTidalAuth] = useState<{ user: any; accessToken: string | null } | null>(null);
+  const [tidalCredentials, setTidalCredentials] = useState<{ clientId: string; clientSecret: string }>({ clientId: '', clientSecret: '' });
+  const [showTidalSetup, setShowTidalSetup] = useState(false);
+  const [tidalUserPlaylists, setTidalUserPlaylists] = useState<any[]>([]);
+  const [isLoadingTidalUser, setIsLoadingTidalUser] = useState(false);
+  const [tidalSearchQuery, setTidalSearchQuery] = useState('');
+  const [tidalSearchResults, setTidalSearchResults] = useState<any[]>([]);
+  const [isSearchingTidal, setIsSearchingTidal] = useState(false);
+  
+  // YouTube Music state (with optional login)
+  const [ytMusicAuth, setYtMusicAuth] = useState<{ user: any; accessToken: string | null } | null>(null);
+  const [ytMusicCredentials, setYtMusicCredentials] = useState<{ clientId: string; clientSecret: string }>({ clientId: '', clientSecret: '' });
+  const [showYtMusicSetup, setShowYtMusicSetup] = useState(false);
+  const [ytMusicPlaylists, setYtMusicPlaylists] = useState<any[]>([]);
+  const [isLoadingYtMusic, setIsLoadingYtMusic] = useState(false);
+  const [ytMusicUrl, setYtMusicUrl] = useState('');
+  
+  // Amazon Music state (URL only - no API)
+  const [amazonMusicUrl, setAmazonMusicUrl] = useState('');
+  
+  // Qobuz state (URL only - limited API)
+  const [qobuzUrl, setQobuzUrl] = useState('');
   
   // Deezer state
   const [deezerQuery, setDeezerQuery] = useState('');
@@ -108,7 +141,6 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
   
   // Import state
   const [importingPlaylist, setImportingPlaylist] = useState<string | null>(null);
-  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [matchedPlaylists, setMatchedPlaylists] = useState<Map<string, MatchedPlaylist>>(new Map());
   const [statusMessage, setStatusMessage] = useState('');
   
@@ -123,7 +155,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
 
   // Schedule modal state
   const [schedulePlaylist, setSchedulePlaylist] = useState<{
-    source: 'deezer' | 'apple' | 'tidal' | 'spotify';
+    source: 'deezer' | 'apple' | 'tidal' | 'spotify' | 'youtube' | 'amazon' | 'qobuz';
     id: string;
     name: string;
     url?: string;
@@ -131,9 +163,12 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
   const [scheduleFrequency, setScheduleFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
   const [existingSchedules, setExistingSchedules] = useState<any[]>([]);
 
-  // Load Spotify auth on mount
+  // Load auth states on mount
   useEffect(() => {
     loadSpotifyAuth();
+    loadDeezerAuth();
+    loadTidalAuth();
+    loadYtMusicAuth();
     loadPlexPlaylists();
     loadDeezerTopPlaylists();
     loadSchedules();
@@ -166,6 +201,231 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
     }
   };
 
+  // Deezer OAuth functions
+  const loadDeezerAuth = async () => {
+    const auth = await window.api.getDeezerAuth();
+    if (auth.accessToken && auth.user) {
+      setDeezerAuth({ user: auth.user, accessToken: auth.accessToken });
+      loadDeezerUserPlaylists();
+    }
+    const creds = await window.api.getDeezerCredentials();
+    if (creds.appId) {
+      setDeezerCredentials({ appId: creds.appId, appSecret: creds.appSecret || '' });
+    }
+  };
+
+  const loadDeezerUserPlaylists = async () => {
+    setIsLoadingDeezerUser(true);
+    try {
+      const playlists = await window.api.getDeezerUserPlaylists();
+      setDeezerUserPlaylists(playlists);
+    } catch (error: any) {
+      console.error('Error loading Deezer playlists:', error);
+    } finally {
+      setIsLoadingDeezerUser(false);
+    }
+  };
+
+  const handleSaveDeezerCredentials = async () => {
+    if (!deezerCredentials.appId || !deezerCredentials.appSecret) {
+      setStatusMessage('Please enter both App ID and App Secret');
+      return;
+    }
+    await window.api.saveDeezerCredentials(deezerCredentials);
+    setShowDeezerSetup(false);
+    setStatusMessage('Deezer credentials saved. Click "Connect Deezer" to login.');
+  };
+
+  const handleDeezerLogin = async () => {
+    if (!deezerCredentials.appId) {
+      setShowDeezerSetup(true);
+      return;
+    }
+    try {
+      await window.api.startDeezerAuth();
+      setStatusMessage('Complete login in your browser, then paste the callback URL here.');
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    }
+  };
+
+  const handleDeezerCallback = async (callbackUrl: string) => {
+    try {
+      const url = new URL(callbackUrl);
+      const code = url.searchParams.get('code');
+      if (!code) {
+        setStatusMessage('Invalid callback URL - no code found');
+        return;
+      }
+      const result = await window.api.exchangeDeezerCode({ code });
+      setDeezerAuth({ user: result.user, accessToken: result.accessToken });
+      setStatusMessage('');
+      loadDeezerUserPlaylists();
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    }
+  };
+
+  const handleDeezerLogout = async () => {
+    await window.api.logoutDeezer();
+    setDeezerAuth(null);
+    setDeezerUserPlaylists([]);
+  };
+
+  // Tidal OAuth functions
+  const loadTidalAuth = async () => {
+    const auth = await window.api.getTidalAuth();
+    if (auth.accessToken && auth.user) {
+      setTidalAuth({ user: auth.user, accessToken: auth.accessToken });
+      loadTidalUserPlaylists();
+    }
+    const creds = await window.api.getTidalCredentials();
+    if (creds.clientId) {
+      setTidalCredentials({ clientId: creds.clientId, clientSecret: creds.clientSecret || '' });
+    }
+  };
+
+  const loadTidalUserPlaylists = async () => {
+    setIsLoadingTidalUser(true);
+    try {
+      const playlists = await window.api.getTidalUserPlaylists();
+      setTidalUserPlaylists(playlists);
+    } catch (error: any) {
+      console.error('Error loading Tidal playlists:', error);
+    } finally {
+      setIsLoadingTidalUser(false);
+    }
+  };
+
+  const handleSaveTidalCredentials = async () => {
+    if (!tidalCredentials.clientId || !tidalCredentials.clientSecret) {
+      setStatusMessage('Please enter both Client ID and Client Secret');
+      return;
+    }
+    await window.api.saveTidalCredentials(tidalCredentials);
+    setShowTidalSetup(false);
+    setStatusMessage('Tidal credentials saved. Click "Connect Tidal" to login.');
+  };
+
+  const handleTidalLogin = async () => {
+    if (!tidalCredentials.clientId) {
+      setShowTidalSetup(true);
+      return;
+    }
+    try {
+      await window.api.startTidalAuth();
+      setStatusMessage('Complete login in your browser, then paste the callback URL here.');
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    }
+  };
+
+  const handleTidalCallback = async (callbackUrl: string) => {
+    try {
+      const url = new URL(callbackUrl);
+      const code = url.searchParams.get('code');
+      if (!code) {
+        setStatusMessage('Invalid callback URL - no code found');
+        return;
+      }
+      const result = await window.api.exchangeTidalCode({ code });
+      setTidalAuth({ user: result.user, accessToken: result.accessToken });
+      setStatusMessage('');
+      loadTidalUserPlaylists();
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    }
+  };
+
+  const handleTidalLogout = async () => {
+    await window.api.logoutTidal();
+    setTidalAuth(null);
+    setTidalUserPlaylists([]);
+  };
+
+  const handleTidalSearch = async () => {
+    if (!tidalSearchQuery.trim()) return;
+    setIsSearchingTidal(true);
+    try {
+      const results = await window.api.searchTidalPlaylists({ query: tidalSearchQuery });
+      setTidalSearchResults(results);
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    } finally {
+      setIsSearchingTidal(false);
+    }
+  };
+
+  // YouTube Music OAuth functions
+  const loadYtMusicAuth = async () => {
+    const auth = await window.api.getYouTubeMusicAuth();
+    if (auth.accessToken && auth.user) {
+      setYtMusicAuth({ user: auth.user, accessToken: auth.accessToken });
+      loadYtMusicPlaylists();
+    }
+    const creds = await window.api.getYouTubeMusicCredentials();
+    if (creds.clientId) {
+      setYtMusicCredentials({ clientId: creds.clientId, clientSecret: creds.clientSecret || '' });
+    }
+  };
+
+  const loadYtMusicPlaylists = async () => {
+    setIsLoadingYtMusic(true);
+    try {
+      const playlists = await window.api.getYouTubeMusicPlaylists();
+      setYtMusicPlaylists(playlists);
+    } catch (error: any) {
+      console.error('Error loading YouTube Music playlists:', error);
+    } finally {
+      setIsLoadingYtMusic(false);
+    }
+  };
+
+  const handleSaveYtMusicCredentials = async () => {
+    if (!ytMusicCredentials.clientId || !ytMusicCredentials.clientSecret) {
+      setStatusMessage('Please enter both Client ID and Client Secret');
+      return;
+    }
+    await window.api.saveYouTubeMusicCredentials(ytMusicCredentials);
+    setShowYtMusicSetup(false);
+    setStatusMessage('YouTube credentials saved. Click "Connect YouTube Music" to login.');
+  };
+
+  const handleYtMusicLogin = async () => {
+    if (!ytMusicCredentials.clientId) {
+      setShowYtMusicSetup(true);
+      return;
+    }
+    try {
+      await window.api.startYouTubeMusicAuth();
+      setStatusMessage('Complete login in your browser, then paste the callback URL here.');
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    }
+  };
+
+  const handleYtMusicCallback = async (callbackUrl: string) => {
+    try {
+      const url = new URL(callbackUrl);
+      const code = url.searchParams.get('code');
+      if (!code) {
+        setStatusMessage('Invalid callback URL - no code found');
+        return;
+      }
+      const result = await window.api.exchangeYouTubeMusicCode({ code });
+      setYtMusicAuth({ user: result.user, accessToken: result.accessToken });
+      setStatusMessage('');
+      loadYtMusicPlaylists();
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    }
+  };
+
+  const handleYtMusicLogout = async () => {
+    await window.api.logoutYouTubeMusic();
+    setYtMusicAuth(null);
+    setYtMusicPlaylists([]);
+  };
   const loadSpotifyAuth = async () => {
     const auth = await window.api.getSpotifyAuth();
     if (auth.accessToken && auth.user) {
@@ -256,18 +516,19 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
   };
 
   const showPreImportModal = (
-    source: 'spotify' | 'deezer',
+    source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz',
     id: string,
     name: string,
     trackCount: number,
-    image?: string
+    image?: string,
+    url?: string
   ) => {
-    setPreImportPlaylist({ source, id, name, image, trackCount });
+    setPreImportPlaylist({ source, id, name, image, trackCount, url });
     setEditedPlaylistName(name);
   };
 
   const openScheduleModal = (
-    source: 'deezer' | 'apple' | 'tidal' | 'spotify',
+    source: 'deezer' | 'apple' | 'tidal' | 'spotify' | 'youtube' | 'amazon' | 'qobuz',
     id: string,
     name: string,
     url?: string
@@ -412,11 +673,11 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
   };
 
   // Direct import from URL without preview
-  const importDirectFromUrl = async (source: 'apple' | 'tidal', url: string, name: string) => {
+  const importDirectFromUrl = async (source: 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz', url: string, name: string) => {
     setImportingPlaylist(url);
     setImportProgress({
       playlistName: name,
-      source: source,
+      source: source === 'youtube' || source === 'amazon' || source === 'qobuz' ? 'spotify' : source,
       current: 0,
       total: 0,
       currentTrack: 'Fetching playlist...',
@@ -431,14 +692,28 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
         const result = await window.api.scrapeAppleMusicPlaylist({ url });
         tracks = result.tracks;
         playlistName = result.name || name;
-      } else {
+      } else if (source === 'tidal') {
         const result = await window.api.scrapeTidalPlaylist({ url });
         tracks = result.tracks;
         playlistName = result.name || name;
+      } else if (source === 'youtube') {
+        const result = await window.api.scrapeYouTubeMusicPlaylist({ url });
+        tracks = result.tracks;
+        playlistName = result.name || name;
+      } else if (source === 'amazon') {
+        const result = await window.api.scrapeAmazonMusicPlaylist({ url });
+        tracks = result.tracks;
+        playlistName = result.name || name;
+      } else if (source === 'qobuz') {
+        const result = await window.api.scrapeQobuzPlaylist({ url });
+        tracks = result.tracks;
+        playlistName = result.name || name;
+      } else {
+        tracks = [];
       }
       
       if (tracks.length === 0) {
-        setStatusMessage('No tracks found. The playlist may be private.');
+        setStatusMessage('No tracks found. The playlist may be private or the service blocked the request.');
         setImportProgress(null);
         setImportingPlaylist(null);
         return;
@@ -446,10 +721,18 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
       
       setImportProgress(prev => prev ? { ...prev, total: tracks.length, currentTrack: '' } : null);
       
+      const sourceNames: Record<string, string> = {
+        apple: 'Apple Music',
+        tidal: 'Tidal',
+        youtube: 'YouTube Music',
+        amazon: 'Amazon Music',
+        qobuz: 'Qobuz',
+      };
+      
       const discoveryPlaylist = {
         id: `${source}-${Date.now()}`,
         name: playlistName,
-        description: `Imported from ${source === 'apple' ? 'Apple Music' : 'Tidal'}`,
+        description: `Imported from ${sourceNames[source]}`,
         source: 'deezer' as const,
         tracks: tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
       };
@@ -480,11 +763,76 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
 
   const startImport = () => {
     if (!preImportPlaylist) return;
-    const { source, id, image } = preImportPlaylist;
+    const { source, id, image, url } = preImportPlaylist;
     const name = editedPlaylistName.trim() || preImportPlaylist.name;
     setPreImportPlaylist(null);
-    // Only spotify and deezer use this modal flow
-    handleImportPlaylist(source as 'spotify' | 'deezer', id, name, image);
+    
+    // URL-based imports (Apple, Tidal, YouTube, Amazon, Qobuz)
+    if ((source === 'apple' || source === 'tidal' || source === 'youtube' || source === 'amazon' || source === 'qobuz') && url) {
+      importDirectFromUrl(source, url, name);
+    } else if (source === 'youtube' && !url) {
+      // YouTube with OAuth - import by playlist ID
+      importYouTubePlaylistById(id, name, image);
+    } else {
+      // Spotify and Deezer use ID-based import
+      handleImportPlaylist(source as 'spotify' | 'deezer', id, name, image);
+    }
+  };
+
+  const importYouTubePlaylistById = async (playlistId: string, playlistName: string, playlistImage?: string) => {
+    setImportingPlaylist(playlistId);
+    setImportProgress({
+      playlistName,
+      playlistImage,
+      source: 'spotify', // Using spotify as a generic source type for progress
+      current: 0,
+      total: 0,
+      currentTrack: 'Fetching playlist...',
+      matchedCount: 0,
+    });
+    
+    try {
+      const tracks = await window.api.getYouTubeMusicPlaylistTracks({ playlistId });
+      
+      if (tracks.length === 0) {
+        setStatusMessage('No tracks found in playlist.');
+        setImportProgress(null);
+        setImportingPlaylist(null);
+        return;
+      }
+      
+      setImportProgress(prev => prev ? { ...prev, total: tracks.length, currentTrack: '' } : null);
+      
+      const discoveryPlaylist = {
+        id: `youtube-${playlistId}`,
+        name: playlistName,
+        description: 'Imported from YouTube Music',
+        source: 'deezer' as const,
+        tracks: tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
+      };
+      
+      const matched = await matchPlaylistToPlex(
+        discoveryPlaylist, 
+        serverUrl, 
+        window.api.searchTrack,
+        (current, total, trackName) => {
+          setImportProgress(prev => prev ? {
+            ...prev,
+            current,
+            total,
+            currentTrack: trackName,
+          } : null);
+        }
+      );
+      
+      setImportProgress(null);
+      setImportingPlaylist(null);
+      onPlaylistSelect(matched);
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+      setImportProgress(null);
+      setImportingPlaylist(null);
+    }
   };
 
   const handleImportPlaylist = useCallback(async (
@@ -803,6 +1151,106 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
           )}
         </>
       )}
+
+      {/* Optional OAuth Login for personal playlists */}
+      <div style={{ marginTop: '24px', borderTop: '1px solid #333', paddingTop: '24px' }}>
+        <h3>Your Playlists (Optional)</h3>
+        {!deezerAuth ? (
+          <div className="import-login-section">
+            {showDeezerSetup ? (
+              <div className="spotify-setup">
+                <h4>Deezer API Setup</h4>
+                <p className="setup-instructions">
+                  To access your personal playlists, create a Deezer app:
+                </p>
+                <ol className="setup-steps">
+                  <li>Go to <a href="https://developers.deezer.com/myapps" target="_blank" rel="noopener">developers.deezer.com/myapps</a></li>
+                  <li>Create a new application</li>
+                  <li>Set redirect URI to: <code>http://127.0.0.1:8888/callback</code></li>
+                </ol>
+                <div className="input-group">
+                  <label>App ID</label>
+                  <input
+                    type="text"
+                    value={deezerCredentials.appId}
+                    onChange={e => setDeezerCredentials(prev => ({ ...prev, appId: e.target.value }))}
+                    placeholder="Enter App ID"
+                  />
+                </div>
+                <div className="input-group">
+                  <label>App Secret</label>
+                  <input
+                    type="password"
+                    value={deezerCredentials.appSecret}
+                    onChange={e => setDeezerCredentials(prev => ({ ...prev, appSecret: e.target.value }))}
+                    placeholder="Enter App Secret"
+                  />
+                </div>
+                <div className="button-row">
+                  <button className="btn btn-secondary" onClick={() => setShowDeezerSetup(false)}>Cancel</button>
+                  <button className="btn btn-primary" onClick={handleSaveDeezerCredentials}>Save</button>
+                </div>
+              </div>
+            ) : (
+              <div className="login-prompt" style={{ padding: '16px' }}>
+                <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>Connect to access your personal Deezer playlists</p>
+                <button className="btn btn-secondary" onClick={handleDeezerLogin}>
+                  {deezerCredentials.appId ? 'Connect Deezer' : 'Setup Deezer'}
+                </button>
+                {deezerCredentials.appId && (
+                  <button className="btn btn-secondary btn-small" style={{ marginLeft: '8px' }} onClick={() => setShowDeezerSetup(true)}>
+                    Edit
+                  </button>
+                )}
+              </div>
+            )}
+            {statusMessage.includes('Complete login') && activeTab === 'deezer' && (
+              <div className="callback-input">
+                <p>After logging in, paste the callback URL here:</p>
+                <input
+                  type="text"
+                  placeholder="http://127.0.0.1:8888/callback?code=..."
+                  onPaste={e => handleDeezerCallback(e.clipboardData.getData('text'))}
+                  onChange={e => e.target.value.includes('code=') && handleDeezerCallback(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="import-playlists-section">
+            <div className="user-header">
+              <div className="user-info-row">
+                <span>{deezerAuth.user?.name || 'Deezer User'}</span>
+              </div>
+              <button className="btn btn-secondary btn-small" onClick={handleDeezerLogout}>Logout</button>
+            </div>
+            {isLoadingDeezerUser ? (
+              <div className="loading">Loading playlists...</div>
+            ) : deezerUserPlaylists.length === 0 ? (
+              <p className="empty-state">No personal playlists found</p>
+            ) : (
+              <div className="playlist-grid">
+                {deezerUserPlaylists.map(playlist => (
+                  <div key={playlist.id} className="import-playlist-card clickable" onClick={() => openPreview('deezer', playlist.id, playlist.name, playlist.trackCount, playlist.image)}>
+                    {playlist.image && <img src={playlist.image} alt="" className="playlist-image" />}
+                    <div className="playlist-info">
+                      <span className="playlist-name">{playlist.name}</span>
+                      <span className="playlist-meta">{playlist.trackCount} tracks</span>
+                    </div>
+                    <button
+                      className="btn btn-small btn-primary"
+                      onClick={(e) => { e.stopPropagation(); showPreImportModal('deezer', playlist.id, playlist.name, playlist.trackCount, playlist.image); }}
+                      disabled={importingPlaylist === playlist.id}
+                    >
+                      {importingPlaylist === playlist.id ? '...' : 'Import'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -830,7 +1278,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
           </button>
           <button 
             className="btn btn-primary"
-            onClick={() => importDirectFromUrl('apple', appleMusicUrl, 'Apple Music Playlist')}
+            onClick={() => showPreImportModal('apple', appleMusicUrl, 'Apple Music Playlist', 0, undefined, appleMusicUrl)}
             disabled={!appleMusicUrl.trim() || importingPlaylist === appleMusicUrl}
           >
             {importingPlaylist === appleMusicUrl ? '...' : 'Import'}
@@ -859,7 +1307,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
               </button>
               <button 
                 className="btn btn-small btn-primary"
-                onClick={(e) => { e.stopPropagation(); importDirectFromUrl('apple', playlist.url, playlist.name); }}
+                onClick={(e) => { e.stopPropagation(); showPreImportModal('apple', playlist.url, playlist.name, 0, undefined, playlist.url); }}
                 disabled={importingPlaylist === playlist.url}
               >
                 {importingPlaylist === playlist.url ? '...' : 'Import'}
@@ -907,13 +1355,58 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
           </button>
           <button 
             className="btn btn-primary"
-            onClick={() => importDirectFromUrl('tidal', tidalUrl, 'Tidal Playlist')}
+            onClick={() => showPreImportModal('tidal', tidalUrl, 'Tidal Playlist', 0, undefined, tidalUrl)}
             disabled={!tidalUrl.trim() || importingPlaylist === tidalUrl}
           >
             {importingPlaylist === tidalUrl ? '...' : 'Import'}
           </button>
         </div>
       </div>
+
+      {/* Search Tidal playlists (requires login) */}
+      {tidalAuth && (
+        <div style={{ marginTop: '16px' }}>
+          <div className="search-bar-row">
+            <input
+              type="text"
+              value={tidalSearchQuery}
+              onChange={e => setTidalSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleTidalSearch()}
+              placeholder="Search Tidal playlists..."
+            />
+            <button 
+              className="btn btn-primary"
+              onClick={handleTidalSearch}
+              disabled={isSearchingTidal || !tidalSearchQuery.trim()}
+            >
+              {isSearchingTidal ? '...' : 'Search'}
+            </button>
+          </div>
+          {tidalSearchResults.length > 0 && (
+            <>
+              <h3 style={{ margin: '16px 0 8px' }}>Search Results</h3>
+              <div className="playlist-grid">
+                {tidalSearchResults.map((playlist: any) => (
+                  <div key={playlist.id} className="import-playlist-card">
+                    {playlist.image && <img src={playlist.image} alt="" className="playlist-image" />}
+                    <div className="playlist-info">
+                      <span className="playlist-name">{playlist.name}</span>
+                      <span className="playlist-meta">{playlist.trackCount || 0} tracks</span>
+                    </div>
+                    <button
+                      className="btn btn-small btn-primary"
+                      onClick={() => showPreImportModal('tidal', playlist.id, playlist.name, playlist.trackCount || 0, playlist.image)}
+                      disabled={importingPlaylist === playlist.id}
+                    >
+                      {importingPlaylist === playlist.id ? '...' : 'Import'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
       
       <h3 style={{ margin: '24px 0 12px' }}>Popular Playlists</h3>
       <div className="playlist-grid">
@@ -936,7 +1429,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
               </button>
               <button 
                 className="btn btn-small btn-primary"
-                onClick={(e) => { e.stopPropagation(); importDirectFromUrl('tidal', playlist.url, playlist.name); }}
+                onClick={(e) => { e.stopPropagation(); showPreImportModal('tidal', playlist.url, playlist.name, 0, undefined, playlist.url); }}
                 disabled={importingPlaylist === playlist.url}
               >
                 {importingPlaylist === playlist.url ? '...' : 'Import'}
@@ -956,6 +1449,297 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Optional OAuth Login for personal playlists */}
+      <div style={{ marginTop: '24px', borderTop: '1px solid #333', paddingTop: '24px' }}>
+        <h3>Your Playlists (Optional)</h3>
+        {!tidalAuth ? (
+          <div className="import-login-section">
+            {showTidalSetup ? (
+              <div className="spotify-setup">
+                <h4>Tidal API Setup</h4>
+                <p className="setup-instructions">
+                  To access your personal playlists, create a Tidal developer app:
+                </p>
+                <ol className="setup-steps">
+                  <li>Go to <a href="https://developer.tidal.com/" target="_blank" rel="noopener">developer.tidal.com</a></li>
+                  <li>Create a new application</li>
+                  <li>Set redirect URI to: <code>http://127.0.0.1:8888/callback</code></li>
+                </ol>
+                <div className="input-group">
+                  <label>Client ID</label>
+                  <input
+                    type="text"
+                    value={tidalCredentials.clientId}
+                    onChange={e => setTidalCredentials(prev => ({ ...prev, clientId: e.target.value }))}
+                    placeholder="Enter Client ID"
+                  />
+                </div>
+                <div className="input-group">
+                  <label>Client Secret</label>
+                  <input
+                    type="password"
+                    value={tidalCredentials.clientSecret}
+                    onChange={e => setTidalCredentials(prev => ({ ...prev, clientSecret: e.target.value }))}
+                    placeholder="Enter Client Secret"
+                  />
+                </div>
+                <div className="button-row">
+                  <button className="btn btn-secondary" onClick={() => setShowTidalSetup(false)}>Cancel</button>
+                  <button className="btn btn-primary" onClick={handleSaveTidalCredentials}>Save</button>
+                </div>
+              </div>
+            ) : (
+              <div className="login-prompt" style={{ padding: '16px' }}>
+                <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>Connect to access your personal Tidal playlists and search</p>
+                <button className="btn btn-secondary" onClick={handleTidalLogin}>
+                  {tidalCredentials.clientId ? 'Connect Tidal' : 'Setup Tidal'}
+                </button>
+                {tidalCredentials.clientId && (
+                  <button className="btn btn-secondary btn-small" style={{ marginLeft: '8px' }} onClick={() => setShowTidalSetup(true)}>
+                    Edit
+                  </button>
+                )}
+              </div>
+            )}
+            {statusMessage.includes('Complete login') && activeTab === 'tidal' && (
+              <div className="callback-input">
+                <p>After logging in, paste the callback URL here:</p>
+                <input
+                  type="text"
+                  placeholder="http://127.0.0.1:8888/callback?code=..."
+                  onPaste={e => handleTidalCallback(e.clipboardData.getData('text'))}
+                  onChange={e => e.target.value.includes('code=') && handleTidalCallback(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="import-playlists-section">
+            <div className="user-header">
+              <div className="user-info-row">
+                <span>{tidalAuth.user?.name || 'Tidal User'}</span>
+              </div>
+              <button className="btn btn-secondary btn-small" onClick={handleTidalLogout}>Logout</button>
+            </div>
+            {isLoadingTidalUser ? (
+              <div className="loading">Loading playlists...</div>
+            ) : tidalUserPlaylists.length === 0 ? (
+              <p className="empty-state">No personal playlists found</p>
+            ) : (
+              <div className="playlist-grid">
+                {tidalUserPlaylists.map((playlist: any) => (
+                  <div key={playlist.id} className="import-playlist-card">
+                    {playlist.image && <img src={playlist.image} alt="" className="playlist-image" />}
+                    <div className="playlist-info">
+                      <span className="playlist-name">{playlist.name}</span>
+                      <span className="playlist-meta">{playlist.trackCount || 0} tracks</span>
+                    </div>
+                    <button
+                      className="btn btn-small btn-primary"
+                      onClick={() => showPreImportModal('tidal', playlist.id, playlist.name, playlist.trackCount || 0, playlist.image)}
+                      disabled={importingPlaylist === playlist.id}
+                    >
+                      {importingPlaylist === playlist.id ? '...' : 'Import'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderYouTubeMusicTab = () => (
+    <div className="import-tab-content">
+      {/* URL Import - always available */}
+      <div className="url-import-section">
+        <h3>Import from YouTube Music</h3>
+        <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>
+          Paste a YouTube Music playlist URL to import
+        </p>
+        <div className="search-bar-row">
+          <input
+            type="text"
+            value={ytMusicUrl}
+            onChange={e => setYtMusicUrl(e.target.value)}
+            placeholder="https://music.youtube.com/playlist?list=..."
+          />
+          <button 
+            className="btn btn-primary"
+            onClick={() => showPreImportModal('youtube', ytMusicUrl, 'YouTube Music Playlist', 0, undefined, ytMusicUrl)}
+            disabled={!ytMusicUrl.trim() || importingPlaylist === ytMusicUrl}
+          >
+            {importingPlaylist === ytMusicUrl ? '...' : 'Import'}
+          </button>
+        </div>
+      </div>
+
+      {/* Optional OAuth Login */}
+      <div style={{ marginTop: '24px', borderTop: '1px solid #333', paddingTop: '24px' }}>
+        <h3>Your Playlists (Optional)</h3>
+        {!ytMusicAuth ? (
+          <div className="import-login-section">
+            {showYtMusicSetup ? (
+              <div className="spotify-setup">
+                <h4>YouTube API Setup</h4>
+                <p className="setup-instructions">
+                  To access your personal playlists, create a Google Cloud project:
+                </p>
+                <ol className="setup-steps">
+                  <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a></li>
+                  <li>Create OAuth 2.0 credentials (Web application)</li>
+                  <li>Add redirect URI: <code>http://127.0.0.1:8888/callback</code></li>
+                  <li>Enable YouTube Data API v3</li>
+                </ol>
+                <div className="input-group">
+                  <label>Client ID</label>
+                  <input
+                    type="text"
+                    value={ytMusicCredentials.clientId}
+                    onChange={e => setYtMusicCredentials(prev => ({ ...prev, clientId: e.target.value }))}
+                    placeholder="Enter Client ID"
+                  />
+                </div>
+                <div className="input-group">
+                  <label>Client Secret</label>
+                  <input
+                    type="password"
+                    value={ytMusicCredentials.clientSecret}
+                    onChange={e => setYtMusicCredentials(prev => ({ ...prev, clientSecret: e.target.value }))}
+                    placeholder="Enter Client Secret"
+                  />
+                </div>
+                <div className="button-row">
+                  <button className="btn btn-secondary" onClick={() => setShowYtMusicSetup(false)}>Cancel</button>
+                  <button className="btn btn-primary" onClick={handleSaveYtMusicCredentials}>Save</button>
+                </div>
+              </div>
+            ) : (
+              <div className="login-prompt" style={{ padding: '16px' }}>
+                <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>Connect to access your personal YouTube Music playlists</p>
+                <button className="btn btn-secondary" onClick={handleYtMusicLogin}>
+                  {ytMusicCredentials.clientId ? 'Connect YouTube Music' : 'Setup YouTube Music'}
+                </button>
+                {ytMusicCredentials.clientId && (
+                  <button className="btn btn-secondary btn-small" style={{ marginLeft: '8px' }} onClick={() => setShowYtMusicSetup(true)}>
+                    Edit
+                  </button>
+                )}
+              </div>
+            )}
+            {statusMessage.includes('Complete login') && activeTab === 'youtube' && (
+              <div className="callback-input">
+                <p>After logging in, paste the callback URL here:</p>
+                <input
+                  type="text"
+                  placeholder="http://127.0.0.1:8888/callback?code=..."
+                  onPaste={e => handleYtMusicCallback(e.clipboardData.getData('text'))}
+                  onChange={e => e.target.value.includes('code=') && handleYtMusicCallback(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="import-playlists-section">
+            <div className="user-header">
+              <div className="user-info-row">
+                <span>{ytMusicAuth.user?.name || 'YouTube Music User'}</span>
+              </div>
+              <button className="btn btn-secondary btn-small" onClick={handleYtMusicLogout}>Logout</button>
+            </div>
+            {isLoadingYtMusic ? (
+              <div className="loading">Loading playlists...</div>
+            ) : ytMusicPlaylists.length === 0 ? (
+              <p className="empty-state">No playlists found</p>
+            ) : (
+              <div className="playlist-grid">
+                {ytMusicPlaylists.map(playlist => (
+                  <div key={playlist.id} className="import-playlist-card">
+                    {playlist.image && <img src={playlist.image} alt="" className="playlist-image" />}
+                    <div className="playlist-info">
+                      <span className="playlist-name">{playlist.name}</span>
+                      <span className="playlist-meta">{playlist.trackCount || 0} tracks</span>
+                    </div>
+                    <button
+                      className="btn btn-small btn-primary"
+                      onClick={() => showPreImportModal('youtube', playlist.id, playlist.name, playlist.trackCount || 0, playlist.image)}
+                      disabled={importingPlaylist === playlist.id}
+                    >
+                      {importingPlaylist === playlist.id ? '...' : 'Import'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderAmazonMusicTab = () => (
+    <div className="import-tab-content">
+      <div className="url-import-section">
+        <h3>Import from Amazon Music</h3>
+        <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>
+          Paste an Amazon Music playlist URL to import. Note: Only public playlists are supported.
+        </p>
+        <div className="search-bar-row">
+          <input
+            type="text"
+            value={amazonMusicUrl}
+            onChange={e => setAmazonMusicUrl(e.target.value)}
+            placeholder="https://music.amazon.com/playlists/..."
+          />
+          <button 
+            className="btn btn-primary"
+            onClick={() => showPreImportModal('amazon', amazonMusicUrl, 'Amazon Music Playlist', 0, undefined, amazonMusicUrl)}
+            disabled={!amazonMusicUrl.trim() || importingPlaylist === amazonMusicUrl}
+          >
+            {importingPlaylist === amazonMusicUrl ? '...' : 'Import'}
+          </button>
+        </div>
+      </div>
+      <div style={{ marginTop: '24px', padding: '16px', background: '#1a1a1a', borderRadius: '8px' }}>
+        <p style={{ color: '#888', fontSize: '13px' }}>
+          ⚠️ Amazon Music does not provide a public API. Import works by scraping public playlist pages, 
+          which may be unreliable. Personal playlists require the playlist to be set to public.
+        </p>
+      </div>
+    </div>
+  );
+
+  const renderQobuzTab = () => (
+    <div className="import-tab-content">
+      <div className="url-import-section">
+        <h3>Import from Qobuz</h3>
+        <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>
+          Paste a Qobuz playlist URL to import
+        </p>
+        <div className="search-bar-row">
+          <input
+            type="text"
+            value={qobuzUrl}
+            onChange={e => setQobuzUrl(e.target.value)}
+            placeholder="https://www.qobuz.com/playlist/..."
+          />
+          <button 
+            className="btn btn-primary"
+            onClick={() => showPreImportModal('qobuz', qobuzUrl, 'Qobuz Playlist', 0, undefined, qobuzUrl)}
+            disabled={!qobuzUrl.trim() || importingPlaylist === qobuzUrl}
+          >
+            {importingPlaylist === qobuzUrl ? '...' : 'Import'}
+          </button>
+        </div>
+      </div>
+      <div style={{ marginTop: '24px', padding: '16px', background: '#1a1a1a', borderRadius: '8px' }}>
+        <p style={{ color: '#888', fontSize: '13px' }}>
+          ⚠️ Qobuz has limited API access. Import works by scraping public playlist pages.
+        </p>
       </div>
     </div>
   );
@@ -1060,33 +1844,6 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
     );
   }
 
-  // Progress view when importing
-  if (importProgress) {
-    const percent = Math.round((importProgress.current / importProgress.total) * 100);
-    return (
-      <div className="import-page">
-        <div className="import-progress-view">
-          {importProgress.playlistImage && (
-            <img src={importProgress.playlistImage} alt="" className="progress-playlist-image" />
-          )}
-          <h2>Importing {importProgress.playlistName}</h2>
-          <p className="progress-source">from {
-            importProgress.source === 'spotify' ? 'Spotify' : 
-            importProgress.source === 'apple' ? 'Apple Music' : 
-            importProgress.source === 'tidal' ? 'Tidal' : 'Deezer'
-          }</p>
-          
-          <div className="progress-bar-container">
-            <div className="progress-bar" style={{ width: `${percent}%` }} />
-          </div>
-          
-          <p className="progress-count">{importProgress.current} / {importProgress.total} tracks</p>
-          <p className="progress-current-track">{importProgress.currentTrack}</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="import-page">
       <div className="import-header">
@@ -1122,6 +1879,24 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
           Spotify
         </button>
         <button 
+          className={`tab-btn ${activeTab === 'youtube' ? 'active' : ''}`}
+          onClick={() => setActiveTab('youtube')}
+        >
+          YouTube Music
+        </button>
+        <button 
+          className={`tab-btn ${activeTab === 'amazon' ? 'active' : ''}`}
+          onClick={() => setActiveTab('amazon')}
+        >
+          Amazon Music
+        </button>
+        <button 
+          className={`tab-btn ${activeTab === 'qobuz' ? 'active' : ''}`}
+          onClick={() => setActiveTab('qobuz')}
+        >
+          Qobuz
+        </button>
+        <button 
           className={`tab-btn ${activeTab === 'plex' ? 'active' : ''}`}
           onClick={() => setActiveTab('plex')}
         >
@@ -1133,6 +1908,9 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
       {activeTab === 'apple' && renderAppleMusicTab()}
       {activeTab === 'tidal' && renderTidalTab()}
       {activeTab === 'spotify' && renderSpotifyTab()}
+      {activeTab === 'youtube' && renderYouTubeMusicTab()}
+      {activeTab === 'amazon' && renderAmazonMusicTab()}
+      {activeTab === 'qobuz' && renderQobuzTab()}
       {activeTab === 'plex' && renderPlexTab()}
       
       {/* Pre-import modal */}
@@ -1146,7 +1924,14 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
                 <img src={preImportPlaylist.image} alt="" className="pre-import-image" />
               )}
               <p className="pre-import-meta">
-                {preImportPlaylist.trackCount} tracks from {preImportPlaylist.source === 'spotify' ? 'Spotify' : 'Deezer'}
+                {preImportPlaylist.trackCount > 0 ? `${preImportPlaylist.trackCount} tracks from ` : 'From '}
+                {preImportPlaylist.source === 'spotify' ? 'Spotify' : 
+                 preImportPlaylist.source === 'deezer' ? 'Deezer' :
+                 preImportPlaylist.source === 'apple' ? 'Apple Music' :
+                 preImportPlaylist.source === 'tidal' ? 'Tidal' :
+                 preImportPlaylist.source === 'youtube' ? 'YouTube Music' :
+                 preImportPlaylist.source === 'amazon' ? 'Amazon Music' :
+                 preImportPlaylist.source === 'qobuz' ? 'Qobuz' : 'Unknown'}
               </p>
             </div>
             

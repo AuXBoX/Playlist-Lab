@@ -57,6 +57,20 @@ function createWindow() {
     mainWindow?.show();
   });
 
+  // Fallback: show window after timeout if ready-to-show doesn't fire
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isVisible()) {
+      console.log('Window not visible after timeout, forcing show...');
+      mainWindow.show();
+    }
+  }, 5000);
+
+  // Handle load failures
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('Failed to load:', errorCode, errorDescription);
+    mainWindow?.show();
+  });
+
   // Open DevTools with F12 or Ctrl+Shift+I
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F12' || (input.control && input.shift && input.key === 'I')) {
@@ -68,7 +82,13 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+    const indexPath = path.join(__dirname, '../renderer/index.html');
+    console.log('Loading:', indexPath);
+    console.log('Exists:', require('fs').existsSync(indexPath));
+    mainWindow.loadFile(indexPath).catch(err => {
+      console.error('Failed to load index.html:', err);
+      mainWindow?.show();
+    });
   }
 }
 
@@ -198,6 +218,7 @@ ipcMain.handle('get-settings', () => {
     country: store.get('country', 'global') as string,
     libraryId: store.get('libraryId') as string | null,
     autoSync: store.get('autoSync', false) as boolean,
+    matchingSettings: store.get('matchingSettings') as any | null,
   };
 });
 
@@ -206,6 +227,7 @@ ipcMain.handle('save-settings', (_, settings) => {
   if (settings.country !== undefined) store.set('country', settings.country);
   if (settings.libraryId !== undefined) store.set('libraryId', settings.libraryId);
   if (settings.autoSync !== undefined) store.set('autoSync', settings.autoSync);
+  if (settings.matchingSettings !== undefined) store.set('matchingSettings', settings.matchingSettings);
   return true;
 });
 
@@ -213,11 +235,12 @@ ipcMain.handle('save-settings', (_, settings) => {
 ipcMain.handle('search-track', async (_, { serverUrl, query }) => {
   const token = store.get('plexToken') as string;
   
-  // Clean up the query - remove special characters that break Plex search
-  // Keep alphanumeric, spaces, and parentheses
+  // Clean up the query - remove special characters that break Plex's SQLite FTS
+  // Parentheses cause "malformed MATCH expression" errors
   const cleanQuery = query
     .replace(/[-–—]/g, ' ')  // Replace hyphens/dashes with spaces
-    .replace(/[^\w\s()]/g, ' ')  // Remove other special chars except parentheses
+    .replace(/[()[\]{}]/g, ' ')  // Remove parentheses and brackets
+    .replace(/[^\w\s]/g, ' ')  // Remove other special chars
     .replace(/\s+/g, ' ')  // Collapse multiple spaces
     .trim();
   
@@ -244,24 +267,28 @@ ipcMain.handle('search-track', async (_, { serverUrl, query }) => {
     const trackHub = hubs.find((h: any) => h.type === 'track');
     let tracks = trackHub?.Metadata || [];
     
-    // If no tracks found, try to get tracks from albums
-    if (tracks.length === 0) {
-      const albumHub = hubs.find((h: any) => h.type === 'album');
-      if (albumHub?.Metadata?.length > 0) {
-        // Fetch tracks from matched albums (up to 3 albums)
-        const albumsToFetch = albumHub.Metadata.slice(0, 3);
-        for (const album of albumsToFetch) {
-          try {
-            const albumUrl = `${serverUrl}/library/metadata/${album.ratingKey}/children?X-Plex-Token=${token}`;
-            const albumResponse = await fetch(albumUrl, { headers: PLEX_HEADERS });
-            if (albumResponse.ok) {
-              const albumData = await albumResponse.json();
-              const albumTracks = albumData.MediaContainer?.Metadata || [];
-              tracks = [...tracks, ...albumTracks];
+    // Also fetch tracks from albums to get more results
+    // This helps when the track is on a single/EP album that Plex returns as album result
+    const albumHub = hubs.find((h: any) => h.type === 'album');
+    if (albumHub?.Metadata?.length > 0) {
+      // Fetch tracks from matched albums (up to 5 albums)
+      const albumsToFetch = albumHub.Metadata.slice(0, 5);
+      for (const album of albumsToFetch) {
+        try {
+          const albumUrl = `${serverUrl}/library/metadata/${album.ratingKey}/children?X-Plex-Token=${token}`;
+          const albumResponse = await fetch(albumUrl, { headers: PLEX_HEADERS });
+          if (albumResponse.ok) {
+            const albumData = await albumResponse.json();
+            const albumTracks = albumData.MediaContainer?.Metadata || [];
+            // Add tracks that aren't already in the list
+            for (const t of albumTracks) {
+              if (!tracks.some((existing: any) => existing.ratingKey === t.ratingKey)) {
+                tracks.push(t);
+              }
             }
-          } catch {
-            // Continue to next album
           }
+        } catch {
+          // Continue to next album
         }
       }
     }
@@ -474,6 +501,78 @@ ipcMain.handle('get-monthly-tracks', async (_, { serverUrl, libraryId }) => {
   const monthlyTracks = tracks.filter((t: any) => (t.lastViewedAt || 0) * 1000 >= thirtyDaysAgo);
   console.log('[get-monthly-tracks] Tracks in last 30 days:', monthlyTracks.length);
   return monthlyTracks;
+});
+
+// Get tracks not played in X days (for Daily Mix)
+ipcMain.handle('get-stale-played-tracks', async (_, { serverUrl, libraryId, daysAgo, limit }) => {
+  const token = store.get('plexToken') as string;
+  // Get all played tracks sorted by lastViewedAt ascending (oldest first)
+  const url = `${serverUrl}/library/sections/${libraryId}/all?type=10&sort=lastViewedAt:asc&lastViewedAt%3E%3E=0&X-Plex-Container-Size=${limit * 2}&X-Plex-Token=${token}`;
+  console.log('[get-stale-played-tracks] Fetching...');
+  const response = await fetch(url, { headers: PLEX_HEADERS });
+  if (!response.ok) {
+    console.log('[get-stale-played-tracks] Failed:', response.status);
+    return [];
+  }
+  const data = await response.json();
+  const tracks = data.MediaContainer?.Metadata || [];
+  
+  // Filter to tracks not played in X days
+  const cutoff = Date.now() - daysAgo * 24 * 60 * 60 * 1000;
+  const staleTracks = tracks.filter((t: any) => (t.lastViewedAt || 0) * 1000 < cutoff);
+  console.log(`[get-stale-played-tracks] Tracks not played in ${daysAgo} days:`, staleTracks.length);
+  return staleTracks.slice(0, limit);
+});
+
+// Get tracks from same artist or album (for Daily Mix similarity)
+ipcMain.handle('get-related-tracks', async (_, { serverUrl, trackKey, limit }) => {
+  const token = store.get('plexToken') as string;
+  
+  // First get the track details to find artist/album
+  const trackUrl = `${serverUrl}/library/metadata/${trackKey}?X-Plex-Token=${token}`;
+  const trackResponse = await fetch(trackUrl, { headers: PLEX_HEADERS });
+  if (!trackResponse.ok) return [];
+  const trackData = await trackResponse.json();
+  const track = trackData.MediaContainer?.Metadata?.[0];
+  if (!track) return [];
+  
+  const relatedTracks: any[] = [];
+  const addedKeys = new Set<string>();
+  addedKeys.add(trackKey); // Don't include the seed track
+  
+  // Get other tracks from the same album
+  if (track.parentRatingKey) {
+    const albumUrl = `${serverUrl}/library/metadata/${track.parentRatingKey}/children?X-Plex-Token=${token}`;
+    const albumResponse = await fetch(albumUrl, { headers: PLEX_HEADERS });
+    if (albumResponse.ok) {
+      const albumData = await albumResponse.json();
+      const albumTracks = albumData.MediaContainer?.Metadata || [];
+      for (const t of albumTracks) {
+        if (!addedKeys.has(t.ratingKey) && relatedTracks.length < limit) {
+          relatedTracks.push(t);
+          addedKeys.add(t.ratingKey);
+        }
+      }
+    }
+  }
+  
+  // If we need more, get tracks from the same artist
+  if (relatedTracks.length < limit && track.grandparentRatingKey) {
+    const artistUrl = `${serverUrl}/library/metadata/${track.grandparentRatingKey}/allLeaves?sort=random&X-Plex-Container-Size=${limit * 2}&X-Plex-Token=${token}`;
+    const artistResponse = await fetch(artistUrl, { headers: PLEX_HEADERS });
+    if (artistResponse.ok) {
+      const artistData = await artistResponse.json();
+      const artistTracks = artistData.MediaContainer?.Metadata || [];
+      for (const t of artistTracks) {
+        if (!addedKeys.has(t.ratingKey) && relatedTracks.length < limit) {
+          relatedTracks.push(t);
+          addedKeys.add(t.ratingKey);
+        }
+      }
+    }
+  }
+  
+  return relatedTracks;
 });
 
 // Get sonically similar tracks
@@ -1130,7 +1229,96 @@ ipcMain.handle('logout-spotify', () => {
 
 // ==================== DEEZER INTEGRATION ====================
 
-// Search Deezer playlists
+// Deezer OAuth - Note: Deezer requires app registration at https://developers.deezer.com/myapps
+// Users need to create their own app and provide credentials
+
+ipcMain.handle('get-deezer-auth', () => {
+  return {
+    accessToken: store.get('deezerAccessToken') as string | null,
+    user: store.get('deezerUser') as any,
+  };
+});
+
+ipcMain.handle('save-deezer-credentials', async (_, { appId, appSecret }) => {
+  store.set('deezerAppId', appId);
+  store.set('deezerAppSecret', appSecret);
+  return true;
+});
+
+ipcMain.handle('get-deezer-credentials', () => {
+  return {
+    appId: store.get('deezerAppId') as string | null,
+    appSecret: store.get('deezerAppSecret') as string | null,
+  };
+});
+
+ipcMain.handle('start-deezer-auth', async () => {
+  const appId = store.get('deezerAppId') as string;
+  if (!appId) throw new Error('Deezer App ID not configured');
+  
+  // Deezer OAuth URL - redirect to localhost
+  const redirectUri = 'http://127.0.0.1:8889/callback';
+  const permissions = 'basic_access,manage_library,offline_access';
+  const authUrl = `https://connect.deezer.com/oauth/auth.php?app_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&perms=${permissions}`;
+  
+  shell.openExternal(authUrl);
+  return { redirectUri };
+});
+
+ipcMain.handle('exchange-deezer-code', async (_, { code }) => {
+  const appId = store.get('deezerAppId') as string;
+  const appSecret = store.get('deezerAppSecret') as string;
+  
+  // Exchange code for access token
+  const tokenUrl = `https://connect.deezer.com/oauth/access_token.php?app_id=${appId}&secret=${appSecret}&code=${code}&output=json`;
+  const response = await fetch(tokenUrl);
+  
+  if (!response.ok) throw new Error('Failed to exchange code');
+  
+  const data = await response.json();
+  if (data.error) throw new Error(data.error.message || 'Auth failed');
+  
+  const accessToken = data.access_token;
+  store.set('deezerAccessToken', accessToken);
+  
+  // Get user info
+  const userResponse = await fetch(`https://api.deezer.com/user/me?access_token=${accessToken}`);
+  const userData = await userResponse.json();
+  
+  store.set('deezerUser', {
+    id: userData.id,
+    name: userData.name,
+    image: userData.picture_medium,
+  });
+  
+  return { accessToken, user: store.get('deezerUser') };
+});
+
+ipcMain.handle('logout-deezer', async () => {
+  store.delete('deezerAccessToken');
+  store.delete('deezerUser');
+  return true;
+});
+
+ipcMain.handle('get-deezer-user-playlists', async () => {
+  const accessToken = store.get('deezerAccessToken') as string;
+  if (!accessToken) return [];
+  
+  const response = await fetch(`https://api.deezer.com/user/me/playlists?access_token=${accessToken}&limit=100`);
+  if (!response.ok) return [];
+  
+  const data = await response.json();
+  return (data.data || []).map((p: any) => ({
+    id: p.id,
+    name: p.title,
+    trackCount: p.nb_tracks,
+    image: p.picture_medium,
+    creator: p.creator?.name || 'You',
+    isPersonal: true,
+  }));
+});
+
+// Search Deezer playlists (public)
 ipcMain.handle('search-deezer-playlists', async (_, { query }) => {
   const response = await fetch(`https://api.deezer.com/search/playlist?q=${encodeURIComponent(query)}&limit=25`);
   
@@ -1208,6 +1396,547 @@ ipcMain.handle('get-deezer-top-playlists', async () => {
   }
   
   return playlists;
+});
+
+// ==================== TIDAL OAUTH INTEGRATION ====================
+
+// Tidal OAuth - Users need to register at https://developer.tidal.com/
+ipcMain.handle('get-tidal-auth', () => {
+  return {
+    accessToken: store.get('tidalAccessToken') as string | null,
+    user: store.get('tidalUser') as any,
+  };
+});
+
+ipcMain.handle('save-tidal-credentials', async (_, { clientId, clientSecret }) => {
+  store.set('tidalClientId', clientId);
+  store.set('tidalClientSecret', clientSecret);
+  return true;
+});
+
+ipcMain.handle('get-tidal-credentials', () => {
+  return {
+    clientId: store.get('tidalClientId') as string | null,
+    clientSecret: store.get('tidalClientSecret') as string | null,
+  };
+});
+
+ipcMain.handle('start-tidal-auth', async () => {
+  const clientId = store.get('tidalClientId') as string;
+  if (!clientId) throw new Error('Tidal Client ID not configured');
+  
+  const redirectUri = 'http://127.0.0.1:8890/callback';
+  const codeVerifier = Buffer.from(Array.from({ length: 32 }, () => Math.floor(Math.random() * 256))).toString('base64url');
+  const codeChallenge = require('crypto').createHash('sha256').update(codeVerifier).digest('base64url');
+  
+  store.set('tidalCodeVerifier', codeVerifier);
+  
+  const authUrl = `https://login.tidal.com/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=playlists.read%20playlists.write&code_challenge=${codeChallenge}&code_challenge_method=S256`;
+  
+  shell.openExternal(authUrl);
+  return { redirectUri };
+});
+
+ipcMain.handle('exchange-tidal-code', async (_, { code }) => {
+  const clientId = store.get('tidalClientId') as string;
+  const clientSecret = store.get('tidalClientSecret') as string;
+  const codeVerifier = store.get('tidalCodeVerifier') as string;
+  const redirectUri = 'http://127.0.0.1:8890/callback';
+  
+  const tokenResponse = await fetch('https://auth.tidal.com/v1/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri,
+      client_id: clientId,
+      client_secret: clientSecret,
+      code_verifier: codeVerifier,
+    }),
+  });
+  
+  if (!tokenResponse.ok) throw new Error('Failed to exchange code');
+  
+  const tokenData = await tokenResponse.json();
+  store.set('tidalAccessToken', tokenData.access_token);
+  store.set('tidalRefreshToken', tokenData.refresh_token);
+  
+  // Get user info
+  const userResponse = await fetch('https://api.tidal.com/v1/users/me', {
+    headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
+  });
+  
+  if (userResponse.ok) {
+    const userData = await userResponse.json();
+    store.set('tidalUser', {
+      id: userData.userId,
+      name: userData.username || userData.firstName || 'Tidal User',
+    });
+  }
+  
+  return { accessToken: tokenData.access_token, user: store.get('tidalUser') };
+});
+
+ipcMain.handle('logout-tidal', async () => {
+  store.delete('tidalAccessToken');
+  store.delete('tidalRefreshToken');
+  store.delete('tidalUser');
+  store.delete('tidalCodeVerifier');
+  return true;
+});
+
+ipcMain.handle('get-tidal-user-playlists', async () => {
+  const accessToken = store.get('tidalAccessToken') as string;
+  const user = store.get('tidalUser') as any;
+  if (!accessToken || !user) return [];
+  
+  try {
+    const response = await fetch(`https://api.tidal.com/v1/users/${user.id}/playlists?limit=50&countryCode=US`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    
+    if (!response.ok) return [];
+    
+    const data = await response.json();
+    return (data.items || []).map((p: any) => ({
+      id: p.uuid,
+      name: p.title,
+      trackCount: p.numberOfTracks,
+      image: p.squareImage ? `https://resources.tidal.com/images/${p.squareImage.replace(/-/g, '/')}/320x320.jpg` : undefined,
+      creator: p.creator?.name || 'You',
+      isPersonal: true,
+      url: `https://tidal.com/browse/playlist/${p.uuid}`,
+    }));
+  } catch (e) {
+    console.error('[Tidal] Error fetching playlists:', e);
+    return [];
+  }
+});
+
+ipcMain.handle('search-tidal-playlists', async (_, { query }) => {
+  // Use public API for search (no auth needed)
+  const headers = {
+    'x-tidal-token': 'CzET4vdadNUFQ5JU',
+    'Accept': 'application/json',
+  };
+  
+  try {
+    const response = await fetch(`https://api.tidal.com/v1/search/playlists?query=${encodeURIComponent(query)}&limit=25&countryCode=US`, { headers });
+    if (!response.ok) return [];
+    
+    const data = await response.json();
+    return (data.items || []).map((p: any) => ({
+      id: p.uuid,
+      name: p.title,
+      trackCount: p.numberOfTracks,
+      image: p.squareImage ? `https://resources.tidal.com/images/${p.squareImage.replace(/-/g, '/')}/320x320.jpg` : undefined,
+      creator: p.creator?.name || 'Tidal',
+      url: `https://tidal.com/browse/playlist/${p.uuid}`,
+    }));
+  } catch (e) {
+    console.error('[Tidal] Search error:', e);
+    return [];
+  }
+});
+
+// ==================== YOUTUBE MUSIC INTEGRATION ====================
+
+// YouTube Music uses Google OAuth
+ipcMain.handle('get-youtube-music-auth', () => {
+  return {
+    accessToken: store.get('ytMusicAccessToken') as string | null,
+    user: store.get('ytMusicUser') as any,
+  };
+});
+
+ipcMain.handle('save-youtube-music-credentials', async (_, { clientId, clientSecret }) => {
+  store.set('ytMusicClientId', clientId);
+  store.set('ytMusicClientSecret', clientSecret);
+  return true;
+});
+
+ipcMain.handle('get-youtube-music-credentials', () => {
+  return {
+    clientId: store.get('ytMusicClientId') as string | null,
+    clientSecret: store.get('ytMusicClientSecret') as string | null,
+  };
+});
+
+ipcMain.handle('start-youtube-music-auth', async () => {
+  const clientId = store.get('ytMusicClientId') as string;
+  if (!clientId) throw new Error('YouTube Client ID not configured');
+  
+  const redirectUri = 'http://127.0.0.1:8891/callback';
+  const scope = 'https://www.googleapis.com/auth/youtube.readonly';
+  
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline`;
+  
+  shell.openExternal(authUrl);
+  return { redirectUri };
+});
+
+ipcMain.handle('exchange-youtube-music-code', async (_, { code }) => {
+  const clientId = store.get('ytMusicClientId') as string;
+  const clientSecret = store.get('ytMusicClientSecret') as string;
+  const redirectUri = 'http://127.0.0.1:8891/callback';
+  
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri,
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+  });
+  
+  if (!tokenResponse.ok) throw new Error('Failed to exchange code');
+  
+  const tokenData = await tokenResponse.json();
+  store.set('ytMusicAccessToken', tokenData.access_token);
+  if (tokenData.refresh_token) store.set('ytMusicRefreshToken', tokenData.refresh_token);
+  
+  // Get user info
+  const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
+  });
+  
+  if (userResponse.ok) {
+    const userData = await userResponse.json();
+    store.set('ytMusicUser', {
+      id: userData.id,
+      name: userData.name || userData.email,
+      image: userData.picture,
+    });
+  }
+  
+  return { accessToken: tokenData.access_token, user: store.get('ytMusicUser') };
+});
+
+ipcMain.handle('logout-youtube-music', async () => {
+  store.delete('ytMusicAccessToken');
+  store.delete('ytMusicRefreshToken');
+  store.delete('ytMusicUser');
+  return true;
+});
+
+ipcMain.handle('get-youtube-music-playlists', async () => {
+  const accessToken = store.get('ytMusicAccessToken') as string;
+  if (!accessToken) return [];
+  
+  try {
+    const response = await fetch('https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&mine=true&maxResults=50', {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    
+    if (!response.ok) return [];
+    
+    const data = await response.json();
+    return (data.items || []).map((p: any) => ({
+      id: p.id,
+      name: p.snippet.title,
+      trackCount: p.contentDetails.itemCount,
+      image: p.snippet.thumbnails?.medium?.url,
+      creator: p.snippet.channelTitle || 'You',
+      isPersonal: true,
+    }));
+  } catch (e) {
+    console.error('[YouTube Music] Error fetching playlists:', e);
+    return [];
+  }
+});
+
+ipcMain.handle('get-youtube-music-playlist-tracks', async (_, { playlistId }) => {
+  const accessToken = store.get('ytMusicAccessToken') as string;
+  if (!accessToken) return [];
+  
+  const tracks: any[] = [];
+  let pageToken = '';
+  
+  try {
+    do {
+      const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=50${pageToken ? `&pageToken=${pageToken}` : ''}`;
+      const response = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      });
+      
+      if (!response.ok) break;
+      
+      const data = await response.json();
+      
+      for (const item of data.items || []) {
+        const title = item.snippet.title;
+        // YouTube video titles often have "Artist - Title" format
+        const parts = title.split(' - ');
+        if (parts.length >= 2) {
+          tracks.push({ title: parts.slice(1).join(' - '), artist: parts[0] });
+        } else {
+          // Try to extract from description or use channel name
+          tracks.push({ title, artist: item.snippet.videoOwnerChannelTitle || 'Unknown' });
+        }
+      }
+      
+      pageToken = data.nextPageToken || '';
+    } while (pageToken);
+    
+    return tracks;
+  } catch (e) {
+    console.error('[YouTube Music] Error fetching tracks:', e);
+    return [];
+  }
+});
+
+// Scrape YouTube Music playlist from URL (for users without login)
+ipcMain.handle('scrape-youtube-music-playlist', async (_, { url }) => {
+  console.log('[YouTube Music] Scraping:', url);
+  
+  return new Promise((resolve) => {
+    const scrapeWindow = new BrowserWindow({
+      width: 1200,
+      height: 900,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+    
+    scrapeWindow.webContents.setAudioMuted(true);
+    scrapeWindow.webContents.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    );
+    
+    const timeout = setTimeout(() => {
+      console.log('[YouTube Music] Scrape timeout');
+      scrapeWindow.close();
+      resolve({ name: 'YouTube Music Playlist', tracks: [] });
+    }, 30000);
+    
+    let attempts = 0;
+    
+    const tryExtract = async () => {
+      attempts++;
+      try {
+        const result = await scrapeWindow.webContents.executeJavaScript(`
+          (function() {
+            const tracks = [];
+            let playlistName = document.querySelector('h2.title, yt-formatted-string.title')?.textContent?.trim() || 'YouTube Music Playlist';
+            
+            // Find track rows
+            document.querySelectorAll('ytmusic-responsive-list-item-renderer, ytmusic-playlist-shelf-renderer .ytmusic-playlist-shelf-renderer').forEach(row => {
+              const titleEl = row.querySelector('.title, .yt-simple-endpoint');
+              const artistEl = row.querySelector('.secondary-flex-columns yt-formatted-string, .subtitle yt-formatted-string');
+              
+              if (titleEl) {
+                const title = titleEl.textContent.trim();
+                const artist = artistEl?.textContent?.trim()?.split('•')[0]?.trim() || 'Unknown';
+                if (title && !tracks.some(t => t.title === title && t.artist === artist)) {
+                  tracks.push({ title, artist });
+                }
+              }
+            });
+            
+            return { name: playlistName, tracks };
+          })()
+        `);
+        
+        if (result.tracks.length > 0 || attempts >= 3) {
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          console.log('[YouTube Music] Scraped', result.tracks.length, 'tracks');
+          resolve(result);
+        } else {
+          setTimeout(tryExtract, 3000);
+        }
+      } catch (e) {
+        if (attempts >= 3) {
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          resolve({ name: 'YouTube Music Playlist', tracks: [] });
+        } else {
+          setTimeout(tryExtract, 3000);
+        }
+      }
+    };
+    
+    scrapeWindow.webContents.on('did-finish-load', async () => {
+      await new Promise(r => setTimeout(r, 5000));
+      tryExtract();
+    });
+    
+    scrapeWindow.loadURL(url);
+  });
+});
+
+// ==================== AMAZON MUSIC INTEGRATION ====================
+
+// Amazon Music has no public API - scraping only
+ipcMain.handle('scrape-amazon-music-playlist', async (_, { url }) => {
+  console.log('[Amazon Music] Scraping:', url);
+  
+  return new Promise((resolve) => {
+    const scrapeWindow = new BrowserWindow({
+      width: 1200,
+      height: 900,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+    
+    scrapeWindow.webContents.setAudioMuted(true);
+    scrapeWindow.webContents.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    );
+    
+    const timeout = setTimeout(() => {
+      console.log('[Amazon Music] Scrape timeout');
+      scrapeWindow.close();
+      resolve({ name: 'Amazon Music Playlist', tracks: [] });
+    }, 30000);
+    
+    let attempts = 0;
+    
+    const tryExtract = async () => {
+      attempts++;
+      try {
+        const result = await scrapeWindow.webContents.executeJavaScript(`
+          (function() {
+            const tracks = [];
+            let playlistName = document.querySelector('h1, [data-testid="playlistHeaderTitle"], .playlistHeaderTitle')?.textContent?.trim() || 'Amazon Music Playlist';
+            
+            // Find track rows
+            document.querySelectorAll('[data-testid="tracklist-row"], .trackListRow, tr[class*="track"]').forEach(row => {
+              const titleEl = row.querySelector('[data-testid="track-title"], .trackTitle, td:nth-child(2)');
+              const artistEl = row.querySelector('[data-testid="track-artist"], .trackArtist, td:nth-child(3)');
+              
+              if (titleEl) {
+                const title = titleEl.textContent.trim();
+                const artist = artistEl?.textContent?.trim() || 'Unknown';
+                if (title && !tracks.some(t => t.title === title && t.artist === artist)) {
+                  tracks.push({ title, artist });
+                }
+              }
+            });
+            
+            return { name: playlistName, tracks };
+          })()
+        `);
+        
+        if (result.tracks.length > 0 || attempts >= 3) {
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          console.log('[Amazon Music] Scraped', result.tracks.length, 'tracks');
+          resolve(result);
+        } else {
+          setTimeout(tryExtract, 3000);
+        }
+      } catch (e) {
+        if (attempts >= 3) {
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          resolve({ name: 'Amazon Music Playlist', tracks: [] });
+        } else {
+          setTimeout(tryExtract, 3000);
+        }
+      }
+    };
+    
+    scrapeWindow.webContents.on('did-finish-load', async () => {
+      await new Promise(r => setTimeout(r, 5000));
+      tryExtract();
+    });
+    
+    scrapeWindow.loadURL(url);
+  });
+});
+
+// ==================== QOBUZ INTEGRATION ====================
+
+// Qobuz has limited API - scraping for playlists
+ipcMain.handle('scrape-qobuz-playlist', async (_, { url }) => {
+  console.log('[Qobuz] Scraping:', url);
+  
+  return new Promise((resolve) => {
+    const scrapeWindow = new BrowserWindow({
+      width: 1200,
+      height: 900,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+    
+    scrapeWindow.webContents.setAudioMuted(true);
+    scrapeWindow.webContents.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    );
+    
+    const timeout = setTimeout(() => {
+      console.log('[Qobuz] Scrape timeout');
+      scrapeWindow.close();
+      resolve({ name: 'Qobuz Playlist', tracks: [] });
+    }, 30000);
+    
+    let attempts = 0;
+    
+    const tryExtract = async () => {
+      attempts++;
+      try {
+        const result = await scrapeWindow.webContents.executeJavaScript(`
+          (function() {
+            const tracks = [];
+            let playlistName = document.querySelector('h1, .playlist-title, [class*="PlaylistTitle"]')?.textContent?.trim() || 'Qobuz Playlist';
+            
+            // Find track rows
+            document.querySelectorAll('.track-row, [class*="TrackRow"], tr[class*="track"]').forEach(row => {
+              const titleEl = row.querySelector('.track-title, [class*="TrackTitle"], td:nth-child(2)');
+              const artistEl = row.querySelector('.track-artist, [class*="ArtistName"], td:nth-child(3)');
+              
+              if (titleEl) {
+                const title = titleEl.textContent.trim();
+                const artist = artistEl?.textContent?.trim() || 'Unknown';
+                if (title && !tracks.some(t => t.title === title && t.artist === artist)) {
+                  tracks.push({ title, artist });
+                }
+              }
+            });
+            
+            return { name: playlistName, tracks };
+          })()
+        `);
+        
+        if (result.tracks.length > 0 || attempts >= 3) {
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          console.log('[Qobuz] Scraped', result.tracks.length, 'tracks');
+          resolve(result);
+        } else {
+          setTimeout(tryExtract, 3000);
+        }
+      } catch (e) {
+        if (attempts >= 3) {
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          resolve({ name: 'Qobuz Playlist', tracks: [] });
+        } else {
+          setTimeout(tryExtract, 3000);
+        }
+      }
+    };
+    
+    scrapeWindow.webContents.on('did-finish-load', async () => {
+      await new Promise(r => setTimeout(r, 5000));
+      tryExtract();
+    });
+    
+    scrapeWindow.loadURL(url);
+  });
 });
 
 // ==================== APPLE MUSIC INTEGRATION ====================

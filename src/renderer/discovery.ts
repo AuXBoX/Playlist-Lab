@@ -3,6 +3,84 @@
  * Matching algorithm ported from matching.py
  */
 
+// Matching settings interface
+export interface MatchingSettings {
+  minMatchScore: number;
+  stripParentheses: boolean;
+  stripBrackets: boolean;
+  useFirstArtistOnly: boolean;
+  ignoreFeaturedArtists: boolean;
+  ignoreRemixInfo: boolean;
+  ignoreVersionInfo: boolean;
+  preferNonCompilation: boolean;
+  penalizeMonoVersions: boolean;
+  penalizeLiveVersions: boolean;
+  customStripPatterns: string[];
+  // Editable pattern lists
+  featuredArtistPatterns: string[];
+  versionSuffixPatterns: string[];
+  remasterPatterns: string[];
+  variousArtistsNames: string[];
+  // Penalty and priority keywords
+  penaltyKeywords: string[];
+  priorityKeywords: string[];
+}
+
+// Default patterns for matching
+export const DEFAULT_FEATURED_ARTIST_PATTERNS = [
+  'feat.', 'feat', 'ft.', 'ft', 'featuring', 'with'
+];
+
+export const DEFAULT_VERSION_SUFFIX_PATTERNS = [
+  'radio edit', 'album version', 'single version', 'original', 
+  'explicit', 'clean', 'extended', 'remix', 'remaster', 'remastered',
+  'mono', 'stereo', 'live', 'acoustic', 'instrumental', 'demo'
+];
+
+export const DEFAULT_REMASTER_PATTERNS = [
+  'remastered', 'remaster', 'deluxe', 'expanded', 'anniversary',
+  'bonus track', 'special edition'
+];
+
+export const DEFAULT_VARIOUS_ARTISTS_NAMES = [
+  'various artists', 'various', 'soundtrack', 'original soundtrack',
+  'ost', 'compilation', 'va', 'cast', 'original cast', 'film cast',
+  'tv cast', 'movie soundtrack', 'original motion picture soundtrack'
+];
+
+// Keywords that reduce match score when found in Plex title but not source
+export const DEFAULT_PENALTY_KEYWORDS = [
+  'live', 'mono', 'remix', 'cover', 'karaoke', 'tribute', 'instrumental',
+  'acoustic', 'demo', 'rough mix', 'alternate', 'alt take', 'outtake'
+];
+
+// Keywords that boost match score when found (preferred versions)
+export const DEFAULT_PRIORITY_KEYWORDS = [
+  'remastered', 'remaster', 'original', 'stereo', 'hd', 'hi-res',
+  'lossless', 'deluxe', 'definitive'
+];
+
+// Default matching settings
+export const DEFAULT_MATCHING_SETTINGS: MatchingSettings = {
+  minMatchScore: 60,
+  stripParentheses: true,
+  stripBrackets: true,
+  useFirstArtistOnly: true,
+  ignoreFeaturedArtists: true,
+  ignoreRemixInfo: false,
+  ignoreVersionInfo: false,
+  preferNonCompilation: true,
+  penalizeMonoVersions: true,
+  penalizeLiveVersions: true,
+  customStripPatterns: [],
+  featuredArtistPatterns: [...DEFAULT_FEATURED_ARTIST_PATTERNS],
+  versionSuffixPatterns: [...DEFAULT_VERSION_SUFFIX_PATTERNS],
+  remasterPatterns: [...DEFAULT_REMASTER_PATTERNS],
+  variousArtistsNames: [...DEFAULT_VARIOUS_ARTISTS_NAMES],
+  penaltyKeywords: [...DEFAULT_PENALTY_KEYWORDS],
+  priorityKeywords: [...DEFAULT_PRIORITY_KEYWORDS],
+};
+
 // Last.fm country names
 const LASTFM_COUNTRIES: Record<string, string> = {
   'global': 'united states', 'us': 'united states', 'gb': 'united kingdom',
@@ -30,6 +108,8 @@ export interface MatchedTrack {
   artist: string;
   matched: boolean;
   plexRatingKey?: string;
+  plexTitle?: string;
+  plexArtist?: string;
   score?: number;
 }
 
@@ -403,30 +483,52 @@ function cleanTrackTitle(title: string): string {
  * Get the core title without any parenthetical content
  */
 function getCoreTitle(title: string): string {
-  // Remove everything in parentheses and brackets
-  let core = title.replace(/\s*\([^)]*\)/g, '').replace(/\s*\[[^\]]*\]/g, '');
+  let core = title;
+  
+  // Apply custom strip patterns first
+  for (const pattern of currentMatchingSettings.customStripPatterns) {
+    core = core.replace(new RegExp(escapeRegex(pattern), 'gi'), '');
+  }
+  
+  // Remove parentheses content if setting enabled
+  if (currentMatchingSettings.stripParentheses) {
+    core = core.replace(/\s*\([^)]*\)/g, '');
+  }
+  
+  // Remove bracket content if setting enabled
+  if (currentMatchingSettings.stripBrackets) {
+    core = core.replace(/\s*\[[^\]]*\]/g, '');
+  }
+  
   return core.replace(/\s+/g, ' ').trim();
+}
+
+// Helper to escape regex special characters
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
  * Check if title has a version suffix like (Radio Edit), (Album Version), (2000 Version)
  */
 function hasVersionSuffix(title: string): boolean {
-  const versionPatterns = [
-    /\(radio\s*edit[^)]*\)/i,
-    /\(album\s*version[^)]*\)/i,
-    /\(single\s*version[^)]*\)/i,
-    /\(original[^)]*\)/i,
-    /\(explicit[^)]*\)/i,
-    /\(clean[^)]*\)/i,
-    /\(extended[^)]*\)/i,
-    /\(remix[^)]*\)/i,
-    /\(\d{4}\s*version[^)]*\)/i,  // (2000 Version)
-    /\(\d{4}\s*remaster[^)]*\)/i, // (2000 Remaster)
-    /\(remaster[^)]*\)/i,
-  ];
+  // Build patterns from configurable list
+  for (const pattern of currentMatchingSettings.versionSuffixPatterns) {
+    const escapedPattern = escapeRegex(pattern);
+    // Match in parentheses or brackets
+    const parenRegex = new RegExp(`\\(${escapedPattern}[^)]*\\)`, 'i');
+    const bracketRegex = new RegExp(`\\[${escapedPattern}[^\\]]*\\]`, 'i');
+    if (parenRegex.test(title) || bracketRegex.test(title)) {
+      return true;
+    }
+  }
   
-  return versionPatterns.some(pattern => pattern.test(title));
+  // Also check for year-based versions like (2000 Version), (2000 Remaster)
+  if (/\(\d{4}\s*(version|remaster)[^)]*\)/i.test(title)) {
+    return true;
+  }
+  
+  return false;
 }
 
 /**
@@ -441,6 +543,22 @@ function isMonoVersion(title: string): boolean {
   ];
   
   return monoPatterns.some(pattern => pattern.test(title));
+}
+
+/**
+ * Check if title is a Live version - these should be deprioritized when source is studio
+ */
+function isLiveVersion(title: string): boolean {
+  const livePatterns = [
+    /\(live[^)]*\)/i,           // (Live), (Live at...), (Live 2020)
+    /\[live[^\]]*\]/i,          // [Live], [Live at...]
+    /\s+-\s+live\s*(at|from|in|version)?/i,  // - Live, - Live at...
+    /\blive\s+(at|from|in)\s+/i, // Live at..., Live from...
+    /\blive\s+version/i,        // Live Version
+    /\blive\s+recording/i,      // Live Recording
+  ];
+  
+  return livePatterns.some(pattern => pattern.test(title));
 }
 
 /**
@@ -471,33 +589,34 @@ function cleanArtistName(artist: string): string {
   
   let cleaned = artist;
   
-  // FIRST: Extract only the first artist from comma-separated list
+  // Extract only the first artist from comma-separated list (if setting enabled)
   // "Timmy Trumpet, POLTERGST, Naeleck" -> "Timmy Trumpet"
-  if (cleaned.includes(',')) {
+  if (currentMatchingSettings.useFirstArtistOnly && cleaned.includes(',')) {
     cleaned = cleaned.split(',')[0].trim();
   }
   
-  // Remove feat/featuring patterns
+  // Remove feat/featuring patterns (if setting enabled)
   // "Gwen Stefani Feat. Blake Shelton" -> "Gwen Stefani"
-  const featPatterns = [
-    /\s+feat\.?\s+.+$/gi,   // " Feat. Blake Shelton" or " feat Blake"
-    /\s+ft\.?\s+.+$/gi,     // " Ft. Someone" or " ft someone"
-    /\s+featuring\s+.+$/gi, // " featuring Someone"
-  ];
-  
-  for (const pattern of featPatterns) {
-    cleaned = cleaned.replace(pattern, '');
+  if (currentMatchingSettings.ignoreFeaturedArtists) {
+    // Build patterns from configurable list
+    for (const pattern of currentMatchingSettings.featuredArtistPatterns) {
+      const escapedPattern = escapeRegex(pattern);
+      const regex = new RegExp(`\\s+${escapedPattern}\\.?\\s+.+$`, 'gi');
+      cleaned = cleaned.replace(regex, '');
+    }
   }
   
   // Handle "x" separator: "Hugel x Topic x Arash" -> "Hugel"
-  const xMatch = cleaned.match(/^([^x]+?)\s+x\s+/i);
-  if (xMatch) {
-    cleaned = xMatch[1].trim();
-  }
-  
-  // Remove "& Other Artist" but keep the primary artist
-  cleaned = cleaned.replace(/\s*&\s+.+$/gi, '');
-  cleaned = cleaned.replace(/\s+and\s+.+$/gi, '');
+  if (currentMatchingSettings.useFirstArtistOnly) {
+    const xMatch = cleaned.match(/^([^x]+?)\s+x\s+/i);
+    if (xMatch) {
+      cleaned = xMatch[1].trim();
+    }
+    
+    // Remove "& Other Artist" but keep the primary artist
+    cleaned = cleaned.replace(/\s*&\s+.+$/gi, '');
+    cleaned = cleaned.replace(/\s+and\s+.+$/gi, '');
+  };
   
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
   cleaned = cleaned.replace(/^[\s\-,&\(\)\[\]]+|[\s\-,&\(\)\[\]]+$/g, '');
@@ -633,12 +752,29 @@ function artistInTitle(sourceArtist: string, plexTitle: string): boolean {
 
 // ==================== PLEX MATCHING ====================
 
+// Current matching settings (set before matching)
+let currentMatchingSettings: MatchingSettings = DEFAULT_MATCHING_SETTINGS;
+
+export function setMatchingSettings(settings: MatchingSettings) {
+  currentMatchingSettings = settings;
+}
+
+export function getMatchingSettings(): MatchingSettings {
+  return currentMatchingSettings;
+}
+
 export async function matchPlaylistToPlex(
   playlist: DiscoveryPlaylist,
   serverUrl: string,
   searchFn: (data: { serverUrl: string; query: string }) => Promise<any[]>,
-  onProgress?: (current: number, total: number, trackName: string) => void
+  onProgress?: (current: number, total: number, trackName: string) => void,
+  settings?: MatchingSettings
 ): Promise<MatchedPlaylist> {
+  // Use provided settings or current global settings
+  if (settings) {
+    currentMatchingSettings = settings;
+  }
+  
   const matchedTracks: MatchedTrack[] = [];
   const total = playlist.tracks.length;
 
@@ -646,11 +782,17 @@ export async function matchPlaylistToPlex(
     const track = playlist.tracks[i];
     onProgress?.(i + 1, total, `${track.artist} - ${track.title}`);
     const match = await findBestMatch(track, serverUrl, searchFn);
+    
+    // Apply minimum score filter - only match if score meets threshold
+    const passesMinScore = match !== null && match.score >= currentMatchingSettings.minMatchScore;
+    
     matchedTracks.push({
       title: track.title,
       artist: track.artist,
-      matched: match !== null,
-      plexRatingKey: match?.ratingKey,
+      matched: passesMinScore,
+      plexRatingKey: passesMinScore ? match?.ratingKey : undefined,
+      plexTitle: passesMinScore ? match?.plexTitle : undefined,
+      plexArtist: passesMinScore ? match?.plexArtist : undefined,
       score: match?.score,
     });
   }
@@ -670,7 +812,7 @@ async function findBestMatch(
   track: ExternalTrack,
   serverUrl: string,
   searchFn: (data: { serverUrl: string; query: string }) => Promise<any[]>
-): Promise<{ ratingKey: string; score: number } | null> {
+): Promise<{ ratingKey: string; score: number; plexTitle: string; plexArtist: string } | null> {
   try {
     // Skip very short titles (but allow acronyms like "T.N.T." which become "tnt")
     const titleWithoutPunctuation = track.title.replace(/[^a-zA-Z0-9]/g, '');
@@ -741,69 +883,144 @@ async function findBestMatch(
     if (!allResults.length) return null;
     
     // Find best match - STRONGLY prefer album artist matches over Various Artists
-    let bestMatch: { ratingKey: string; score: number } | null = null;
+    let bestMatch: { ratingKey: string; score: number; rankScore: number; plexTitle: string; plexArtist: string } | null = null;
     
     for (const result of allResults) {
       const plexTitle = result.title || '';
       const albumArtist = result.grandparentTitle || '';
+      const albumName = result.parentTitle || '';
       const trackArtist = result.originalTitle || '';
       
-      // Check if this is a Various Artists / compilation album
-      const isVariousArtists = albumArtist.toLowerCase() === 'various artists' || 
-                               albumArtist.toLowerCase() === 'various' ||
-                               albumArtist.toLowerCase() === 'soundtrack' ||
-                               albumArtist.toLowerCase() === 'original soundtrack';
+      // Check if this is a Various Artists / compilation album using configurable list
+      const albumArtistLower = albumArtist.toLowerCase();
+      const albumNameLower = albumName.toLowerCase();
+      const isVariousArtists = currentMatchingSettings.variousArtistsNames.some(
+        name => albumArtistLower === name.toLowerCase() || 
+                albumArtistLower.includes(name.toLowerCase())
+      );
+      // Also check if album name suggests it's a soundtrack/compilation
+      const isSoundtrackAlbum = albumNameLower.includes('soundtrack') || 
+                                albumNameLower.includes('ost') ||
+                                albumArtistLower.includes('cast') ||
+                                albumArtistLower.includes('soundtrack');
+      const isCompilation = isVariousArtists || isSoundtrackAlbum;
       
       // Check title match first
       const titleMatches = titlesMatch(track.title, plexTitle);
       if (!titleMatches) continue;
       
       // Check artist matches - try album artist first, then track artist
-      const albumArtistMatches = albumArtist && !isVariousArtists && artistsMatch(track.artist, albumArtist);
+      const albumArtistMatches = albumArtist && !isCompilation && artistsMatch(track.artist, albumArtist);
       const trackArtistMatches = trackArtist && artistsMatch(track.artist, trackArtist);
       // Also check if artist name is embedded in the title (for "01 - Artist - Title" format)
       const artistInTitleMatches = artistInTitle(track.artist, plexTitle);
       
-      if (!albumArtistMatches && !trackArtistMatches && !artistInTitleMatches) continue;
+      // For Various Artists/compilations/soundtracks with exact title match, allow title-only matching
+      // This helps with soundtracks where track artist metadata varies
+      const cleanSourceTitle = normalizeForComparison(cleanTrackTitle(track.title));
+      const cleanPlexTitle = normalizeForComparison(cleanTrackTitle(plexTitle));
+      const exactTitleMatch = cleanSourceTitle === cleanPlexTitle;
+      const allowTitleOnlyMatch = isCompilation && exactTitleMatch;
+      
+      // Also allow if title matches exactly and it's a short/common title on a compilation
+      // This catches cases where originalTitle might be empty or different
+      const titleOnlyForShortMatch = exactTitleMatch && cleanSourceTitle.length <= 20 && isCompilation;
+      
+      if (!albumArtistMatches && !trackArtistMatches && !artistInTitleMatches && !allowTitleOnlyMatch && !titleOnlyForShortMatch) continue;
       
       // Calculate base score
-      const plexArtist = albumArtistMatches ? albumArtist : trackArtist;
+      const plexArtist = albumArtistMatches ? albumArtist : (trackArtist || albumArtist);
       let score = calculateMatchScore(track.title, track.artist, plexTitle, plexArtist);
       
-      // STRONGLY prefer album artist matches (non-Various Artists)
-      // This ensures we pick "Raye - Raye" over "Various Artists - Now That's What I Call Music"
-      if (albumArtistMatches) {
-        score += 50; // Big bonus for proper album artist match
-      } else if (isVariousArtists) {
-        score -= 30; // Penalty for Various Artists compilations
+      // Prefer album artist matches (non-Various Artists) if setting enabled
+      if (currentMatchingSettings.preferNonCompilation) {
+        if (albumArtistMatches) {
+          score += 50; // Big bonus for proper album artist match
+        } else if (isCompilation) {
+          score -= 30; // Penalty for Various Artists/soundtrack compilations
+        }
       }
       
-      // Prefer tracks without version suffixes if source doesn't have them
-      // But still match them as fallback
-      const sourceHasVersionSuffix = hasVersionSuffix(track.title);
-      const plexHasVersionSuffix = hasVersionSuffix(plexTitle);
-      
-      if (!sourceHasVersionSuffix && plexHasVersionSuffix) {
-        // Source is "SOS", Plex is "SOS (Radio Edit)" - small penalty, still match
-        score -= 10;
-      } else if (sourceHasVersionSuffix && !plexHasVersionSuffix) {
-        // Source is "SOS (Radio Edit)", Plex is "SOS" - prefer the clean version
-        score -= 5;
+      // Extra penalty if we only matched by title (no artist match at all)
+      if ((allowTitleOnlyMatch || titleOnlyForShortMatch) && !trackArtistMatches && !artistInTitleMatches) {
+        score -= 20; // Penalty for title-only match, but still allow it
       }
       
-      // STRONGLY deprioritize Mono versions - prefer stereo/regular versions
-      // "Fly Me High (Mono Mix)" should lose to "Fly Me High"
-      const plexIsMonoVersion = isMonoVersion(plexTitle);
-      if (plexIsMonoVersion) {
-        score -= 40; // Big penalty for Mono versions
+      // Handle version suffix preferences
+      if (!currentMatchingSettings.ignoreVersionInfo) {
+        const sourceHasVersionSuffix = hasVersionSuffix(track.title);
+        const plexHasVersionSuffix = hasVersionSuffix(plexTitle);
+        
+        if (!sourceHasVersionSuffix && plexHasVersionSuffix) {
+          score -= 10;
+        } else if (sourceHasVersionSuffix && !plexHasVersionSuffix) {
+          score -= 5;
+        }
       }
       
-      if (!bestMatch || score > bestMatch.score) {
-        bestMatch = { ratingKey: result.ratingKey, score };
+      // Handle remix info preferences
+      if (!currentMatchingSettings.ignoreRemixInfo) {
+        const sourceHasRemix = /remix/i.test(track.title);
+        const plexHasRemix = /remix/i.test(plexTitle);
+        if (sourceHasRemix !== plexHasRemix) {
+          score -= 15;
+        }
+      }
+      
+      // Penalize Mono versions if setting enabled
+      if (currentMatchingSettings.penalizeMonoVersions) {
+        const plexIsMonoVersion = isMonoVersion(plexTitle);
+        if (plexIsMonoVersion) {
+          score -= 40;
+        }
+      }
+      
+      // Penalize Live versions if setting enabled (when source is not live)
+      if (currentMatchingSettings.penalizeLiveVersions) {
+        const sourceIsLive = isLiveVersion(track.title);
+        const plexIsLive = isLiveVersion(plexTitle);
+        // Only penalize if source is NOT live but Plex version IS live
+        if (!sourceIsLive && plexIsLive) {
+          score -= 50; // Strong penalty - user likely wants studio version
+        }
+        // Small bonus if both are live (user wants live version)
+        if (sourceIsLive && plexIsLive) {
+          score += 20;
+        }
+      }
+      
+      // Apply custom penalty keywords
+      const plexTitleLower = plexTitle.toLowerCase();
+      const sourceTitleLower = track.title.toLowerCase();
+      for (const keyword of currentMatchingSettings.penaltyKeywords) {
+        const keywordLower = keyword.toLowerCase();
+        // Penalize if Plex has keyword but source doesn't
+        if (plexTitleLower.includes(keywordLower) && !sourceTitleLower.includes(keywordLower)) {
+          score -= 25;
+        }
+      }
+      
+      // Apply custom priority keywords (bonus if Plex has preferred version)
+      for (const keyword of currentMatchingSettings.priorityKeywords) {
+        const keywordLower = keyword.toLowerCase();
+        if (plexTitleLower.includes(keywordLower)) {
+          score += 10;
+        }
+      }
+      
+      if (!bestMatch || score > bestMatch.rankScore) {
+        const plexArtistName = albumArtistMatches ? albumArtist : (trackArtist || albumArtist);
+        // Use base score (0-100) for display, full score with bonuses for ranking
+        const displayScore = Math.min(100, Math.max(0, calculateMatchScore(track.title, track.artist, plexTitle, plexArtistName)));
+        bestMatch = { ratingKey: result.ratingKey, score: displayScore, rankScore: score, plexTitle, plexArtist: plexArtistName };
       }
     }
     
-    return bestMatch;
+    // Return without rankScore (internal use only)
+    if (bestMatch) {
+      return { ratingKey: bestMatch.ratingKey, score: bestMatch.score, plexTitle: bestMatch.plexTitle, plexArtist: bestMatch.plexArtist };
+    }
+    return null;
   } catch {
     return null;
   }

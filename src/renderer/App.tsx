@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchAllCharts, MatchedPlaylist, matchPlaylistToPlex, PLAYLIST_SCHEDULES } from './discovery';
-import ImportPage from './ImportPage';
+import { fetchAllCharts, MatchedPlaylist, matchPlaylistToPlex, PLAYLIST_SCHEDULES, MatchingSettings, DEFAULT_MATCHING_SETTINGS, setMatchingSettings, DEFAULT_FEATURED_ARTIST_PATTERNS, DEFAULT_VERSION_SUFFIX_PATTERNS, DEFAULT_REMASTER_PATTERNS, DEFAULT_VARIOUS_ARTISTS_NAMES, DEFAULT_PENALTY_KEYWORDS, DEFAULT_PRIORITY_KEYWORDS } from './discovery';
+import ImportPage, { ImportProgress } from './ImportPage';
 import SharingPage from './SharingPage';
 import BackupRestorePage from './BackupRestorePage';
 import logoImg from './logo.png';
@@ -46,6 +46,8 @@ declare global {
       getRandomArtists: (data: { serverUrl: string; libraryId: string; limit: number }) => Promise<any[]>;
       getRecentTracks: (data: { serverUrl: string; libraryId: string }) => Promise<any[]>;
       getSimilarTracks: (data: { serverUrl: string; trackKey: string }) => Promise<any[]>;
+      getStalePlayedTracks: (data: { serverUrl: string; libraryId: string; daysAgo: number; limit: number }) => Promise<any[]>;
+      getRelatedTracks: (data: { serverUrl: string; trackKey: string; limit: number }) => Promise<any[]>;
       getRecentAlbums: (data: { serverUrl: string; libraryId: string; limit: number }) => Promise<any[]>;
       getAlbumTracks: (data: { serverUrl: string; albumKey: string }) => Promise<any[]>;
       deletePlaylist: (data: { serverUrl: string; playlistId: string }) => Promise<boolean>;
@@ -58,6 +60,7 @@ declare global {
       getDueSchedules: () => Promise<PlaylistSchedule[]>;
       markScheduleRun: (playlistId: string) => Promise<boolean>;
       scrapeAriaCharts: (selectedChartIds?: string[]) => Promise<{ id: string; name: string; description: string; tracks: { title: string; artist: string }[] }[]>;
+      // Spotify
       getSpotifyAuth: () => Promise<{ accessToken: string | null; refreshToken: string | null; expiresAt: number | null; user: any }>;
       saveSpotifyCredentials: (data: { clientId: string; clientSecret: string }) => Promise<boolean>;
       getSpotifyCredentials: () => Promise<{ clientId: string | null; clientSecret: string | null }>;
@@ -66,11 +69,44 @@ declare global {
       getSpotifyPlaylists: () => Promise<any[]>;
       getSpotifyPlaylistTracks: (data: { playlistId: string }) => Promise<any[]>;
       logoutSpotify: () => Promise<boolean>;
+      // Deezer
       searchDeezerPlaylists: (data: { query: string }) => Promise<any[]>;
       getDeezerPlaylistTracks: (data: { playlistId: string }) => Promise<any[]>;
       getDeezerTopPlaylists: () => Promise<any[]>;
+      getDeezerAuth: () => Promise<{ accessToken: string | null; user: any }>;
+      saveDeezerCredentials: (data: { appId: string; appSecret: string }) => Promise<boolean>;
+      getDeezerCredentials: () => Promise<{ appId: string | null; appSecret: string | null }>;
+      startDeezerAuth: () => Promise<{ redirectUri: string }>;
+      exchangeDeezerCode: (data: { code: string }) => Promise<{ accessToken: string; user: any }>;
+      logoutDeezer: () => Promise<boolean>;
+      getDeezerUserPlaylists: () => Promise<any[]>;
+      // Apple Music
       scrapeAppleMusicPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
+      // Tidal
       scrapeTidalPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
+      getTidalAuth: () => Promise<{ accessToken: string | null; user: any }>;
+      saveTidalCredentials: (data: { clientId: string; clientSecret: string }) => Promise<boolean>;
+      getTidalCredentials: () => Promise<{ clientId: string | null; clientSecret: string | null }>;
+      startTidalAuth: () => Promise<{ redirectUri: string }>;
+      exchangeTidalCode: (data: { code: string }) => Promise<{ accessToken: string; user: any }>;
+      logoutTidal: () => Promise<boolean>;
+      getTidalUserPlaylists: () => Promise<any[]>;
+      searchTidalPlaylists: (data: { query: string }) => Promise<any[]>;
+      // YouTube Music
+      getYouTubeMusicAuth: () => Promise<{ accessToken: string | null; user: any }>;
+      saveYouTubeMusicCredentials: (data: { clientId: string; clientSecret: string }) => Promise<boolean>;
+      getYouTubeMusicCredentials: () => Promise<{ clientId: string | null; clientSecret: string | null }>;
+      startYouTubeMusicAuth: () => Promise<{ redirectUri: string }>;
+      exchangeYouTubeMusicCode: (data: { code: string }) => Promise<{ accessToken: string; user: any }>;
+      logoutYouTubeMusic: () => Promise<boolean>;
+      getYouTubeMusicPlaylists: () => Promise<any[]>;
+      getYouTubeMusicPlaylistTracks: (data: { playlistId: string }) => Promise<any[]>;
+      scrapeYouTubeMusicPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
+      // Amazon Music
+      scrapeAmazonMusicPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
+      // Qobuz
+      scrapeQobuzPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
+      // Other
       getMonthlyTracks: (data: { serverUrl: string; libraryId: string }) => Promise<any[]>;
       getMixesSchedule: () => Promise<{ enabled: boolean; frequency: 'daily' | 'weekly' | 'monthly'; lastRun?: number }>;
       saveMixesSchedule: (schedule: { enabled: boolean; frequency: 'daily' | 'weekly' | 'monthly'; lastRun?: number }) => Promise<boolean>;
@@ -168,6 +204,21 @@ export default function App() {
   const [editSearchResults, setEditSearchResults] = useState<any[]>([]);
   const [isEditSearching, setIsEditSearching] = useState(false);
 
+  // Matching settings state
+  const [showMatchingSettings, setShowMatchingSettings] = useState(false);
+  const [matchingSettings, setMatchingSettingsState] = useState<MatchingSettings>(DEFAULT_MATCHING_SETTINGS);
+  const [newStripPattern, setNewStripPattern] = useState('');
+  const [newFeatPattern, setNewFeatPattern] = useState('');
+  const [newVersionPattern, setNewVersionPattern] = useState('');
+  const [newRemasterPattern, setNewRemasterPattern] = useState('');
+  const [newVariousName, setNewVariousName] = useState('');
+  const [newPenaltyKeyword, setNewPenaltyKeyword] = useState('');
+  const [newPriorityKeyword, setNewPriorityKeyword] = useState('');
+  const [expandedPatternSection, setExpandedPatternSection] = useState<string | null>(null);
+
+  // Global import progress state (shared with ImportPage)
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+
   useEffect(() => {
     async function init() {
       const authData = await window.api.getAuth();
@@ -180,6 +231,12 @@ export default function App() {
           libraryId: savedSettings.libraryId || '',
           autoSync: savedSettings.autoSync || false,
         });
+        
+        // Load matching settings
+        if (savedSettings.matchingSettings) {
+          setMatchingSettingsState(savedSettings.matchingSettings);
+          setMatchingSettings(savedSettings.matchingSettings);
+        }
         
         if (authData.server) {
           const url = authData.server.connections?.[0]?.uri;
@@ -290,7 +347,8 @@ export default function App() {
       for (const p of existingPlaylists) {
         if (p.title === 'Your Weekly Mix' || 
             p.title === 'Time Capsule' ||
-            p.title === 'New Music Mix') {
+            p.title === 'New Music Mix' ||
+            p.title === 'Daily Mix') {
           await window.api.deletePlaylist({ serverUrl, playlistId: p.ratingKey });
         }
       }
@@ -314,6 +372,10 @@ export default function App() {
       setStatusMessage('Creating New Music Mix...');
       const newMusicCreated = await createNewMusicMix();
       if (newMusicCreated) setGeneratedCount(c => c + 1);
+
+      setStatusMessage('Creating Daily Mix...');
+      const dailyMixCreated = await createDailyMix();
+      if (dailyMixCreated) setGeneratedCount(c => c + 1);
 
       // Mark schedule as run
       await window.api.markMixesScheduleRun();
@@ -468,6 +530,61 @@ export default function App() {
     return false;
   };
 
+  // Daily Mix: 50 recent tracks + 4 related each + 50 stale tracks = ~150 tracks
+  const createDailyMix = async () => {
+    console.log('Creating Daily Mix...');
+    const addedKeys = new Set<string>();
+    const mixTracks: string[] = [];
+    
+    // 1. Get last 50 listened tracks
+    const recentTracks = await window.api.getRecentTracks({ serverUrl: serverUrl!, libraryId: settings.libraryId });
+    const seedTracks = recentTracks.slice(0, 50);
+    console.log(`[Daily Mix] Seed tracks: ${seedTracks.length}`);
+    
+    // Add seed tracks
+    for (const track of seedTracks) {
+      if (!addedKeys.has(track.ratingKey)) {
+        mixTracks.push(track.ratingKey);
+        addedKeys.add(track.ratingKey);
+      }
+    }
+    
+    // 2. For each seed track, get up to 4 related tracks (same artist/album)
+    for (const seed of seedTracks.slice(0, 50)) {
+      const related = await window.api.getRelatedTracks({ serverUrl: serverUrl!, trackKey: seed.ratingKey, limit: 4 });
+      for (const track of related) {
+        if (!addedKeys.has(track.ratingKey)) {
+          mixTracks.push(track.ratingKey);
+          addedKeys.add(track.ratingKey);
+        }
+      }
+    }
+    console.log(`[Daily Mix] After related tracks: ${mixTracks.length}`);
+    
+    // 3. Get 50 tracks not played in 20+ days
+    const staleTracks = await window.api.getStalePlayedTracks({ 
+      serverUrl: serverUrl!, 
+      libraryId: settings.libraryId, 
+      daysAgo: 20, 
+      limit: 50 
+    });
+    for (const track of staleTracks) {
+      if (!addedKeys.has(track.ratingKey)) {
+        mixTracks.push(track.ratingKey);
+        addedKeys.add(track.ratingKey);
+      }
+    }
+    console.log(`[Daily Mix] Final track count: ${mixTracks.length}`);
+    
+    if (mixTracks.length >= 20) {
+      await window.api.createPlaylist({ serverUrl: serverUrl!, title: 'Daily Mix', trackKeys: shuffle(mixTracks) });
+      console.log('Daily Mix created!');
+      return true;
+    }
+    console.log('Not enough tracks for Daily Mix');
+    return false;
+  };
+
   // Discover charts
   const handleDiscover = useCallback(async () => {
     if (!serverUrl || !settings.libraryId) return;
@@ -576,7 +693,15 @@ export default function App() {
   const handleManualMatch = (plexTrack: any) => {
     if (!selectedPlaylist || manualSearchTrack === null) return;
     const updatedTracks = [...selectedPlaylist.tracks];
-    updatedTracks[manualSearchTrack.index] = { ...updatedTracks[manualSearchTrack.index], matched: true, plexRatingKey: plexTrack.ratingKey, score: 100 };
+    const plexArtist = plexTrack.grandparentTitle || plexTrack.originalTitle || '';
+    updatedTracks[manualSearchTrack.index] = { 
+      ...updatedTracks[manualSearchTrack.index], 
+      matched: true, 
+      plexRatingKey: plexTrack.ratingKey, 
+      plexTitle: plexTrack.title,
+      plexArtist: plexArtist,
+      score: 100 
+    };
     const updatedPlaylist = { ...selectedPlaylist, tracks: updatedTracks, matchedCount: updatedTracks.filter(t => t.matched).length };
     setPlaylists(prev => prev.map(p => p.id === selectedPlaylist.id ? updatedPlaylist : p));
     setSelectedPlaylist(updatedPlaylist);
@@ -661,6 +786,13 @@ export default function App() {
         </div>
       </nav>
       
+      {/* Matching Settings */}
+      <div className="sidebar-matching">
+        <button className="btn btn-secondary btn-small btn-full" onClick={() => setShowMatchingSettings(true)}>
+          ⚙️ Matching Settings
+        </button>
+      </div>
+      
       {/* Settings at bottom */}
       <div className="sidebar-footer">
         <div className="sidebar-settings">
@@ -700,7 +832,7 @@ export default function App() {
       case 'schedule':
         return renderSchedulePage();
       case 'import':
-        return <ImportPage serverUrl={serverUrl} onBack={() => setCurrentPage('import')} onPlaylistSelect={setSelectedPlaylist} />;
+        return <ImportPage serverUrl={serverUrl} onBack={() => setCurrentPage('import')} onPlaylistSelect={setSelectedPlaylist} importProgress={importProgress} setImportProgress={setImportProgress} />;
       case 'share':
         return <SharingPage serverUrl={serverUrl} onBack={() => setCurrentPage('share')} />;
       case 'backup':
@@ -720,7 +852,7 @@ export default function App() {
       
       <div className="card">
         <p style={{ marginBottom: '16px', color: '#a0a0a0' }}>
-          Generate personalized playlists based on your listening history. Creates Weekly Mix, Time Capsule, and New Music Mix.
+          Generate personalized playlists based on your listening history. Creates Weekly Mix, Daily Mix, Time Capsule, and New Music Mix.
         </p>
         
         <button className="btn btn-primary btn-large" data-auto-generate onClick={handleGenerateAll} disabled={isGenerating || !settings.libraryId}>
@@ -801,6 +933,7 @@ export default function App() {
         <h3>What gets created:</h3>
         <ul>
           <li><strong>Your Weekly Mix</strong> - Based on your top artists</li>
+          <li><strong>Daily Mix</strong> - Recent tracks + related songs + rediscoveries (~150 tracks)</li>
           <li><strong>Time Capsule</strong> - Rediscover older favorites</li>
           <li><strong>New Music Mix</strong> - Fresh tracks from recent additions</li>
         </ul>
@@ -1132,11 +1265,14 @@ export default function App() {
             {tracksToShow.map((track, i) => {
               const actualIndex = selectedPlaylist.tracks.findIndex(t => t.title === track.title && t.artist === track.artist);
               return (
-                <div key={i} className={`track-item ${track.matched ? 'matched' : 'unmatched'} ${!track.matched ? 'clickable' : ''}`} onClick={() => !track.matched && openManualSearch(actualIndex, track.title, track.artist)} title={!track.matched ? 'Click to manually search' : ''}>
+                <div key={i} className={`track-item ${track.matched ? 'matched' : 'unmatched'} clickable`} onClick={() => openManualSearch(actualIndex, track.title, track.artist)} title="Click to search/change match">
                   <span className="track-status">{track.matched ? '✓' : '✗'}</span>
                   <div className="track-info">
                     <span className="track-title">{track.title}</span>
                     <span className="track-artist">{track.artist}</span>
+                    {track.matched && track.plexTitle && (
+                      <span className="track-plex-match">→ {track.plexTitle} • {track.plexArtist}</span>
+                    )}
                   </div>
                   {track.matched ? track.score && <span className="track-score">{Math.round(track.score)}%</span> : <span className="track-search-hint">🔍</span>}
                 </div>
@@ -1338,6 +1474,236 @@ export default function App() {
   }
 
   // Main app with sidebar
+  const renderMatchingSettingsModal = () => {
+    if (!showMatchingSettings) return null;
+    
+    const updateMatchingSettings = (newSettings: MatchingSettings) => {
+      setMatchingSettingsState(newSettings);
+      setMatchingSettings(newSettings); // Update the discovery module
+    };
+    
+    const handleSaveMatchingSettings = () => {
+      setMatchingSettings(matchingSettings); // Apply to discovery module
+      window.api.saveSettings({...settings, matchingSettings});
+      setShowMatchingSettings(false);
+    };
+    
+    const handleResetMatchingSettings = () => {
+      setMatchingSettingsState(DEFAULT_MATCHING_SETTINGS);
+      setMatchingSettings(DEFAULT_MATCHING_SETTINGS);
+    };
+
+    const renderPatternSection = (
+      title: string,
+      sectionKey: string,
+      patterns: string[],
+      defaultPatterns: string[],
+      settingsKey: keyof MatchingSettings,
+      newValue: string,
+      setNewValue: (v: string) => void,
+      placeholder: string
+    ) => {
+      const isExpanded = expandedPatternSection === sectionKey;
+      return (
+        <div className="pattern-section">
+          <div className="pattern-section-header" onClick={() => setExpandedPatternSection(isExpanded ? null : sectionKey)}>
+            <span>{title}</span>
+            <span className="pattern-count">{patterns.length} patterns</span>
+            <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
+          </div>
+          {isExpanded && (
+            <div className="pattern-section-content">
+              <div className="pattern-list">
+                {patterns.map((pattern, i) => (
+                  <div key={i} className="pattern-item">
+                    <span>{pattern}</span>
+                    <button className="btn-remove" onClick={() => updateMatchingSettings({...matchingSettings, [settingsKey]: patterns.filter((_, idx) => idx !== i)})}>×</button>
+                  </div>
+                ))}
+                {patterns.length === 0 && <div className="pattern-empty">No patterns defined</div>}
+              </div>
+              <div className="pattern-add">
+                <input 
+                  type="text" 
+                  placeholder={placeholder} 
+                  value={newValue} 
+                  onChange={e => setNewValue(e.target.value)} 
+                  onKeyDown={e => { 
+                    if (e.key === 'Enter' && newValue.trim()) { 
+                      updateMatchingSettings({...matchingSettings, [settingsKey]: [...patterns, newValue.trim()]}); 
+                      setNewValue(''); 
+                    }
+                  }} 
+                />
+                <button className="btn btn-secondary btn-small" onClick={() => { 
+                  if (newValue.trim()) { 
+                    updateMatchingSettings({...matchingSettings, [settingsKey]: [...patterns, newValue.trim()]}); 
+                    setNewValue(''); 
+                  }
+                }}>Add</button>
+              </div>
+              <button className="btn btn-secondary btn-small" style={{marginTop: '8px'}} onClick={() => updateMatchingSettings({...matchingSettings, [settingsKey]: [...defaultPatterns]})}>
+                Reset to Defaults
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    };
+    
+    return (
+      <div className="modal-overlay" onClick={() => setShowMatchingSettings(false)}>
+        <div className="modal-content matching-settings-modal" onClick={e => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2>Matching Settings</h2>
+            <button className="btn btn-secondary btn-small" onClick={() => setShowMatchingSettings(false)}>✕</button>
+          </div>
+          
+          <div className="matching-settings-content">
+            <div className="setting-group">
+              <h3>Title Cleaning</h3>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.stripParentheses} onChange={e => updateMatchingSettings({...matchingSettings, stripParentheses: e.target.checked})} />
+                Strip parentheses content (Radio Edit), (Remix)
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.stripBrackets} onChange={e => updateMatchingSettings({...matchingSettings, stripBrackets: e.target.checked})} />
+                Strip bracket content [Explicit], [Remaster]
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.ignoreRemixInfo} onChange={e => updateMatchingSettings({...matchingSettings, ignoreRemixInfo: e.target.checked})} />
+                Ignore remix info when matching
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.ignoreVersionInfo} onChange={e => updateMatchingSettings({...matchingSettings, ignoreVersionInfo: e.target.checked})} />
+                Ignore version info (Remaster, Deluxe)
+              </label>
+            </div>
+            
+            <div className="setting-group">
+              <h3>Artist Matching</h3>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.useFirstArtistOnly} onChange={e => updateMatchingSettings({...matchingSettings, useFirstArtistOnly: e.target.checked})} />
+                Use first artist only (for multiple artists)
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.ignoreFeaturedArtists} onChange={e => updateMatchingSettings({...matchingSettings, ignoreFeaturedArtists: e.target.checked})} />
+                Ignore featured artists (feat., ft.)
+              </label>
+            </div>
+            
+            <div className="setting-group">
+              <h3>Scoring</h3>
+              <label className="slider-label">
+                Minimum match score: {matchingSettings.minMatchScore}%
+                <input type="range" min="30" max="100" value={matchingSettings.minMatchScore} onChange={e => updateMatchingSettings({...matchingSettings, minMatchScore: parseInt(e.target.value)})} />
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.preferNonCompilation} onChange={e => updateMatchingSettings({...matchingSettings, preferNonCompilation: e.target.checked})} />
+                Prefer non-compilation albums
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.penalizeMonoVersions} onChange={e => updateMatchingSettings({...matchingSettings, penalizeMonoVersions: e.target.checked})} />
+                Penalize mono versions
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.penalizeLiveVersions} onChange={e => updateMatchingSettings({...matchingSettings, penalizeLiveVersions: e.target.checked})} />
+                Prefer studio over live versions
+              </label>
+            </div>
+            
+            <div className="setting-group">
+              <h3>Pattern Lists</h3>
+              <p className="setting-hint">Click to expand and edit the patterns used for matching</p>
+              
+              {renderPatternSection(
+                'Featured Artist Keywords',
+                'feat',
+                matchingSettings.featuredArtistPatterns || DEFAULT_FEATURED_ARTIST_PATTERNS,
+                DEFAULT_FEATURED_ARTIST_PATTERNS,
+                'featuredArtistPatterns',
+                newFeatPattern,
+                setNewFeatPattern,
+                'e.g. featuring'
+              )}
+              
+              {renderPatternSection(
+                'Version Suffixes',
+                'version',
+                matchingSettings.versionSuffixPatterns || DEFAULT_VERSION_SUFFIX_PATTERNS,
+                DEFAULT_VERSION_SUFFIX_PATTERNS,
+                'versionSuffixPatterns',
+                newVersionPattern,
+                setNewVersionPattern,
+                'e.g. deluxe edition'
+              )}
+              
+              {renderPatternSection(
+                'Remaster Keywords',
+                'remaster',
+                matchingSettings.remasterPatterns || DEFAULT_REMASTER_PATTERNS,
+                DEFAULT_REMASTER_PATTERNS,
+                'remasterPatterns',
+                newRemasterPattern,
+                setNewRemasterPattern,
+                'e.g. anniversary edition'
+              )}
+              
+              {renderPatternSection(
+                'Various Artists Names',
+                'various',
+                matchingSettings.variousArtistsNames || DEFAULT_VARIOUS_ARTISTS_NAMES,
+                DEFAULT_VARIOUS_ARTISTS_NAMES,
+                'variousArtistsNames',
+                newVariousName,
+                setNewVariousName,
+                'e.g. compilation'
+              )}
+              
+              {renderPatternSection(
+                'Custom Strip Patterns',
+                'custom',
+                matchingSettings.customStripPatterns,
+                [],
+                'customStripPatterns',
+                newStripPattern,
+                setNewStripPattern,
+                'e.g. - Single Version'
+              )}
+              
+              {renderPatternSection(
+                'Penalty Keywords (reduce score)',
+                'penalty',
+                matchingSettings.penaltyKeywords || DEFAULT_PENALTY_KEYWORDS,
+                DEFAULT_PENALTY_KEYWORDS,
+                'penaltyKeywords',
+                newPenaltyKeyword,
+                setNewPenaltyKeyword,
+                'e.g. karaoke'
+              )}
+              
+              {renderPatternSection(
+                'Priority Keywords (boost score)',
+                'priority',
+                matchingSettings.priorityKeywords || DEFAULT_PRIORITY_KEYWORDS,
+                DEFAULT_PRIORITY_KEYWORDS,
+                'priorityKeywords',
+                newPriorityKeyword,
+                setNewPriorityKeyword,
+                'e.g. hd'
+              )}
+            </div>
+          </div>
+          
+          <div className="modal-footer">
+            <button className="btn btn-secondary" onClick={handleResetMatchingSettings}>Reset All to Default</button>
+            <button className="btn btn-primary" onClick={handleSaveMatchingSettings}>Save</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app-layout">
       {renderSidebar()}
@@ -1348,6 +1714,30 @@ export default function App() {
       {renderManualSearchModal()}
       {renderPlaylistSelector()}
       {renderChartScheduler()}
+      {renderMatchingSettingsModal()}
+      {/* Global import progress overlay */}
+      {importProgress && (
+        <div className="import-progress-overlay">
+          <div className="import-progress-view">
+            {importProgress.playlistImage && (
+              <img src={importProgress.playlistImage} alt="" className="progress-playlist-image" />
+            )}
+            <h2>Importing {importProgress.playlistName}</h2>
+            <p className="progress-source">from {
+              importProgress.source === 'spotify' ? 'Spotify' : 
+              importProgress.source === 'apple' ? 'Apple Music' : 
+              importProgress.source === 'tidal' ? 'Tidal' : 'Deezer'
+            }</p>
+            
+            <div className="progress-bar-container">
+              <div className="progress-bar" style={{ width: `${importProgress.total > 0 ? Math.round((importProgress.current / importProgress.total) * 100) : 0}%` }} />
+            </div>
+            
+            <p className="progress-count">{importProgress.current} / {importProgress.total} tracks</p>
+            <p className="progress-current-track">{importProgress.currentTrack}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('api', {
   // Mixes operations
   getRecentTracks: (data: { serverUrl: string; libraryId: string }) => ipcRenderer.invoke('get-recent-tracks', data),
   getMonthlyTracks: (data: { serverUrl: string; libraryId: string }) => ipcRenderer.invoke('get-monthly-tracks', data),
+  getStalePlayedTracks: (data: { serverUrl: string; libraryId: string; daysAgo: number; limit: number }) => ipcRenderer.invoke('get-stale-played-tracks', data),
+  getRelatedTracks: (data: { serverUrl: string; trackKey: string; limit: number }) => ipcRenderer.invoke('get-related-tracks', data),
   getSimilarTracks: (data: { serverUrl: string; trackKey: string }) => ipcRenderer.invoke('get-similar-tracks', data),
   getRecentAlbums: (data: { serverUrl: string; libraryId: string; limit: number }) => ipcRenderer.invoke('get-recent-albums', data),
   getAlbumTracks: (data: { serverUrl: string; albumKey: string }) => ipcRenderer.invoke('get-album-tracks', data),
@@ -71,6 +73,13 @@ contextBridge.exposeInMainWorld('api', {
   searchDeezerPlaylists: (data: { query: string }) => ipcRenderer.invoke('search-deezer-playlists', data),
   getDeezerPlaylistTracks: (data: { playlistId: string }) => ipcRenderer.invoke('get-deezer-playlist-tracks', data),
   getDeezerTopPlaylists: () => ipcRenderer.invoke('get-deezer-top-playlists'),
+  getDeezerAuth: () => ipcRenderer.invoke('get-deezer-auth'),
+  saveDeezerCredentials: (data: { appId: string; appSecret: string }) => ipcRenderer.invoke('save-deezer-credentials', data),
+  getDeezerCredentials: () => ipcRenderer.invoke('get-deezer-credentials'),
+  startDeezerAuth: () => ipcRenderer.invoke('start-deezer-auth'),
+  exchangeDeezerCode: (data: { code: string }) => ipcRenderer.invoke('exchange-deezer-code', data),
+  logoutDeezer: () => ipcRenderer.invoke('logout-deezer'),
+  getDeezerUserPlaylists: () => ipcRenderer.invoke('get-deezer-user-playlists'),
   
   // Apple Music integration
   scrapeAppleMusicPlaylist: (data: { url: string }) => ipcRenderer.invoke('scrape-apple-music-playlist', data),
@@ -79,6 +88,31 @@ contextBridge.exposeInMainWorld('api', {
   // Tidal integration
   scrapeTidalPlaylist: (data: { url: string }) => ipcRenderer.invoke('scrape-tidal-playlist', data),
   getTidalTopPlaylists: () => ipcRenderer.invoke('get-tidal-top-playlists'),
+  getTidalAuth: () => ipcRenderer.invoke('get-tidal-auth'),
+  saveTidalCredentials: (data: { clientId: string; clientSecret: string }) => ipcRenderer.invoke('save-tidal-credentials', data),
+  getTidalCredentials: () => ipcRenderer.invoke('get-tidal-credentials'),
+  startTidalAuth: () => ipcRenderer.invoke('start-tidal-auth'),
+  exchangeTidalCode: (data: { code: string }) => ipcRenderer.invoke('exchange-tidal-code', data),
+  logoutTidal: () => ipcRenderer.invoke('logout-tidal'),
+  getTidalUserPlaylists: () => ipcRenderer.invoke('get-tidal-user-playlists'),
+  searchTidalPlaylists: (data: { query: string }) => ipcRenderer.invoke('search-tidal-playlists', data),
+  
+  // YouTube Music integration
+  getYouTubeMusicAuth: () => ipcRenderer.invoke('get-youtube-music-auth'),
+  saveYouTubeMusicCredentials: (data: { clientId: string; clientSecret: string }) => ipcRenderer.invoke('save-youtube-music-credentials', data),
+  getYouTubeMusicCredentials: () => ipcRenderer.invoke('get-youtube-music-credentials'),
+  startYouTubeMusicAuth: () => ipcRenderer.invoke('start-youtube-music-auth'),
+  exchangeYouTubeMusicCode: (data: { code: string }) => ipcRenderer.invoke('exchange-youtube-music-code', data),
+  logoutYouTubeMusic: () => ipcRenderer.invoke('logout-youtube-music'),
+  getYouTubeMusicPlaylists: () => ipcRenderer.invoke('get-youtube-music-playlists'),
+  getYouTubeMusicPlaylistTracks: (data: { playlistId: string }) => ipcRenderer.invoke('get-youtube-music-playlist-tracks', data),
+  scrapeYouTubeMusicPlaylist: (data: { url: string }) => ipcRenderer.invoke('scrape-youtube-music-playlist', data),
+  
+  // Amazon Music integration (scraping only - no API)
+  scrapeAmazonMusicPlaylist: (data: { url: string }) => ipcRenderer.invoke('scrape-amazon-music-playlist', data),
+  
+  // Qobuz integration (scraping only - limited API)
+  scrapeQobuzPlaylist: (data: { url: string }) => ipcRenderer.invoke('scrape-qobuz-playlist', data),
   
   // Playlist sharing
   getHomeUsers: () => ipcRenderer.invoke('get-home-users'),
