@@ -213,11 +213,12 @@ ipcMain.handle('save-settings', (_, settings) => {
 ipcMain.handle('search-track', async (_, { serverUrl, query }) => {
   const token = store.get('plexToken') as string;
   
-  // Clean up the query - remove special characters that break Plex search
-  // Keep alphanumeric, spaces, and parentheses
+  // Clean up the query - remove special characters that break Plex's SQLite FTS
+  // Parentheses cause "malformed MATCH expression" errors
   const cleanQuery = query
     .replace(/[-–—]/g, ' ')  // Replace hyphens/dashes with spaces
-    .replace(/[^\w\s()]/g, ' ')  // Remove other special chars except parentheses
+    .replace(/[()[\]{}]/g, ' ')  // Remove parentheses and brackets
+    .replace(/[^\w\s]/g, ' ')  // Remove other special chars
     .replace(/\s+/g, ' ')  // Collapse multiple spaces
     .trim();
   
@@ -244,24 +245,28 @@ ipcMain.handle('search-track', async (_, { serverUrl, query }) => {
     const trackHub = hubs.find((h: any) => h.type === 'track');
     let tracks = trackHub?.Metadata || [];
     
-    // If no tracks found, try to get tracks from albums
-    if (tracks.length === 0) {
-      const albumHub = hubs.find((h: any) => h.type === 'album');
-      if (albumHub?.Metadata?.length > 0) {
-        // Fetch tracks from matched albums (up to 3 albums)
-        const albumsToFetch = albumHub.Metadata.slice(0, 3);
-        for (const album of albumsToFetch) {
-          try {
-            const albumUrl = `${serverUrl}/library/metadata/${album.ratingKey}/children?X-Plex-Token=${token}`;
-            const albumResponse = await fetch(albumUrl, { headers: PLEX_HEADERS });
-            if (albumResponse.ok) {
-              const albumData = await albumResponse.json();
-              const albumTracks = albumData.MediaContainer?.Metadata || [];
-              tracks = [...tracks, ...albumTracks];
+    // Also fetch tracks from albums to get more results
+    // This helps when the track is on a single/EP album that Plex returns as album result
+    const albumHub = hubs.find((h: any) => h.type === 'album');
+    if (albumHub?.Metadata?.length > 0) {
+      // Fetch tracks from matched albums (up to 5 albums)
+      const albumsToFetch = albumHub.Metadata.slice(0, 5);
+      for (const album of albumsToFetch) {
+        try {
+          const albumUrl = `${serverUrl}/library/metadata/${album.ratingKey}/children?X-Plex-Token=${token}`;
+          const albumResponse = await fetch(albumUrl, { headers: PLEX_HEADERS });
+          if (albumResponse.ok) {
+            const albumData = await albumResponse.json();
+            const albumTracks = albumData.MediaContainer?.Metadata || [];
+            // Add tracks that aren't already in the list
+            for (const t of albumTracks) {
+              if (!tracks.some((existing: any) => existing.ratingKey === t.ratingKey)) {
+                tracks.push(t);
+              }
             }
-          } catch {
-            // Continue to next album
           }
+        } catch {
+          // Continue to next album
         }
       }
     }

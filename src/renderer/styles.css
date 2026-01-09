@@ -416,6 +416,16 @@ body {
   text-overflow: ellipsis;
 }
 
+.track-plex-match {
+  display: block;
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
+}
+
 .track-score {
   font-size: 11px;
   color: var(--text-secondary);

@@ -30,6 +30,8 @@ export interface MatchedTrack {
   artist: string;
   matched: boolean;
   plexRatingKey?: string;
+  plexTitle?: string;
+  plexArtist?: string;
   score?: number;
 }
 
@@ -651,6 +653,8 @@ export async function matchPlaylistToPlex(
       artist: track.artist,
       matched: match !== null,
       plexRatingKey: match?.ratingKey,
+      plexTitle: match?.plexTitle,
+      plexArtist: match?.plexArtist,
       score: match?.score,
     });
   }
@@ -670,7 +674,7 @@ async function findBestMatch(
   track: ExternalTrack,
   serverUrl: string,
   searchFn: (data: { serverUrl: string; query: string }) => Promise<any[]>
-): Promise<{ ratingKey: string; score: number } | null> {
+): Promise<{ ratingKey: string; score: number; plexTitle: string; plexArtist: string } | null> {
   try {
     // Skip very short titles (but allow acronyms like "T.N.T." which become "tnt")
     const titleWithoutPunctuation = track.title.replace(/[^a-zA-Z0-9]/g, '');
@@ -741,7 +745,7 @@ async function findBestMatch(
     if (!allResults.length) return null;
     
     // Find best match - STRONGLY prefer album artist matches over Various Artists
-    let bestMatch: { ratingKey: string; score: number } | null = null;
+    let bestMatch: { ratingKey: string; score: number; plexTitle: string; plexArtist: string } | null = null;
     
     for (const result of allResults) {
       const plexTitle = result.title || '';
@@ -799,7 +803,8 @@ async function findBestMatch(
       }
       
       if (!bestMatch || score > bestMatch.score) {
-        bestMatch = { ratingKey: result.ratingKey, score };
+        const plexArtistName = albumArtistMatches ? albumArtist : (trackArtist || albumArtist);
+        bestMatch = { ratingKey: result.ratingKey, score, plexTitle, plexArtist: plexArtistName };
       }
     }
     

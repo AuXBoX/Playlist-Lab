@@ -576,7 +576,15 @@ export default function App() {
   const handleManualMatch = (plexTrack: any) => {
     if (!selectedPlaylist || manualSearchTrack === null) return;
     const updatedTracks = [...selectedPlaylist.tracks];
-    updatedTracks[manualSearchTrack.index] = { ...updatedTracks[manualSearchTrack.index], matched: true, plexRatingKey: plexTrack.ratingKey, score: 100 };
+    const plexArtist = plexTrack.grandparentTitle || plexTrack.originalTitle || '';
+    updatedTracks[manualSearchTrack.index] = { 
+      ...updatedTracks[manualSearchTrack.index], 
+      matched: true, 
+      plexRatingKey: plexTrack.ratingKey, 
+      plexTitle: plexTrack.title,
+      plexArtist: plexArtist,
+      score: 100 
+    };
     const updatedPlaylist = { ...selectedPlaylist, tracks: updatedTracks, matchedCount: updatedTracks.filter(t => t.matched).length };
     setPlaylists(prev => prev.map(p => p.id === selectedPlaylist.id ? updatedPlaylist : p));
     setSelectedPlaylist(updatedPlaylist);
@@ -1132,11 +1140,14 @@ export default function App() {
             {tracksToShow.map((track, i) => {
               const actualIndex = selectedPlaylist.tracks.findIndex(t => t.title === track.title && t.artist === track.artist);
               return (
-                <div key={i} className={`track-item ${track.matched ? 'matched' : 'unmatched'} ${!track.matched ? 'clickable' : ''}`} onClick={() => !track.matched && openManualSearch(actualIndex, track.title, track.artist)} title={!track.matched ? 'Click to manually search' : ''}>
+                <div key={i} className={`track-item ${track.matched ? 'matched' : 'unmatched'} clickable`} onClick={() => openManualSearch(actualIndex, track.title, track.artist)} title="Click to search/change match">
                   <span className="track-status">{track.matched ? '✓' : '✗'}</span>
                   <div className="track-info">
                     <span className="track-title">{track.title}</span>
                     <span className="track-artist">{track.artist}</span>
+                    {track.matched && track.plexTitle && (
+                      <span className="track-plex-match">→ {track.plexTitle} • {track.plexArtist}</span>
+                    )}
                   </div>
                   {track.matched ? track.score && <span className="track-score">{Math.round(track.score)}%</span> : <span className="track-search-hint">🔍</span>}
                 </div>
