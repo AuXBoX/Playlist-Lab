@@ -71,6 +71,7 @@ declare global {
       getDeezerTopPlaylists: () => Promise<any[]>;
       scrapeAppleMusicPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
       scrapeTidalPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
+      scrapeYouTubeMusicPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
       getMonthlyTracks: (data: { serverUrl: string; libraryId: string }) => Promise<any[]>;
       getMixesSchedule: () => Promise<{ enabled: boolean; frequency: 'daily' | 'weekly' | 'monthly'; lastRun?: number }>;
       saveMixesSchedule: (schedule: { enabled: boolean; frequency: 'daily' | 'weekly' | 'monthly'; lastRun?: number }) => Promise<boolean>;

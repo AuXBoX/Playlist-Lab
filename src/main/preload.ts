@@ -79,7 +79,10 @@ contextBridge.exposeInMainWorld('api', {
   // Tidal integration
   scrapeTidalPlaylist: (data: { url: string }) => ipcRenderer.invoke('scrape-tidal-playlist', data),
   getTidalTopPlaylists: () => ipcRenderer.invoke('get-tidal-top-playlists'),
-  
+
+  // YouTube Music integration
+  scrapeYouTubeMusicPlaylist: (data: { url: string }) => ipcRenderer.invoke('scrape-youtube-music-playlist', data),
+
   // Playlist sharing
   getHomeUsers: () => ipcRenderer.invoke('get-home-users'),
   getSharedServers: () => ipcRenderer.invoke('get-shared-servers'),

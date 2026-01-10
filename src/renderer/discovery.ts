@@ -746,7 +746,8 @@ async function findBestMatch(
     
     // Find best match - STRONGLY prefer album artist matches over Various Artists
     let bestMatch: { ratingKey: string; score: number; plexTitle: string; plexArtist: string } | null = null;
-    
+    let bestInternalScore = -Infinity;
+
     for (const result of allResults) {
       const plexTitle = result.title || '';
       const albumArtist = result.grandparentTitle || '';
@@ -802,12 +803,15 @@ async function findBestMatch(
         score -= 40; // Big penalty for Mono versions
       }
       
-      if (!bestMatch || score > bestMatch.score) {
+      if (score > bestInternalScore) {
+        bestInternalScore = score;
         const plexArtistName = albumArtistMatches ? albumArtist : (trackArtist || albumArtist);
-        bestMatch = { ratingKey: result.ratingKey, score, plexTitle, plexArtist: plexArtistName };
+        // Cap display score at 100 (internal score can be higher for ranking)
+        const displayScore = Math.min(score, 100);
+        bestMatch = { ratingKey: result.ratingKey, score: displayScore, plexTitle, plexArtist: plexArtistName };
       }
     }
-    
+
     return bestMatch;
   } catch {
     return null;
