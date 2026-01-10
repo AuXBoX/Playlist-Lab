@@ -58,7 +58,7 @@ export default function SharingPage({ serverUrl, onBack }: SharingPageProps) {
   const [isSharing, setIsSharing] = useState(false);
 
   useEffect(() => {
-    loadUsers();
+    void loadUsers();
   }, []);
 
   const loadUsers = async () => {
@@ -220,7 +220,7 @@ export default function SharingPage({ serverUrl, onBack }: SharingPageProps) {
     // Refresh user playlists
     for (let i = 0; i < usersWithPlaylists.length; i++) {
       if (selectedTargetUsers.has(String(usersWithPlaylists[i].user.id))) {
-        loadUserPlaylists(i);
+        await loadUserPlaylists(i);
       }
     }
     
@@ -242,7 +242,7 @@ export default function SharingPage({ serverUrl, onBack }: SharingPageProps) {
       });
       
       // Refresh that user's playlists
-      loadUserPlaylists(userIndex);
+      void loadUserPlaylists(userIndex);
       setStatusMessage(`Deleted "${playlist.title}"`);
       setTimeout(() => setStatusMessage(''), 3000);
     } catch (error: any) {

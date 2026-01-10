@@ -59,6 +59,16 @@ Run `scripts/build.bat` and select:
 3. **Both** - Build both versions
 4. **Dev mode** - Run without building
 
+### Build for MacOS
+
+Disable signing if process is not in place:
+
+```
+export CSC_IDENTITY_AUTO_DISCOVERY=false
+```
+
+Then run `npm run build:mac` to generate the packages in `scripts/release`.
+
 ### GitHub Management
 Run `scripts/github-manager.bat` for:
 - Commit and push changes
