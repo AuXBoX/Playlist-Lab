@@ -4,3 +4,4 @@ scripts/
 *.log
 .kiro/
 .vscode/
+.idea/
