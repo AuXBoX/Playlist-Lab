@@ -1583,6 +1583,252 @@ ipcMain.handle('get-tidal-top-playlists', async () => {
   }));
 });
 
+// ==================== YOUTUBE MUSIC ====================
+
+// Extract playlist ID from YouTube Music URL
+function extractYouTubeMusicPlaylistId(url: string): string | null {
+  // Handles:
+  // https://music.youtube.com/playlist?list=PLAYLIST_ID
+  // https://www.youtube.com/playlist?list=PLAYLIST_ID
+  const match = url.match(/[?&]list=([^&]+)/);
+  return match ? match[1] : null;
+}
+
+// Scrape YouTube Music playlist
+ipcMain.handle('scrape-youtube-music-playlist', async (_, { url }) => {
+  console.log('[YouTubeMusic] Fetching playlist:', url);
+
+  const playlistId = extractYouTubeMusicPlaylistId(url);
+  if (!playlistId) {
+    console.log('[YouTubeMusic] Could not extract playlist ID from URL');
+    return { name: 'YouTube Music Playlist', tracks: [], trackCount: 0 };
+  }
+
+  console.log('[YouTubeMusic] Playlist ID:', playlistId);
+
+  // Use BrowserWindow to scrape since YT Music has no public API
+  return new Promise((resolve) => {
+    const scrapeWindow = new BrowserWindow({
+      width: 1200,
+      height: 900,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+
+    scrapeWindow.webContents.setAudioMuted(true);
+
+    // Set a realistic user agent
+    scrapeWindow.webContents.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    );
+
+    let resolved = false;
+    let attempts = 0;
+    const maxAttempts = 8;
+
+    const timeout = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      console.log('[YouTubeMusic] Scrape timeout');
+      scrapeWindow.close();
+      resolve({ name: 'YouTube Music Playlist', tracks: [], trackCount: 0 });
+    }, 60000);
+
+    const tryExtract = async () => {
+      if (resolved) return;
+      attempts++;
+      console.log('[YouTubeMusic] Extraction attempt', attempts);
+
+      try {
+        const result = await scrapeWindow.webContents.executeJavaScript(`
+          (function() {
+            const tracks = [];
+            let playlistName = 'YouTube Music Playlist';
+            const debug = [];
+
+            // Try to get playlist name from various selectors
+            const titleSelectors = [
+              'ytmusic-detail-header-renderer yt-formatted-string.title',
+              'ytmusic-responsive-header-renderer yt-formatted-string.title',
+              '.metadata yt-formatted-string.title',
+              'h2 yt-formatted-string',
+              '[class*="title"]'
+            ];
+
+            for (const sel of titleSelectors) {
+              const el = document.querySelector(sel);
+              if (el && el.textContent.trim()) {
+                playlistName = el.textContent.trim();
+                debug.push('Found title with: ' + sel);
+                break;
+              }
+            }
+
+            // Log what elements exist on the page for debugging
+            debug.push('ytmusic-responsive-list-item-renderer count: ' + document.querySelectorAll('ytmusic-responsive-list-item-renderer').length);
+            debug.push('ytmusic-playlist-panel-video-renderer count: ' + document.querySelectorAll('ytmusic-playlist-panel-video-renderer').length);
+            debug.push('ytmusic-two-row-item-renderer count: ' + document.querySelectorAll('ytmusic-two-row-item-renderer').length);
+            debug.push('[data-song-title] count: ' + document.querySelectorAll('[data-song-title]').length);
+
+            // Method 1: ytmusic-responsive-list-item-renderer (most common for playlists)
+            let trackRows = document.querySelectorAll('ytmusic-responsive-list-item-renderer');
+            debug.push('Method 1 rows: ' + trackRows.length);
+
+            trackRows.forEach((row, index) => {
+              try {
+                // Title is in .title or yt-formatted-string with specific attributes
+                let title = '';
+                let artist = '';
+
+                // Try multiple title selectors
+                const titleSelectors = [
+                  '.title yt-formatted-string',
+                  'yt-formatted-string.title',
+                  '.title-column yt-formatted-string',
+                  '.flex-columns yt-formatted-string:first-child'
+                ];
+
+                for (const sel of titleSelectors) {
+                  const el = row.querySelector(sel);
+                  if (el && el.textContent.trim()) {
+                    title = el.textContent.trim();
+                    break;
+                  }
+                }
+
+                // Try multiple artist selectors
+                const artistSelectors = [
+                  '.secondary-flex-columns yt-formatted-string a',
+                  '.subtitle yt-formatted-string a',
+                  '.flex-columns .secondary yt-formatted-string a',
+                  'yt-formatted-string.subtitle a'
+                ];
+
+                for (const sel of artistSelectors) {
+                  const el = row.querySelector(sel);
+                  if (el && el.textContent.trim()) {
+                    artist = el.textContent.trim();
+                    break;
+                  }
+                }
+
+                // Fallback: get artist from subtitle text
+                if (!artist) {
+                  const subtitleEl = row.querySelector('.secondary-flex-columns yt-formatted-string, .subtitle yt-formatted-string, yt-formatted-string.subtitle');
+                  if (subtitleEl) {
+                    const text = subtitleEl.textContent.trim();
+                    // Usually "Artist • Album • Duration" or "Artist"
+                    artist = text.split('•')[0].trim();
+                  }
+                }
+
+                if (title && artist) {
+                  tracks.push({ title, artist });
+                }
+              } catch (e) {
+                debug.push('Error in method 1: ' + e.message);
+              }
+            });
+
+            // Method 2: ytmusic-playlist-panel-video-renderer (for playlist panel/queue)
+            if (tracks.length === 0) {
+              trackRows = document.querySelectorAll('ytmusic-playlist-panel-video-renderer');
+              debug.push('Method 2 rows: ' + trackRows.length);
+
+              trackRows.forEach((row) => {
+                try {
+                  const titleEl = row.querySelector('.title yt-formatted-string, yt-formatted-string.title');
+                  const artistEl = row.querySelector('.byline yt-formatted-string a, .subtitle yt-formatted-string a');
+
+                  const title = titleEl ? titleEl.textContent.trim() : '';
+                  let artist = artistEl ? artistEl.textContent.trim() : '';
+
+                  if (!artist) {
+                    const bylineEl = row.querySelector('.byline yt-formatted-string, .subtitle yt-formatted-string');
+                    if (bylineEl) {
+                      artist = bylineEl.textContent.split('•')[0].trim();
+                    }
+                  }
+
+                  if (title && artist) {
+                    tracks.push({ title, artist });
+                  }
+                } catch (e) {
+                  debug.push('Error in method 2: ' + e.message);
+                }
+              });
+            }
+
+            // Method 3: Look for any song containers with title/artist structure
+            if (tracks.length === 0) {
+              const songContainers = document.querySelectorAll('[class*="song"], [class*="track"], [class*="video-renderer"]');
+              debug.push('Method 3 containers: ' + songContainers.length);
+            }
+
+            console.log('[YTMusic Debug]', debug.join(' | '));
+            return { playlistName, tracks, debug };
+          })()
+        `);
+
+        console.log('[YouTubeMusic] Found', result.tracks.length, 'tracks, name:', result.playlistName);
+        if (result.debug) {
+          console.log('[YouTubeMusic] Debug:', result.debug.join(' | '));
+        }
+
+        if (result.tracks.length > 0) {
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          resolve({
+            name: result.playlistName,
+            tracks: result.tracks,
+            trackCount: result.tracks.length,
+          });
+          return;
+        }
+
+        if (attempts < maxAttempts && !resolved) {
+          // Wait and try again - YouTube Music loads content dynamically
+          setTimeout(tryExtract, 3000);
+        } else if (!resolved) {
+          resolved = true;
+          console.log('[YouTubeMusic] Max attempts reached, no tracks found');
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          resolve({ name: result.playlistName || 'YouTube Music Playlist', tracks: [], trackCount: 0 });
+        }
+      } catch (error: any) {
+        console.error('[YouTubeMusic] Extraction error:', error.message);
+        if (attempts < maxAttempts && !resolved) {
+          setTimeout(tryExtract, 3000);
+        } else if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          resolve({ name: 'YouTube Music Playlist', tracks: [], trackCount: 0 });
+        }
+      }
+    };
+
+    scrapeWindow.webContents.on('did-finish-load', async () => {
+      // Wait for dynamic content to load
+      await new Promise(r => setTimeout(r, 5000));
+      tryExtract();
+    });
+
+    // Use YouTube Music URL format
+    const ytMusicUrl = url.includes('music.youtube.com')
+      ? url
+      : `https://music.youtube.com/playlist?list=${playlistId}`;
+
+    scrapeWindow.loadURL(ytMusicUrl);
+  });
+});
+
 // ==================== PLAYLIST SHARING ====================
 
 // Helper to parse XML response for SharedServer entries

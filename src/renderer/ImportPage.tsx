@@ -37,22 +37,22 @@ interface ExternalTrack {
 interface ImportProgress {
   playlistName: string;
   playlistImage?: string;
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal';
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube';
   current: number;
   total: number;
   currentTrack: string;
   matchedCount: number;
 }
 
-type Tab = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'plex';
+type Tab = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'plex';
 
 interface PreImportPlaylist {
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal';
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube';
   id: string;
   name: string;
   image?: string;
   trackCount: number;
-  url?: string; // For Apple Music and Tidal
+  url?: string; // For Apple Music, Tidal, and YouTube Music
 }
 
 export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: ImportPageProps) {
@@ -78,6 +78,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
   const [deezerTopPlaylists, setDeezerTopPlaylists] = useState<DeezerPlaylist[]>([]);
   const [appleMusicUrl, setAppleMusicUrl] = useState('');
   const [tidalUrl, setTidalUrl] = useState('');
+  const [youtubeMusicUrl, setYoutubeMusicUrl] = useState('');
   
   // Curated popular playlists for Apple Music and Tidal
   const appleMusicPopular = [
@@ -105,7 +106,18 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
     { name: 'Acoustic Vibes', url: 'https://tidal.com/browse/playlist/9b8c9d0e-3d3d-9d3d-3d3d-3d3d3d3d3d3d' },
     { name: 'Party Mix', url: 'https://tidal.com/browse/playlist/0c9d0e1f-4e4e-0e4e-4e4e-4e4e4e4e4e4e' },
   ];
-  
+
+  const youtubeMusicPopular = [
+    { name: 'Today\'s Biggest Hits', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs' },
+    { name: 'Pop Hotlist', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_n9Fbdw7e6ap-98fLY_GmTZIEwS6GUG6u0' },
+    { name: 'Hip Hop Hotlist', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_lBNUteBRencHzKelu5iDHwLF6mYqjL-JU' },
+    { name: 'Rock Hotlist', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_kLWIr9gv1XLlPbaDS965-Db4TrYPGG3UQ' },
+    { name: 'Chill Hits', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_nfL1OPGMRRnjYEj3bABBsJv0AQWdUTVHc' },
+    { name: 'Workout Beats', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_kuu0ScnbOVO_rNWeNphmQk5lQD8kaQBeM' },
+    { name: 'Feel Good Pop', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_mvP9DeZFxGXQ9sQxKL2VNh-4UfL2K0dW8' },
+    { name: 'Dance Pop', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_kgKtlFkD9D0q_q0t9t3q3p3n3m3l3k3j3i' },
+  ];
+
   // Import state
   const [importingPlaylist, setImportingPlaylist] = useState<string | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
@@ -123,7 +135,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
 
   // Schedule modal state
   const [schedulePlaylist, setSchedulePlaylist] = useState<{
-    source: 'deezer' | 'apple' | 'tidal' | 'spotify';
+    source: 'deezer' | 'apple' | 'tidal' | 'spotify' | 'youtube';
     id: string;
     name: string;
     url?: string;
@@ -309,7 +321,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
   };
 
   const openPreview = async (
-    source: 'spotify' | 'deezer' | 'apple' | 'tidal',
+    source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube',
     id: string,
     name: string,
     trackCount: number,
@@ -319,7 +331,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
     setPreviewPlaylist({ source, id, name, image, trackCount, url });
     setIsLoadingPreview(true);
     setPreviewTracks([]);
-    
+
     try {
       let tracks: ExternalTrack[];
       if (source === 'spotify') {
@@ -331,6 +343,9 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
         tracks = result.tracks;
       } else if (source === 'tidal' && url) {
         const result = await window.api.scrapeTidalPlaylist({ url });
+        tracks = result.tracks;
+      } else if (source === 'youtube' && url) {
+        const result = await window.api.scrapeYouTubeMusicPlaylist({ url });
         tracks = result.tracks;
       } else {
         tracks = [];
@@ -345,13 +360,13 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
 
   const importFromPreview = () => {
     if (!previewPlaylist) return;
-    
-    // For Apple Music and Tidal, import directly since we already have the tracks
-    if ((previewPlaylist.source === 'apple' || previewPlaylist.source === 'tidal') && previewTracks.length > 0) {
+
+    // For Apple Music, Tidal, and YouTube Music, import directly since we already have the tracks
+    if ((previewPlaylist.source === 'apple' || previewPlaylist.source === 'tidal' || previewPlaylist.source === 'youtube') && previewTracks.length > 0) {
       importFromPreviewDirect();
       return;
     }
-    
+
     setPreImportPlaylist(previewPlaylist);
     setEditedPlaylistName(previewPlaylist.name);
     setPreviewPlaylist(null);
@@ -360,9 +375,9 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
 
   const importFromPreviewDirect = async () => {
     if (!previewPlaylist || previewTracks.length === 0) return;
-    
+
     const playlistName = previewPlaylist.name;
-    const sourceName = previewPlaylist.source === 'apple' ? 'Apple Music' : 'Tidal';
+    const sourceName = previewPlaylist.source === 'apple' ? 'Apple Music' : previewPlaylist.source === 'youtube' ? 'YouTube Music' : 'Tidal';
     const sourceType = previewPlaylist.source;
     const tracks = [...previewTracks];
     
@@ -412,7 +427,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
   };
 
   // Direct import from URL without preview
-  const importDirectFromUrl = async (source: 'apple' | 'tidal', url: string, name: string) => {
+  const importDirectFromUrl = async (source: 'apple' | 'tidal' | 'youtube', url: string, name: string) => {
     setImportingPlaylist(url);
     setImportProgress({
       playlistName: name,
@@ -422,13 +437,17 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
       currentTrack: 'Fetching playlist...',
       matchedCount: 0,
     });
-    
+
     try {
       let tracks: { title: string; artist: string }[];
       let playlistName = name;
-      
+
       if (source === 'apple') {
         const result = await window.api.scrapeAppleMusicPlaylist({ url });
+        tracks = result.tracks;
+        playlistName = result.name || name;
+      } else if (source === 'youtube') {
+        const result = await window.api.scrapeYouTubeMusicPlaylist({ url });
         tracks = result.tracks;
         playlistName = result.name || name;
       } else {
@@ -436,27 +455,27 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
         tracks = result.tracks;
         playlistName = result.name || name;
       }
-      
+
       if (tracks.length === 0) {
         setStatusMessage('No tracks found. The playlist may be private.');
         setImportProgress(null);
         setImportingPlaylist(null);
         return;
       }
-      
+
       setImportProgress(prev => prev ? { ...prev, total: tracks.length, currentTrack: '' } : null);
-      
+
       const discoveryPlaylist = {
         id: `${source}-${Date.now()}`,
         name: playlistName,
-        description: `Imported from ${source === 'apple' ? 'Apple Music' : 'Tidal'}`,
+        description: `Imported from ${source === 'apple' ? 'Apple Music' : source === 'youtube' ? 'YouTube Music' : 'Tidal'}`,
         source: 'deezer' as const,
         tracks: tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
       };
-      
+
       const matched = await matchPlaylistToPlex(
-        discoveryPlaylist, 
-        serverUrl, 
+        discoveryPlaylist,
+        serverUrl,
         window.api.searchTrack,
         (current, total, trackName) => {
           setImportProgress(prev => prev ? {
@@ -467,7 +486,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
           } : null);
         }
       );
-      
+
       setImportProgress(null);
       setImportingPlaylist(null);
       onPlaylistSelect(matched);
@@ -960,6 +979,83 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
     </div>
   );
 
+  const renderYouTubeMusicTab = () => (
+    <div className="import-tab-content">
+      <div className="url-import-section">
+        <h3>Import from YouTube Music</h3>
+        <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>
+          Paste a YouTube Music playlist share link to preview and import
+        </p>
+        <div className="search-bar-row">
+          <input
+            type="text"
+            value={youtubeMusicUrl}
+            onChange={e => setYoutubeMusicUrl(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && youtubeMusicUrl.trim() && openPreview('youtube', youtubeMusicUrl, 'YouTube Music Playlist', 0, undefined, youtubeMusicUrl)}
+            placeholder="https://music.youtube.com/playlist?list=..."
+          />
+          <button
+            className="btn btn-secondary"
+            onClick={() => openPreview('youtube', youtubeMusicUrl, 'YouTube Music Playlist', 0, undefined, youtubeMusicUrl)}
+            disabled={!youtubeMusicUrl.trim()}
+          >
+            Preview
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => importDirectFromUrl('youtube', youtubeMusicUrl, 'YouTube Music Playlist')}
+            disabled={!youtubeMusicUrl.trim() || importingPlaylist === youtubeMusicUrl}
+          >
+            {importingPlaylist === youtubeMusicUrl ? '...' : 'Import'}
+          </button>
+        </div>
+      </div>
+
+      <h3 style={{ margin: '24px 0 12px' }}>Popular Playlists</h3>
+      <div className="playlist-grid">
+        {youtubeMusicPopular.map((playlist, i) => (
+          <div
+            key={i}
+            className="import-playlist-card clickable"
+            onClick={() => openPreview('youtube', playlist.url, playlist.name, 0, undefined, playlist.url)}
+          >
+            <div className="playlist-info">
+              <span className="playlist-name">{playlist.name}</span>
+              <span className="playlist-meta">YouTube Music</span>
+            </div>
+            <div className="button-group">
+              <button
+                className="btn btn-small btn-secondary"
+                onClick={(e) => { e.stopPropagation(); openPreview('youtube', playlist.url, playlist.name, 0, undefined, playlist.url); }}
+              >
+                Preview
+              </button>
+              <button
+                className="btn btn-small btn-primary"
+                onClick={(e) => { e.stopPropagation(); importDirectFromUrl('youtube', playlist.url, playlist.name); }}
+                disabled={importingPlaylist === playlist.url}
+              >
+                {importingPlaylist === playlist.url ? '...' : 'Import'}
+              </button>
+              <button
+                className={`btn btn-small ${isPlaylistScheduled('youtube', playlist.url) ? 'btn-scheduled' : 'btn-secondary'}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  isPlaylistScheduled('youtube', playlist.url)
+                    ? removeSchedule('youtube', playlist.url)
+                    : openScheduleModal('youtube', playlist.url, playlist.name, playlist.url);
+                }}
+                title={isPlaylistScheduled('youtube', playlist.url) ? 'Remove schedule' : 'Schedule auto-refresh'}
+              >
+                {isPlaylistScheduled('youtube', playlist.url) ? 'Scheduled' : 'Schedule'}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
   const renderPlexTab = () => (
     <div className="import-tab-content">
       <div className="plex-playlists-header">
@@ -1009,6 +1105,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
       deezer: 'Deezer',
       apple: 'Apple Music',
       tidal: 'Tidal',
+      youtube: 'YouTube Music',
     };
     
     return (
@@ -1071,9 +1168,10 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
           )}
           <h2>Importing {importProgress.playlistName}</h2>
           <p className="progress-source">from {
-            importProgress.source === 'spotify' ? 'Spotify' : 
-            importProgress.source === 'apple' ? 'Apple Music' : 
-            importProgress.source === 'tidal' ? 'Tidal' : 'Deezer'
+            importProgress.source === 'spotify' ? 'Spotify' :
+            importProgress.source === 'apple' ? 'Apple Music' :
+            importProgress.source === 'tidal' ? 'Tidal' :
+            importProgress.source === 'youtube' ? 'YouTube Music' : 'Deezer'
           }</p>
           
           <div className="progress-bar-container">
@@ -1109,29 +1207,36 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
         >
           Apple Music
         </button>
-        <button 
+        <button
           className={`tab-btn ${activeTab === 'tidal' ? 'active' : ''}`}
           onClick={() => setActiveTab('tidal')}
         >
           Tidal
         </button>
-        <button 
+        <button
+          className={`tab-btn ${activeTab === 'youtube' ? 'active' : ''}`}
+          onClick={() => setActiveTab('youtube')}
+        >
+          YouTube Music
+        </button>
+        <button
           className={`tab-btn ${activeTab === 'spotify' ? 'active' : ''}`}
           onClick={() => setActiveTab('spotify')}
         >
           Spotify
         </button>
-        <button 
+        <button
           className={`tab-btn ${activeTab === 'plex' ? 'active' : ''}`}
           onClick={() => setActiveTab('plex')}
         >
           Plex
         </button>
       </div>
-      
+
       {activeTab === 'deezer' && renderDeezerTab()}
       {activeTab === 'apple' && renderAppleMusicTab()}
       {activeTab === 'tidal' && renderTidalTab()}
+      {activeTab === 'youtube' && renderYouTubeMusicTab()}
       {activeTab === 'spotify' && renderSpotifyTab()}
       {activeTab === 'plex' && renderPlexTab()}
       
@@ -1177,7 +1282,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect }: Impo
           <div className="modal schedule-modal" onClick={e => e.stopPropagation()}>
             <h3>Schedule Playlist</h3>
             <p style={{ color: '#a0a0a0', marginBottom: '16px' }}>
-              Auto-refresh "{schedulePlaylist.name}" from {schedulePlaylist.source === 'apple' ? 'Apple Music' : schedulePlaylist.source.charAt(0).toUpperCase() + schedulePlaylist.source.slice(1)}
+              Auto-refresh "{schedulePlaylist.name}" from {schedulePlaylist.source === 'apple' ? 'Apple Music' : schedulePlaylist.source === 'youtube' ? 'YouTube Music' : schedulePlaylist.source.charAt(0).toUpperCase() + schedulePlaylist.source.slice(1)}
             </p>
             
             <div className="input-group">
