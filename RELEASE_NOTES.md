@@ -1,5 +1,20 @@
 # Release Notes
 
+## v1.0.3
+
+### Improvements
+- **Larger Window Size** - Default window increased to 1200x850 for better usability
+- **Fixed Sidebar Layout** - Sidebar now stays fixed while main content scrolls
+- **Popular Playlists for All Sources** - YouTube Music, Amazon Music, and Qobuz now show curated popular playlists
+- **GitHub Manager** - Added option to delete/squash commits
+
+### Bug Fixes
+- Fixed sidebar scrolling issues where Matching Settings was cut off
+- Fixed build configuration for Linux DEB packages (added author email)
+- Fixed artifact paths in GitHub Actions workflow
+
+---
+
 ## v1.0.2
 
 ### New Features

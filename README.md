@@ -19,6 +19,7 @@ Discover trending music and create playlists from charts:
 - **ARIA Charts** (Australia) - Official Australian music charts including Top Singles, Hip-Hop/R&B, Dance, and decade charts
 - **Deezer Charts** - Global and country-specific top tracks
 - **Last.fm Charts** - Most scrobbled tracks by region
+- **Popular Playlists** - Curated playlists from all supported services (Deezer, Apple Music, Tidal, YouTube Music, Amazon Music, Qobuz)
 - **Decade Playlists** - 80s, 90s, 2000s, 2010s hits
 - **Genre Playlists** - Pop, Rock, Hip-Hop, R&B, Country, Dance
 
@@ -40,6 +41,9 @@ Create personalized playlists based on your Plex listening history:
 - **Configurable Match Threshold** - Set minimum score for automatic matching (0-100%)
 - **Strict Mode** - Require exact artist matches
 - **Album Matching** - Include album name in matching criteria
+- **Penalty Keywords** - Reduce scores for unwanted versions (live, karaoke, cover, etc.)
+- **Priority Keywords** - Boost scores for preferred versions (remastered, original, stereo, etc.)
+- **Editable Patterns** - Customize matching patterns for featured artists, versions, and various artists
 
 ## Installation
 
