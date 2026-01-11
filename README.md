@@ -76,18 +76,6 @@ npm install
 ```bash
 npm run electron:dev
 ```
-
-### Build
-Run `scripts/build.bat` and select:
-1. **Platform** - Windows, macOS, Linux, or All
-2. **Build Type** - Portable/App, Installer, or Both
-
-### GitHub Management
-Run `scripts/github-manager.bat` for:
-- Commit and push changes
-- Create releases with multi-platform builds
-- Manage tags and releases
-
 ## How It Works
 
 1. Sign in with your Plex account
