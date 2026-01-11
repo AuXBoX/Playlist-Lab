@@ -138,6 +138,40 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
     { name: 'Acoustic Vibes', url: 'https://tidal.com/browse/playlist/9b8c9d0e-3d3d-9d3d-3d3d-3d3d3d3d3d3d' },
     { name: 'Party Mix', url: 'https://tidal.com/browse/playlist/0c9d0e1f-4e4e-0e4e-4e4e-4e4e4e4e4e4e' },
   ];
+
+  // Curated popular playlists for YouTube Music
+  const youtubePopular = [
+    { name: 'Today\'s Biggest Hits', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs' },
+    { name: 'Pop Hotlist', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_n9Fbdw7e6ap-98fLY_GkKPDNOwfEGnCPg' },
+    { name: 'Hip-Hop Hotlist', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_lBNUteBRencHzKelu5iDHwLF6mYqjL-JU' },
+    { name: 'Rock Hotlist', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_mfut9V_o1n9nVG_m5yZ3ztCif29AHUffI' },
+    { name: 'Chill Hits', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_n8mHAKaloLc5ub3lKfrKPSM-YLsaJbKgE' },
+    { name: 'Workout Beats', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_kLWIr9gv1XLlPbaDS965-Db4TrYPya0bU' },
+    { name: 'Feel Good', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_lXWhlJsAulOMsGj5_yyMXoYr3ZPJ0GKbM' },
+    { name: 'Dance Pop', url: 'https://music.youtube.com/playlist?list=RDCLAK5uy_kuo04hnIGNq5dG08-bxBvMmWgh-f5nKYY' },
+  ];
+
+  // Curated popular playlists for Amazon Music
+  const amazonPopular = [
+    { name: 'Top 50 Global', url: 'https://music.amazon.com/playlists/B07GWJLQKP' },
+    { name: 'Pop Culture', url: 'https://music.amazon.com/playlists/B01M1KW1JQ' },
+    { name: 'Hip-Hop Central', url: 'https://music.amazon.com/playlists/B01LZ7BQHK' },
+    { name: 'Rock Classics', url: 'https://music.amazon.com/playlists/B07D8QXKPN' },
+    { name: 'Chill Out', url: 'https://music.amazon.com/playlists/B07GWTQXKP' },
+    { name: 'Workout', url: 'https://music.amazon.com/playlists/B07D8QXKPM' },
+    { name: 'Country Heat', url: 'https://music.amazon.com/playlists/B01M1KW1JR' },
+    { name: 'R&B Rotation', url: 'https://music.amazon.com/playlists/B07GWTQXKQ' },
+  ];
+
+  // Curated popular playlists for Qobuz
+  const qobuzPopular = [
+    { name: 'Qobuz Weekly', url: 'https://www.qobuz.com/us-en/playlist/qobuz-weekly' },
+    { name: 'New This Week', url: 'https://www.qobuz.com/us-en/playlist/new-this-week' },
+    { name: 'Hi-Res Essentials', url: 'https://www.qobuz.com/us-en/playlist/hi-res-essentials' },
+    { name: 'Jazz Essentials', url: 'https://www.qobuz.com/us-en/playlist/jazz-essentials' },
+    { name: 'Classical Essentials', url: 'https://www.qobuz.com/us-en/playlist/classical-essentials' },
+    { name: 'Audiophile Picks', url: 'https://www.qobuz.com/us-en/playlist/audiophile-picks' },
+  ];
   
   // Import state
   const [importingPlaylist, setImportingPlaylist] = useState<string | null>(null);
@@ -173,6 +207,13 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
     loadDeezerTopPlaylists();
     loadSchedules();
   }, []);
+
+  // Load popular playlists when switching tabs (if not logged in)
+  useEffect(() => {
+    if (activeTab === 'deezer' && deezerTopPlaylists.length === 0) {
+      loadDeezerTopPlaylists();
+    }
+  }, [activeTab]);
 
   const loadSchedules = async () => {
     const schedules = await window.api.getSchedules();
@@ -1578,6 +1619,43 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
         </div>
       </div>
 
+      {/* Popular Playlists */}
+      <h3 style={{ margin: '24px 0 12px' }}>Popular Playlists</h3>
+      <div className="playlist-grid">
+        {youtubePopular.map((playlist, i) => (
+          <div 
+            key={i} 
+            className="import-playlist-card clickable"
+            onClick={() => openPreview('youtube', playlist.url, playlist.name, 0, undefined, playlist.url)}
+          >
+            <div className="playlist-info">
+              <span className="playlist-name">{playlist.name}</span>
+              <span className="playlist-meta">YouTube Music</span>
+            </div>
+            <div className="button-group">
+              <button 
+                className="btn btn-small btn-primary"
+                onClick={(e) => { e.stopPropagation(); showPreImportModal('youtube', playlist.url, playlist.name, 0, undefined, playlist.url); }}
+                disabled={importingPlaylist === playlist.url}
+              >
+                {importingPlaylist === playlist.url ? '...' : 'Import'}
+              </button>
+              <button 
+                className={`btn btn-small ${isPlaylistScheduled('youtube', playlist.url) ? 'btn-scheduled' : 'btn-secondary'}`}
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  isPlaylistScheduled('youtube', playlist.url) 
+                    ? removeSchedule('youtube', playlist.url)
+                    : openScheduleModal('youtube', playlist.url, playlist.name, playlist.url); 
+                }}
+              >
+                {isPlaylistScheduled('youtube', playlist.url) ? 'Scheduled' : 'Schedule'}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* Optional OAuth Login */}
       <div style={{ marginTop: '24px', borderTop: '1px solid #333', paddingTop: '24px' }}>
         <h3>Your Playlists (Optional)</h3>
@@ -1704,6 +1782,44 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
           </button>
         </div>
       </div>
+
+      {/* Popular Playlists */}
+      <h3 style={{ margin: '24px 0 12px' }}>Popular Playlists</h3>
+      <div className="playlist-grid">
+        {amazonPopular.map((playlist, i) => (
+          <div 
+            key={i} 
+            className="import-playlist-card clickable"
+            onClick={() => openPreview('amazon', playlist.url, playlist.name, 0, undefined, playlist.url)}
+          >
+            <div className="playlist-info">
+              <span className="playlist-name">{playlist.name}</span>
+              <span className="playlist-meta">Amazon Music</span>
+            </div>
+            <div className="button-group">
+              <button 
+                className="btn btn-small btn-primary"
+                onClick={(e) => { e.stopPropagation(); showPreImportModal('amazon', playlist.url, playlist.name, 0, undefined, playlist.url); }}
+                disabled={importingPlaylist === playlist.url}
+              >
+                {importingPlaylist === playlist.url ? '...' : 'Import'}
+              </button>
+              <button 
+                className={`btn btn-small ${isPlaylistScheduled('amazon', playlist.url) ? 'btn-scheduled' : 'btn-secondary'}`}
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  isPlaylistScheduled('amazon', playlist.url) 
+                    ? removeSchedule('amazon', playlist.url)
+                    : openScheduleModal('amazon', playlist.url, playlist.name, playlist.url); 
+                }}
+              >
+                {isPlaylistScheduled('amazon', playlist.url) ? 'Scheduled' : 'Schedule'}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div style={{ marginTop: '24px', padding: '16px', background: '#1a1a1a', borderRadius: '8px' }}>
         <p style={{ color: '#888', fontSize: '13px' }}>
           ⚠️ Amazon Music does not provide a public API. Import works by scraping public playlist pages, 
@@ -1736,6 +1852,44 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
           </button>
         </div>
       </div>
+
+      {/* Popular Playlists */}
+      <h3 style={{ margin: '24px 0 12px' }}>Popular Playlists</h3>
+      <div className="playlist-grid">
+        {qobuzPopular.map((playlist, i) => (
+          <div 
+            key={i} 
+            className="import-playlist-card clickable"
+            onClick={() => openPreview('qobuz', playlist.url, playlist.name, 0, undefined, playlist.url)}
+          >
+            <div className="playlist-info">
+              <span className="playlist-name">{playlist.name}</span>
+              <span className="playlist-meta">Qobuz</span>
+            </div>
+            <div className="button-group">
+              <button 
+                className="btn btn-small btn-primary"
+                onClick={(e) => { e.stopPropagation(); showPreImportModal('qobuz', playlist.url, playlist.name, 0, undefined, playlist.url); }}
+                disabled={importingPlaylist === playlist.url}
+              >
+                {importingPlaylist === playlist.url ? '...' : 'Import'}
+              </button>
+              <button 
+                className={`btn btn-small ${isPlaylistScheduled('qobuz', playlist.url) ? 'btn-scheduled' : 'btn-secondary'}`}
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  isPlaylistScheduled('qobuz', playlist.url) 
+                    ? removeSchedule('qobuz', playlist.url)
+                    : openScheduleModal('qobuz', playlist.url, playlist.name, playlist.url); 
+                }}
+              >
+                {isPlaylistScheduled('qobuz', playlist.url) ? 'Scheduled' : 'Schedule'}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div style={{ marginTop: '24px', padding: '16px', background: '#1a1a1a', borderRadius: '8px' }}>
         <p style={{ color: '#888', fontSize: '13px' }}>
           ⚠️ Qobuz has limited API access. Import works by scraping public playlist pages.
