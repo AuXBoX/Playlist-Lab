@@ -114,10 +114,26 @@ contextBridge.exposeInMainWorld('api', {
   // Qobuz integration (scraping only - limited API)
   scrapeQobuzPlaylist: (data: { url: string }) => ipcRenderer.invoke('scrape-qobuz-playlist', data),
   
+  // Spotify URL scraping (for public playlists without login)
+  scrapeSpotifyPlaylist: (data: { url: string }) => ipcRenderer.invoke('scrape-spotify-playlist', data),
+  
+  // File import (M3U/M3U8)
+  importM3UFile: () => ipcRenderer.invoke('import-m3u-file'),
+  importiTunesXML: () => ipcRenderer.invoke('import-itunes-xml'),
+  
+  // ListenBrainz
+  getListenBrainzPlaylists: (data: { username: string }) => ipcRenderer.invoke('get-listenbrainz-playlists', data),
+  getListenBrainzPlaylistTracks: (data: { playlistId: string }) => ipcRenderer.invoke('get-listenbrainz-playlist-tracks', data),
+  
   // Playlist sharing
   getHomeUsers: () => ipcRenderer.invoke('get-home-users'),
   getSharedServers: () => ipcRenderer.invoke('get-shared-servers'),
   getUserPlaylists: (data: { serverUrl: string; userToken: string }) => ipcRenderer.invoke('get-user-playlists', data),
   copyPlaylistToUser: (data: { serverUrl: string; sourcePlaylistId: string; targetUserToken: string; newTitle: string }) => ipcRenderer.invoke('copy-playlist-to-user', data),
   deleteUserPlaylist: (data: { serverUrl: string; playlistId: string; userToken: string }) => ipcRenderer.invoke('delete-user-playlist', data),
+  
+  // Update checker
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  openReleasePage: (url: string) => ipcRenderer.invoke('open-release-page', url),
 });

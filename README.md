@@ -6,13 +6,16 @@ A desktop app for importing, generating, and managing playlists on your Plex Med
 
 ### Import Playlists
 Import playlists from external music services and match tracks to your Plex library:
+- **Spotify** - Import from URL (no login required) or connect your account for personal playlists
 - **Deezer** - Search public playlists or connect your account for personal playlists
-- **Spotify** - Connect your account and import your playlists (requires API credentials)
 - **Apple Music** - Import from playlist URL
 - **Tidal** - Import from URL or connect your account for personal playlists
 - **YouTube Music** - Import from URL or connect your account for personal playlists
 - **Amazon Music** - Import from public playlist URL
 - **Qobuz** - Import from playlist URL
+- **ListenBrainz** - Import public playlists by username
+- **M3U/M3U8 Files** - Import local playlist files
+- **iTunes XML** - Import playlists from iTunes/Music app library exports
 
 ### Charts & Discovery
 Discover trending music and create playlists from charts:
@@ -32,6 +35,8 @@ Create personalized playlists based on your Plex listening history:
 
 ### Playlist Management
 - **Edit Playlists** - Add/remove tracks, manually match unmatched tracks
+- **Sort & Reorder** - Sort tracks by title, artist, status, or score; drag-and-drop to reorder
+- **Export Missing** - Export unmatched tracks to CSV for reference
 - **Schedule Imports** - Auto-refresh playlists weekly, fortnightly, or monthly
 - **Backup & Restore** - Export playlists to portable JSON format, restore from backup
 - **Sharing** - Share playlists with Plex managed users
@@ -45,6 +50,10 @@ Create personalized playlists based on your Plex listening history:
 - **Priority Keywords** - Boost scores for preferred versions (remastered, original, stereo, etc.)
 - **Editable Patterns** - Customize matching patterns for featured artists, versions, and various artists
 
+### Auto-Update
+- Automatic update notifications when new versions are available
+- One-click download from GitHub releases
+
 ## Installation
 
 ### From Release
@@ -57,6 +66,11 @@ Download the latest release from [GitHub Releases](https://github.com/AuXBoX/Pla
 **macOS:**
 - **DMG** - Disk image installer
 - **ZIP** - Portable app bundle
+
+> ⚠️ **macOS Users:** The app is not code-signed, so macOS may show "Playlist Lab is damaged and can't be opened." To fix this:
+> 1. Open Terminal
+> 2. Run: `xattr -cr /Applications/Playlist\ Lab.app` (adjust path if needed)
+> 3. Or right-click the app → Open → Open (first time only)
 
 **Linux:**
 - **DEB** - Debian/Ubuntu package

@@ -1,5 +1,28 @@
 # Release Notes
 
+## v1.0.4
+
+### New Features
+- **M3U/M3U8 Import** - Import playlists from M3U and M3U8 files with #EXTINF tags or "Artist - Title" filenames
+- **iTunes XML Import** - Import playlists from iTunes/Music app library exports (File → Library → Export Library)
+- **ListenBrainz Import** - Import public playlists from any ListenBrainz user
+- **Export Missing Tracks** - Export unmatched tracks to CSV after matching for easy reference
+- **Track Sorting** - Sort matched tracks by title, artist, status, or match score (click column headers)
+- **Track Reordering** - Drag and drop to reorder tracks before creating playlist
+
+### Improvements
+- **Larger Window** - Default size increased to 1400x950, minimum 900x700
+- **Better Settings Modal** - More padding and wider layout for Matching Settings
+- **Fixed Sidebar Header** - "Playlist Lab" title no longer cut off by title bar
+
+### macOS Installation Note
+The app is not code-signed. If macOS shows "Playlist Lab is damaged and can't be opened":
+1. Open Terminal
+2. Run: `xattr -cr /Applications/Playlist\ Lab.app`
+3. Or: Right-click the app → Open → Open (first launch only)
+
+---
+
 ## v1.0.3
 
 ### Improvements
@@ -12,6 +35,12 @@
 - Fixed sidebar scrolling issues where Matching Settings was cut off
 - Fixed build configuration for Linux DEB packages (added author email)
 - Fixed artifact paths in GitHub Actions workflow
+
+### macOS Installation Note
+The app is not code-signed. If macOS shows "Playlist Lab is damaged and can't be opened":
+1. Open Terminal
+2. Run: `xattr -cr /Applications/Playlist\ Lab.app`
+3. Or: Right-click the app → Open → Open (first launch only)
 
 ---
 

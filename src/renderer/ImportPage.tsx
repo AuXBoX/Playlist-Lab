@@ -55,7 +55,7 @@ interface PreImportPlaylist {
   url?: string;
 }
 
-type Tab = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'plex';
+type Tab = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'plex' | 'file' | 'listenbrainz';
 
 export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, importProgress, setImportProgress }: ImportPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('deezer');
@@ -66,6 +66,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   const [showSpotifySetup, setShowSpotifySetup] = useState(false);
   const [spotifyPlaylists, setSpotifyPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [isLoadingSpotify, setIsLoadingSpotify] = useState(false);
+  const [spotifyUrl, setSpotifyUrl] = useState('');
   
   // Deezer state (with optional login)
   const [deezerAuth, setDeezerAuth] = useState<{ user: any; accessToken: string | null } | null>(null);
@@ -97,6 +98,15 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   
   // Qobuz state (URL only - limited API)
   const [qobuzUrl, setQobuzUrl] = useState('');
+  
+  // File import state (M3U/M3U8)
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
+  const [iTunesPlaylists, setiTunesPlaylists] = useState<{ name: string; trackCount: number; tracks: { title: string; artist: string }[] }[]>([]);
+  
+  // ListenBrainz state
+  const [listenBrainzUsername, setListenBrainzUsername] = useState('');
+  const [listenBrainzPlaylists, setListenBrainzPlaylists] = useState<{ id: string; name: string; trackCount: number }[]>([]);
+  const [isLoadingListenBrainz, setIsLoadingListenBrainz] = useState(false);
   
   // Deezer state
   const [deezerQuery, setDeezerQuery] = useState('');
@@ -714,11 +724,11 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   };
 
   // Direct import from URL without preview
-  const importDirectFromUrl = async (source: 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz', url: string, name: string) => {
+  const importDirectFromUrl = async (source: 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'spotify', url: string, name: string) => {
     setImportingPlaylist(url);
     setImportProgress({
       playlistName: name,
-      source: source === 'youtube' || source === 'amazon' || source === 'qobuz' ? 'spotify' : source,
+      source: source === 'youtube' || source === 'amazon' || source === 'qobuz' || source === 'spotify' ? 'spotify' : source,
       current: 0,
       total: 0,
       currentTrack: 'Fetching playlist...',
@@ -749,6 +759,10 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
         const result = await window.api.scrapeQobuzPlaylist({ url });
         tracks = result.tracks;
         playlistName = result.name || name;
+      } else if (source === 'spotify') {
+        const result = await window.api.scrapeSpotifyPlaylist({ url });
+        tracks = result.tracks;
+        playlistName = result.name || name;
       } else {
         tracks = [];
       }
@@ -768,6 +782,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
         youtube: 'YouTube Music',
         amazon: 'Amazon Music',
         qobuz: 'Qobuz',
+        spotify: 'Spotify',
       };
       
       const discoveryPlaylist = {
@@ -945,6 +960,29 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
 
   const renderSpotifyTab = () => (
     <div className="import-tab-content">
+      {/* URL Import - always visible */}
+      <div className="url-import-section" style={{ marginBottom: '24px', paddingBottom: '24px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+        <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>
+          Import any public Spotify playlist by URL (no login required)
+        </p>
+        <div className="search-bar">
+          <input
+            type="text"
+            value={spotifyUrl}
+            onChange={e => setSpotifyUrl(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && spotifyUrl.trim() && importDirectFromUrl('spotify', spotifyUrl, 'Spotify Playlist')}
+            placeholder="https://open.spotify.com/playlist/..."
+          />
+          <button 
+            className="btn btn-primary"
+            onClick={() => importDirectFromUrl('spotify', spotifyUrl, 'Spotify Playlist')}
+            disabled={!spotifyUrl.trim() || importingPlaylist === spotifyUrl}
+          >
+            {importingPlaylist === spotifyUrl ? 'Importing...' : 'Import'}
+          </button>
+        </div>
+      </div>
+      
       {!spotifyAuth ? (
         <div className="import-login-section">
           {showSpotifySetup ? (
@@ -1940,6 +1978,263 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
     </div>
   );
 
+  const handleFileImport = async () => {
+    setIsLoadingFile(true);
+    try {
+      const result = await window.api.importM3UFile();
+      if (!result || result.tracks.length === 0) {
+        setStatusMessage('No tracks found in file or import cancelled.');
+        setIsLoadingFile(false);
+        return;
+      }
+      
+      const playlistName = result.name || 'Imported Playlist';
+      setImportProgress({
+        playlistName,
+        source: 'spotify',
+        current: 0,
+        total: result.tracks.length,
+        currentTrack: '',
+        matchedCount: 0,
+      });
+      
+      const discoveryPlaylist = {
+        id: `file-${Date.now()}`,
+        name: playlistName,
+        description: 'Imported from M3U file',
+        source: 'deezer' as const,
+        tracks: result.tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
+      };
+      
+      const matched = await matchPlaylistToPlex(
+        discoveryPlaylist,
+        serverUrl,
+        window.api.searchTrack,
+        (current, total, trackName) => {
+          setImportProgress(prev => prev ? { ...prev, current, total, currentTrack: trackName } : null);
+        }
+      );
+      
+      setImportProgress(null);
+      setIsLoadingFile(false);
+      onPlaylistSelect(matched);
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+      setImportProgress(null);
+      setIsLoadingFile(false);
+    }
+  };
+
+  const handleiTunesImport = async () => {
+    setIsLoadingFile(true);
+    setiTunesPlaylists([]);
+    try {
+      const result = await window.api.importiTunesXML();
+      if (!result || result.playlists.length === 0) {
+        setStatusMessage('No playlists found in file or import cancelled.');
+        setIsLoadingFile(false);
+        return;
+      }
+      setiTunesPlaylists(result.playlists);
+      setIsLoadingFile(false);
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+      setIsLoadingFile(false);
+    }
+  };
+
+  const importiTunesPlaylist = async (playlist: { name: string; tracks: { title: string; artist: string }[] }) => {
+    setImportProgress({
+      playlistName: playlist.name,
+      source: 'spotify',
+      current: 0,
+      total: playlist.tracks.length,
+      currentTrack: '',
+      matchedCount: 0,
+    });
+    
+    const discoveryPlaylist = {
+      id: `itunes-${Date.now()}`,
+      name: playlist.name,
+      description: 'Imported from iTunes',
+      source: 'deezer' as const,
+      tracks: playlist.tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
+    };
+    
+    try {
+      const matched = await matchPlaylistToPlex(
+        discoveryPlaylist,
+        serverUrl,
+        window.api.searchTrack,
+        (current, total, trackName) => {
+          setImportProgress(prev => prev ? { ...prev, current, total, currentTrack: trackName } : null);
+        }
+      );
+      setImportProgress(null);
+      setiTunesPlaylists([]);
+      onPlaylistSelect(matched);
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+      setImportProgress(null);
+    }
+  };
+
+  const renderFileTab = () => (
+    <div className="import-tab-content">
+      <div style={{ marginBottom: '32px' }}>
+        <h3 style={{ marginBottom: '12px', color: '#fff' }}>M3U / M3U8 Playlists</h3>
+        <p style={{ color: '#a0a0a0', marginBottom: '16px' }}>
+          Import playlists from M3U or M3U8 files with #EXTINF tags or "Artist - Title" filenames.
+        </p>
+        <button 
+          className="btn btn-primary" 
+          onClick={handleFileImport}
+          disabled={isLoadingFile}
+        >
+          {isLoadingFile ? 'Importing...' : 'Select M3U/M3U8 File'}
+        </button>
+      </div>
+      
+      <div style={{ marginBottom: '32px' }}>
+        <h3 style={{ marginBottom: '12px', color: '#fff' }}>iTunes Library XML</h3>
+        <p style={{ color: '#a0a0a0', marginBottom: '16px' }}>
+          Import playlists from iTunes/Music app XML export. Export via File → Library → Export Library.
+        </p>
+        <button 
+          className="btn btn-primary" 
+          onClick={handleiTunesImport}
+          disabled={isLoadingFile}
+          style={{ marginBottom: '16px' }}
+        >
+          {isLoadingFile ? 'Loading...' : 'Select iTunes XML File'}
+        </button>
+        
+        {iTunesPlaylists.length > 0 && (
+          <div className="playlist-grid" style={{ marginTop: '16px' }}>
+            {iTunesPlaylists.map((playlist, i) => (
+              <div key={i} className="import-playlist-card" onClick={() => importiTunesPlaylist(playlist)}>
+                <div className="playlist-info">
+                  <span className="playlist-name">{playlist.name}</span>
+                  <span className="playlist-meta">{playlist.trackCount} tracks</span>
+                </div>
+                <span className="playlist-badge">iTunes</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const loadListenBrainzPlaylists = async () => {
+    if (!listenBrainzUsername.trim()) {
+      setStatusMessage('Please enter a ListenBrainz username');
+      return;
+    }
+    setIsLoadingListenBrainz(true);
+    setListenBrainzPlaylists([]);
+    try {
+      const playlists = await window.api.getListenBrainzPlaylists({ username: listenBrainzUsername.trim() });
+      setListenBrainzPlaylists(playlists);
+      if (playlists.length === 0) {
+        setStatusMessage('No playlists found for this user');
+      }
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    } finally {
+      setIsLoadingListenBrainz(false);
+    }
+  };
+
+  const importListenBrainzPlaylist = async (playlist: { id: string; name: string; trackCount: number }) => {
+    setImportProgress({
+      playlistName: playlist.name,
+      source: 'spotify',
+      current: 0,
+      total: playlist.trackCount,
+      currentTrack: 'Fetching tracks...',
+      matchedCount: 0,
+    });
+    
+    try {
+      const tracks = await window.api.getListenBrainzPlaylistTracks({ playlistId: playlist.id });
+      
+      if (tracks.length === 0) {
+        setStatusMessage('No tracks found in playlist');
+        setImportProgress(null);
+        return;
+      }
+      
+      setImportProgress(prev => prev ? { ...prev, total: tracks.length, currentTrack: '' } : null);
+      
+      const discoveryPlaylist = {
+        id: `listenbrainz-${playlist.id}`,
+        name: playlist.name,
+        description: 'Imported from ListenBrainz',
+        source: 'deezer' as const,
+        tracks: tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
+      };
+      
+      const matched = await matchPlaylistToPlex(
+        discoveryPlaylist,
+        serverUrl,
+        window.api.searchTrack,
+        (current, total, trackName) => {
+          setImportProgress(prev => prev ? { ...prev, current, total, currentTrack: trackName } : null);
+        }
+      );
+      
+      setImportProgress(null);
+      onPlaylistSelect(matched);
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+      setImportProgress(null);
+    }
+  };
+
+  const renderListenBrainzTab = () => (
+    <div className="import-tab-content">
+      <p style={{ color: '#a0a0a0', marginBottom: '16px' }}>
+        Import playlists from ListenBrainz. Enter a username to load their public playlists.
+      </p>
+      
+      <div className="search-bar" style={{ marginBottom: '24px' }}>
+        <input
+          type="text"
+          value={listenBrainzUsername}
+          onChange={e => setListenBrainzUsername(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && loadListenBrainzPlaylists()}
+          placeholder="Enter ListenBrainz username..."
+        />
+        <button 
+          className="btn btn-primary" 
+          onClick={loadListenBrainzPlaylists}
+          disabled={isLoadingListenBrainz || !listenBrainzUsername.trim()}
+        >
+          {isLoadingListenBrainz ? 'Loading...' : 'Load Playlists'}
+        </button>
+      </div>
+      
+      {listenBrainzPlaylists.length > 0 && (
+        <div className="playlist-grid">
+          {listenBrainzPlaylists.map(playlist => (
+            <div 
+              key={playlist.id} 
+              className="import-playlist-card"
+              onClick={() => importListenBrainzPlaylist(playlist)}
+            >
+              <div className="playlist-info">
+                <span className="playlist-name">{playlist.name}</span>
+                <span className="playlist-meta">{playlist.trackCount} tracks</span>
+              </div>
+              <span className="playlist-badge">ListenBrainz</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   // Preview view when viewing playlist tracks
   if (previewPlaylist) {
     const sourceNames: Record<string, string> = {
@@ -2056,6 +2351,18 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
         >
           Plex
         </button>
+        <button 
+          className={`tab-btn ${activeTab === 'file' ? 'active' : ''}`}
+          onClick={() => setActiveTab('file')}
+        >
+          File
+        </button>
+        <button 
+          className={`tab-btn ${activeTab === 'listenbrainz' ? 'active' : ''}`}
+          onClick={() => setActiveTab('listenbrainz')}
+        >
+          ListenBrainz
+        </button>
       </div>
       
       {activeTab === 'deezer' && renderDeezerTab()}
@@ -2066,6 +2373,8 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
       {activeTab === 'amazon' && renderAmazonMusicTab()}
       {activeTab === 'qobuz' && renderQobuzTab()}
       {activeTab === 'plex' && renderPlexTab()}
+      {activeTab === 'file' && renderFileTab()}
+      {activeTab === 'listenbrainz' && renderListenBrainzTab()}
       
       {/* Pre-import modal */}
       {preImportPlaylist && (

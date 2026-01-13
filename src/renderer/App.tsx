@@ -106,6 +106,14 @@ declare global {
       scrapeAmazonMusicPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
       // Qobuz
       scrapeQobuzPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
+      // Spotify URL scraping
+      scrapeSpotifyPlaylist: (data: { url: string }) => Promise<{ name: string; tracks: { title: string; artist: string }[] }>;
+      // File import
+      importM3UFile: () => Promise<{ name: string; tracks: { title: string; artist: string }[] } | null>;
+      importiTunesXML: () => Promise<{ playlists: { name: string; trackCount: number; tracks: { title: string; artist: string }[] }[] } | null>;
+      // ListenBrainz
+      getListenBrainzPlaylists: (data: { username: string }) => Promise<{ id: string; name: string; trackCount: number }[]>;
+      getListenBrainzPlaylistTracks: (data: { playlistId: string }) => Promise<{ title: string; artist: string }[]>;
       // Other
       getMonthlyTracks: (data: { serverUrl: string; libraryId: string }) => Promise<any[]>;
       getMixesSchedule: () => Promise<{ enabled: boolean; frequency: 'daily' | 'weekly' | 'monthly'; lastRun?: number }>;
@@ -117,6 +125,10 @@ declare global {
       getUserPlaylists: (data: { serverUrl: string; userToken: string }) => Promise<any[]>;
       copyPlaylistToUser: (data: { serverUrl: string; sourcePlaylistId: string; targetUserToken: string; newTitle: string }) => Promise<boolean>;
       deleteUserPlaylist: (data: { serverUrl: string; playlistId: string; userToken: string }) => Promise<boolean>;
+      // Update checker
+      checkForUpdates: () => Promise<{ hasUpdate: boolean; currentVersion?: string; latestVersion?: string; releaseUrl?: string; releaseNotes?: string; error?: string }>;
+      getAppVersion: () => Promise<string>;
+      openReleasePage: (url: string) => Promise<boolean>;
     };
   }
 }
@@ -180,6 +192,9 @@ export default function App() {
   
   const [selectedPlaylist, setSelectedPlaylist] = useState<MatchedPlaylist | null>(null);
   const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false);
+  const [trackSortField, setTrackSortField] = useState<'none' | 'title' | 'artist' | 'status' | 'score'>('none');
+  const [trackSortDir, setTrackSortDir] = useState<'asc' | 'desc'>('asc');
+  const [draggedTrackIndex, setDraggedTrackIndex] = useState<number | null>(null);
   const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
   const [selectedCharts, setSelectedCharts] = useState<Set<string>>(new Set());
   const [schedules, setSchedules] = useState<PlaylistSchedule[]>([]);
@@ -193,6 +208,10 @@ export default function App() {
   const [isManualSearching, setIsManualSearching] = useState(false);
   const [showChartScheduler, setShowChartScheduler] = useState(false);
   const [chartScheduleSelections, setChartScheduleSelections] = useState<Map<string, { frequency: ScheduleFrequency; startDate: string }>>(new Map());
+
+  // Update notification state
+  const [updateInfo, setUpdateInfo] = useState<{ hasUpdate: boolean; latestVersion?: string; releaseUrl?: string; releaseNotes?: string } | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   // Edit playlists state
   const [editPlaylists, setEditPlaylists] = useState<any[]>([]);
@@ -270,6 +289,17 @@ export default function App() {
         }
       }
       setIsLoading(false);
+      
+      // Check for updates
+      try {
+        const update = await window.api.checkForUpdates();
+        if (update.hasUpdate) {
+          setUpdateInfo(update);
+          setShowUpdateModal(true);
+        }
+      } catch (e) {
+        console.log('Update check failed:', e);
+      }
     }
     init();
   }, []);
@@ -1238,9 +1268,67 @@ export default function App() {
   // Modals
   const renderPlaylistDetail = () => {
     if (!selectedPlaylist) return null;
-    const tracksToShow = showUnmatchedOnly ? selectedPlaylist.tracks.filter(t => !t.matched) : selectedPlaylist.tracks;
+    
+    // Apply sorting
+    let tracksToShow = showUnmatchedOnly ? [...selectedPlaylist.tracks.filter(t => !t.matched)] : [...selectedPlaylist.tracks];
+    
+    if (trackSortField !== 'none') {
+      tracksToShow.sort((a, b) => {
+        let cmp = 0;
+        if (trackSortField === 'title') {
+          cmp = a.title.localeCompare(b.title);
+        } else if (trackSortField === 'artist') {
+          cmp = a.artist.localeCompare(b.artist);
+        } else if (trackSortField === 'status') {
+          cmp = (a.matched ? 1 : 0) - (b.matched ? 1 : 0);
+        } else if (trackSortField === 'score') {
+          cmp = (a.score || 0) - (b.score || 0);
+        }
+        return trackSortDir === 'asc' ? cmp : -cmp;
+      });
+    }
+    
     const matchedTracks = selectedPlaylist.tracks.filter(t => t.matched);
     const unmatchedTracks = selectedPlaylist.tracks.filter(t => !t.matched);
+    
+    const handleSort = (field: 'title' | 'artist' | 'status' | 'score') => {
+      if (trackSortField === field) {
+        if (trackSortDir === 'asc') setTrackSortDir('desc');
+        else { setTrackSortField('none'); setTrackSortDir('asc'); }
+      } else {
+        setTrackSortField(field);
+        setTrackSortDir('asc');
+      }
+    };
+    
+    const handleDragStart = (index: number) => {
+      if (trackSortField !== 'none') return; // Disable drag when sorted
+      setDraggedTrackIndex(index);
+    };
+    
+    const handleDragOver = (e: React.DragEvent, index: number) => {
+      e.preventDefault();
+      if (trackSortField !== 'none' || draggedTrackIndex === null || draggedTrackIndex === index) return;
+    };
+    
+    const handleDrop = (targetIndex: number) => {
+      if (trackSortField !== 'none' || draggedTrackIndex === null || draggedTrackIndex === targetIndex) {
+        setDraggedTrackIndex(null);
+        return;
+      }
+      
+      const newTracks = [...selectedPlaylist.tracks];
+      const [draggedTrack] = newTracks.splice(draggedTrackIndex, 1);
+      newTracks.splice(targetIndex, 0, draggedTrack);
+      
+      setSelectedPlaylist({ ...selectedPlaylist, tracks: newTracks });
+      setDraggedTrackIndex(null);
+    };
+    
+    const sortIcon = (field: string) => {
+      if (trackSortField !== field) return '↕';
+      return trackSortDir === 'asc' ? '↑' : '↓';
+    };
     
     return (
       <div className="modal-overlay" onClick={() => setSelectedPlaylist(null)}>
@@ -1257,24 +1345,76 @@ export default function App() {
               <input type="checkbox" checked={showUnmatchedOnly} onChange={e => setShowUnmatchedOnly(e.target.checked)} />
               Show unmatched only
             </label>
-            <button className="btn btn-primary btn-small" onClick={() => { handleCreatePlaylist(selectedPlaylist); setSelectedPlaylist(null); }} disabled={matchedTracks.length === 0 || createdPlaylists.includes(selectedPlaylist.id)}>
-              {createdPlaylists.includes(selectedPlaylist.id) ? '✓ Created' : `Create Playlist (${matchedTracks.length} tracks)`}
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {unmatchedTracks.length > 0 && (
+                <button className="btn btn-secondary btn-small" onClick={() => {
+                  const csv = ['Title,Artist', ...unmatchedTracks.map(t => `"${t.title.replace(/"/g, '""')}","${t.artist.replace(/"/g, '""')}"`)].join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${selectedPlaylist.name.replace(/[^a-z0-9]/gi, '_')}_missing.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}>
+                  Export Missing ({unmatchedTracks.length})
+                </button>
+              )}
+              <button className="btn btn-primary btn-small" onClick={() => { handleCreatePlaylist(selectedPlaylist); setSelectedPlaylist(null); }} disabled={matchedTracks.length === 0 || createdPlaylists.includes(selectedPlaylist.id)}>
+                {createdPlaylists.includes(selectedPlaylist.id) ? '✓ Created' : `Create Playlist (${matchedTracks.length} tracks)`}
+              </button>
+            </div>
           </div>
+          
+          <div className="track-list-header" style={{ display: 'flex', padding: '8px 12px', borderBottom: '1px solid #333', fontSize: '12px', color: '#888', gap: '8px' }}>
+            <span style={{ width: '30px' }}>#</span>
+            <span style={{ width: '30px', cursor: 'pointer' }} onClick={() => handleSort('status')} title="Sort by status">
+              {sortIcon('status')}
+            </span>
+            <span style={{ flex: 2, cursor: 'pointer' }} onClick={() => handleSort('title')} title="Sort by title">
+              Title {sortIcon('title')}
+            </span>
+            <span style={{ flex: 1, cursor: 'pointer' }} onClick={() => handleSort('artist')} title="Sort by artist">
+              Artist {sortIcon('artist')}
+            </span>
+            <span style={{ width: '50px', cursor: 'pointer', textAlign: 'right' }} onClick={() => handleSort('score')} title="Sort by match score">
+              Score {sortIcon('score')}
+            </span>
+          </div>
+          
           <div className="track-list">
             {tracksToShow.map((track, i) => {
               const actualIndex = selectedPlaylist.tracks.findIndex(t => t.title === track.title && t.artist === track.artist);
               return (
-                <div key={i} className={`track-item ${track.matched ? 'matched' : 'unmatched'} clickable`} onClick={() => openManualSearch(actualIndex, track.title, track.artist)} title="Click to search/change match">
-                  <span className="track-status">{track.matched ? '✓' : '✗'}</span>
-                  <div className="track-info">
+                <div 
+                  key={i} 
+                  className={`track-item ${track.matched ? 'matched' : 'unmatched'} clickable ${draggedTrackIndex === actualIndex ? 'dragging' : ''}`}
+                  draggable={trackSortField === 'none'}
+                  onDragStart={() => handleDragStart(actualIndex)}
+                  onDragOver={(e) => handleDragOver(e, actualIndex)}
+                  onDrop={() => handleDrop(actualIndex)}
+                  onDragEnd={() => setDraggedTrackIndex(null)}
+                  onClick={() => openManualSearch(actualIndex, track.title, track.artist)} 
+                  title={trackSortField === 'none' ? 'Drag to reorder, click to search/change match' : 'Click to search/change match'}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                >
+                  <span style={{ width: '30px', color: '#666', fontSize: '12px' }}>{i + 1}</span>
+                  <span className="track-status" style={{ width: '30px' }}>{track.matched ? '✓' : '✗'}</span>
+                  <div className="track-info" style={{ flex: 2 }}>
                     <span className="track-title">{track.title}</span>
-                    <span className="track-artist">{track.artist}</span>
                     {track.matched && track.plexTitle && (
-                      <span className="track-plex-match">→ {track.plexTitle} • {track.plexArtist}</span>
+                      <span className="track-plex-match">→ {track.plexTitle}</span>
                     )}
                   </div>
-                  {track.matched ? track.score && <span className="track-score">{Math.round(track.score)}%</span> : <span className="track-search-hint">🔍</span>}
+                  <div style={{ flex: 1, color: '#888' }}>
+                    <span className="track-artist">{track.artist}</span>
+                    {track.matched && track.plexArtist && track.plexArtist !== track.artist && (
+                      <span className="track-plex-match" style={{ display: 'block' }}>→ {track.plexArtist}</span>
+                    )}
+                  </div>
+                  <span style={{ width: '50px', textAlign: 'right' }}>
+                    {track.matched ? track.score && <span className="track-score">{Math.round(track.score)}%</span> : <span className="track-search-hint">🔍</span>}
+                  </span>
                 </div>
               );
             })}
@@ -1715,6 +1855,38 @@ export default function App() {
       {renderPlaylistSelector()}
       {renderChartScheduler()}
       {renderMatchingSettingsModal()}
+      {/* Update notification modal */}
+      {showUpdateModal && updateInfo && (
+        <div className="modal-overlay" onClick={() => setShowUpdateModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '450px' }}>
+            <div className="modal-header">
+              <div>
+                <h2>🎉 Update Available</h2>
+                <p className="modal-subtitle">Version {updateInfo.latestVersion} is now available</p>
+              </div>
+              <button className="btn btn-secondary btn-small" onClick={() => setShowUpdateModal(false)}>✕</button>
+            </div>
+            <div style={{ padding: '16px 0' }}>
+              {updateInfo.releaseNotes && (
+                <div style={{ maxHeight: '200px', overflowY: 'auto', marginBottom: '16px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px', fontSize: '13px', color: '#a0a0a0', whiteSpace: 'pre-wrap' }}>
+                  {updateInfo.releaseNotes.slice(0, 500)}{updateInfo.releaseNotes.length > 500 ? '...' : ''}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button className="btn btn-secondary" onClick={() => setShowUpdateModal(false)}>
+                  Later
+                </button>
+                <button className="btn btn-primary" onClick={() => {
+                  if (updateInfo.releaseUrl) window.api.openReleasePage(updateInfo.releaseUrl);
+                  setShowUpdateModal(false);
+                }}>
+                  Download Update
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Global import progress overlay */}
       {importProgress && (
         <div className="import-progress-overlay">

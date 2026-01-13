@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain, shell, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import Store from 'electron-store';
 
 // Configure store to use playlist-lab folder in AppData
@@ -31,10 +32,10 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 850,
-    minWidth: 800,
-    minHeight: 600,
+    width: 1400,
+    height: 950,
+    minWidth: 900,
+    minHeight: 700,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1939,6 +1940,292 @@ ipcMain.handle('scrape-qobuz-playlist', async (_, { url }) => {
   });
 });
 
+// Import M3U/M3U8 file
+ipcMain.handle('import-m3u-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title: 'Select M3U/M3U8 Playlist File',
+    filters: [
+      { name: 'Playlist Files', extensions: ['m3u', 'm3u8'] },
+      { name: 'All Files', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  });
+  
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  
+  const filePath = result.filePaths[0];
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split(/\r?\n/);
+  const tracks: { title: string; artist: string }[] = [];
+  
+  // Get playlist name from filename
+  const fileName = path.basename(filePath, path.extname(filePath));
+  
+  let currentTitle = '';
+  let currentArtist = '';
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // Skip empty lines and M3U header
+    if (!trimmed || trimmed === '#EXTM3U') continue;
+    
+    // Parse #EXTINF line: #EXTINF:duration,Artist - Title or #EXTINF:duration,Title
+    if (trimmed.startsWith('#EXTINF:')) {
+      const infoMatch = trimmed.match(/#EXTINF:[^,]*,(.+)/);
+      if (infoMatch) {
+        const info = infoMatch[1].trim();
+        // Try to split by " - " for Artist - Title format
+        const dashIndex = info.indexOf(' - ');
+        if (dashIndex > 0) {
+          currentArtist = info.substring(0, dashIndex).trim();
+          currentTitle = info.substring(dashIndex + 3).trim();
+        } else {
+          currentTitle = info;
+          currentArtist = '';
+        }
+      }
+    }
+    // If we have a title from EXTINF, add it when we hit the file path
+    else if (!trimmed.startsWith('#')) {
+      if (currentTitle) {
+        tracks.push({ title: currentTitle, artist: currentArtist || 'Unknown' });
+        currentTitle = '';
+        currentArtist = '';
+      } else {
+        // Try to extract from filename: "Artist - Title.ext"
+        const baseName = path.basename(trimmed, path.extname(trimmed));
+        const dashIndex = baseName.indexOf(' - ');
+        if (dashIndex > 0) {
+          const artist = baseName.substring(0, dashIndex).trim();
+          const title = baseName.substring(dashIndex + 3).trim();
+          if (title) tracks.push({ title, artist });
+        } else if (baseName) {
+          tracks.push({ title: baseName, artist: 'Unknown' });
+        }
+      }
+    }
+  }
+  
+  console.log(`[M3U] Parsed ${tracks.length} tracks from ${fileName}`);
+  return { name: fileName, tracks };
+});
+
+// Import iTunes Library XML file
+ipcMain.handle('import-itunes-xml', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title: 'Select iTunes Library XML File',
+    filters: [
+      { name: 'iTunes XML', extensions: ['xml'] },
+      { name: 'All Files', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  });
+  
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  
+  const filePath = result.filePaths[0];
+  const content = fs.readFileSync(filePath, 'utf-8');
+  
+  // Parse iTunes XML plist format
+  const playlists: { name: string; trackCount: number; tracks: { title: string; artist: string }[] }[] = [];
+  const trackMap = new Map<string, { title: string; artist: string }>();
+  
+  // Extract tracks from the Tracks dict
+  const tracksMatch = content.match(/<key>Tracks<\/key>\s*<dict>([\s\S]*?)<\/dict>\s*<key>Playlists<\/key>/);
+  if (tracksMatch) {
+    const tracksSection = tracksMatch[1];
+    // Match each track entry
+    const trackEntries = tracksSection.split(/<key>\d+<\/key>\s*<dict>/);
+    for (const entry of trackEntries) {
+      if (!entry.trim()) continue;
+      
+      const trackIdMatch = entry.match(/<key>Track ID<\/key>\s*<integer>(\d+)<\/integer>/);
+      const nameMatch = entry.match(/<key>Name<\/key>\s*<string>([^<]*)<\/string>/);
+      const artistMatch = entry.match(/<key>Artist<\/key>\s*<string>([^<]*)<\/string>/);
+      
+      if (trackIdMatch && nameMatch) {
+        const trackId = trackIdMatch[1];
+        const title = nameMatch[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+        const artist = artistMatch ? artistMatch[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"') : 'Unknown';
+        trackMap.set(trackId, { title, artist });
+      }
+    }
+  }
+  
+  // Extract playlists
+  const playlistsMatch = content.match(/<key>Playlists<\/key>\s*<array>([\s\S]*)<\/array>\s*<\/dict>\s*<\/plist>/);
+  if (playlistsMatch) {
+    const playlistsSection = playlistsMatch[1];
+    const playlistEntries = playlistsSection.split(/<dict>/);
+    
+    for (const entry of playlistEntries) {
+      if (!entry.trim()) continue;
+      
+      // Skip system playlists
+      if (entry.includes('<key>Master</key>') || 
+          entry.includes('<key>Distinguished Kind</key>') ||
+          entry.includes('<key>Music</key><true/>') ||
+          entry.includes('<key>Audiobooks</key><true/>') ||
+          entry.includes('<key>Podcasts</key><true/>')) {
+        continue;
+      }
+      
+      const nameMatch = entry.match(/<key>Name<\/key>\s*<string>([^<]*)<\/string>/);
+      if (!nameMatch) continue;
+      
+      const playlistName = nameMatch[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+      
+      // Get track IDs in this playlist
+      const tracks: { title: string; artist: string }[] = [];
+      const itemsMatch = entry.match(/<key>Playlist Items<\/key>\s*<array>([\s\S]*?)<\/array>/);
+      if (itemsMatch) {
+        const trackIdMatches = itemsMatch[1].matchAll(/<key>Track ID<\/key>\s*<integer>(\d+)<\/integer>/g);
+        for (const match of trackIdMatches) {
+          const track = trackMap.get(match[1]);
+          if (track) tracks.push(track);
+        }
+      }
+      
+      if (tracks.length > 0) {
+        playlists.push({ name: playlistName, trackCount: tracks.length, tracks });
+      }
+    }
+  }
+  
+  console.log(`[iTunes] Parsed ${playlists.length} playlists with ${trackMap.size} total tracks`);
+  return { playlists };
+});
+
+// Get ListenBrainz user playlists
+ipcMain.handle('get-listenbrainz-playlists', async (_, { username }) => {
+  const response = await fetch(`https://api.listenbrainz.org/1/user/${encodeURIComponent(username)}/playlists`, {
+    headers: { 'Accept': 'application/json' }
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch playlists: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  const playlists = (data.playlists || []).map((p: any) => ({
+    id: p.playlist.identifier.split('/').pop(),
+    name: p.playlist.title || 'Untitled',
+    trackCount: p.playlist.track?.length || 0,
+  }));
+  
+  console.log(`[ListenBrainz] Found ${playlists.length} playlists for ${username}`);
+  return playlists;
+});
+
+// Get ListenBrainz playlist tracks
+ipcMain.handle('get-listenbrainz-playlist-tracks', async (_, { playlistId }) => {
+  const response = await fetch(`https://api.listenbrainz.org/1/playlist/${playlistId}`, {
+    headers: { 'Accept': 'application/json' }
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch playlist: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  const tracks = (data.playlist?.track || []).map((t: any) => ({
+    title: t.title || 'Unknown',
+    artist: t.creator || 'Unknown',
+  }));
+  
+  console.log(`[ListenBrainz] Fetched ${tracks.length} tracks from playlist ${playlistId}`);
+  return tracks;
+});
+
+// ==================== SPOTIFY URL SCRAPING ====================
+
+// Scrape Spotify playlist from URL using BrowserWindow
+ipcMain.handle('scrape-spotify-playlist', async (_, { url }) => {
+  console.log('[Spotify] Scraping:', url);
+  
+  return new Promise((resolve) => {
+    const scrapeWindow = new BrowserWindow({
+      width: 1200,
+      height: 900,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+    
+    scrapeWindow.webContents.setAudioMuted(true);
+    scrapeWindow.webContents.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    );
+    
+    const timeout = setTimeout(() => {
+      console.log('[Spotify] Scrape timeout');
+      scrapeWindow.close();
+      resolve({ name: 'Spotify Playlist', tracks: [] });
+    }, 30000);
+    
+    let attempts = 0;
+    
+    const tryExtract = async () => {
+      attempts++;
+      try {
+        const result = await scrapeWindow.webContents.executeJavaScript(`
+          (function() {
+            const tracks = [];
+            let playlistName = document.querySelector('h1, [data-testid="entityTitle"]')?.textContent?.trim() || 'Spotify Playlist';
+            
+            // Find track rows
+            document.querySelectorAll('[data-testid="tracklist-row"], [role="row"]').forEach(row => {
+              const titleEl = row.querySelector('[data-testid="internal-track-link"] div, a[href*="/track/"] div');
+              const artistEl = row.querySelector('[data-testid="internal-track-link"] + span a, a[href*="/artist/"]');
+              
+              if (titleEl) {
+                const title = titleEl.textContent?.trim();
+                const artist = artistEl?.textContent?.trim() || 'Unknown';
+                if (title && !tracks.some(t => t.title === title && t.artist === artist)) {
+                  tracks.push({ title, artist });
+                }
+              }
+            });
+            
+            return { name: playlistName, tracks };
+          })()
+        `);
+        
+        if (result.tracks.length > 0 || attempts >= 5) {
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          console.log('[Spotify] Scraped', result.tracks.length, 'tracks');
+          resolve(result);
+        } else {
+          setTimeout(tryExtract, 2000);
+        }
+      } catch (e) {
+        if (attempts >= 5) {
+          clearTimeout(timeout);
+          scrapeWindow.close();
+          resolve({ name: 'Spotify Playlist', tracks: [] });
+        } else {
+          setTimeout(tryExtract, 2000);
+        }
+      }
+    };
+    
+    scrapeWindow.webContents.on('did-finish-load', async () => {
+      await new Promise(r => setTimeout(r, 4000));
+      tryExtract();
+    });
+    
+    scrapeWindow.loadURL(url);
+  });
+});
+
 // ==================== APPLE MUSIC INTEGRATION ====================
 
 // Scrape Apple Music playlist from URL using BrowserWindow
@@ -2457,4 +2744,58 @@ ipcMain.handle('delete-user-playlist', async (_, { serverUrl, playlistId, userTo
     headers: PLEX_HEADERS,
   });
   return response.ok;
+});
+
+// ==================== UPDATE CHECKER ====================
+
+const APP_VERSION = app.getVersion();
+const GITHUB_REPO = 'AuXBoX/Playlist-Lab';
+
+// Check for updates from GitHub releases
+ipcMain.handle('check-for-updates', async () => {
+  try {
+    const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+      headers: { 'Accept': 'application/vnd.github.v3+json' }
+    });
+    
+    if (!response.ok) return { hasUpdate: false };
+    
+    const release = await response.json();
+    const latestVersion = release.tag_name.replace(/^v/, '');
+    
+    // Compare versions
+    const current = APP_VERSION.split('.').map(Number);
+    const latest = latestVersion.split('.').map(Number);
+    
+    let hasUpdate = false;
+    for (let i = 0; i < 3; i++) {
+      if ((latest[i] || 0) > (current[i] || 0)) {
+        hasUpdate = true;
+        break;
+      } else if ((latest[i] || 0) < (current[i] || 0)) {
+        break;
+      }
+    }
+    
+    return {
+      hasUpdate,
+      currentVersion: APP_VERSION,
+      latestVersion,
+      releaseUrl: release.html_url,
+      releaseNotes: release.body || '',
+      publishedAt: release.published_at,
+    };
+  } catch (error) {
+    console.error('Update check failed:', error);
+    return { hasUpdate: false, error: 'Failed to check for updates' };
+  }
+});
+
+// Get current app version
+ipcMain.handle('get-app-version', () => APP_VERSION);
+
+// Open release page in browser
+ipcMain.handle('open-release-page', async (_, url) => {
+  await shell.openExternal(url);
+  return true;
 });
