@@ -347,14 +347,20 @@ ipcMain.handle('create-playlist', async (_, { serverUrl, title, trackKeys }) => 
   return response.ok;
 });
 
-// Get existing playlists
-ipcMain.handle('get-playlists', async (_, { serverUrl }) => {
+// Get existing playlists (excludes smart playlists for editing)
+ipcMain.handle('get-playlists', async (_, { serverUrl, includeSmart = false }) => {
   const token = store.get('plexToken') as string;
   const response = await fetch(`${serverUrl}/playlists?playlistType=audio&X-Plex-Token=${token}`, {
     headers: PLEX_HEADERS,
   });
   const data = await response.json();
-  return data.MediaContainer?.Metadata || [];
+  const playlists = data.MediaContainer?.Metadata || [];
+  
+  // Filter out smart playlists unless explicitly requested
+  if (!includeSmart) {
+    return playlists.filter((p: any) => !p.smart);
+  }
+  return playlists;
 });
 
 // Get playlist tracks
@@ -383,6 +389,19 @@ ipcMain.handle('remove-from-playlist', async (_, { serverUrl, playlistId, playli
   const token = store.get('plexToken') as string;
   const url = `${serverUrl}/playlists/${playlistId}/items/${playlistItemId}?X-Plex-Token=${token}`;
   const response = await fetch(url, { method: 'DELETE', headers: PLEX_HEADERS });
+  return response.ok;
+});
+
+// Move playlist item (reorder)
+ipcMain.handle('move-playlist-item', async (_, { serverUrl, playlistId, itemId, afterId }) => {
+  const token = store.get('plexToken') as string;
+  // Plex API: PUT /playlists/{playlistId}/items/{playlistItemID}/move?after={afterItemID}
+  // If afterId is null, move to beginning (no after param)
+  let url = `${serverUrl}/playlists/${playlistId}/items/${itemId}/move?X-Plex-Token=${token}`;
+  if (afterId) {
+    url += `&after=${afterId}`;
+  }
+  const response = await fetch(url, { method: 'PUT', headers: PLEX_HEADERS });
   return response.ok;
 });
 
@@ -2101,25 +2120,46 @@ ipcMain.handle('import-itunes-xml', async () => {
   return { playlists };
 });
 
-// Get ListenBrainz user playlists
+// Get ListenBrainz user playlists (including "created for" playlists like Daily/Weekly Jams)
 ipcMain.handle('get-listenbrainz-playlists', async (_, { username }) => {
-  const response = await fetch(`https://api.listenbrainz.org/1/user/${encodeURIComponent(username)}/playlists`, {
+  // Fetch user's own playlists
+  const userPlaylistsResponse = await fetch(`https://api.listenbrainz.org/1/user/${encodeURIComponent(username)}/playlists`, {
     headers: { 'Accept': 'application/json' }
   });
   
-  if (!response.ok) {
-    throw new Error(`Failed to fetch playlists: ${response.status}`);
+  // Fetch "created for" playlists (Daily Jams, Weekly Jams, etc. from troi-bot)
+  const createdForResponse = await fetch(`https://api.listenbrainz.org/1/user/${encodeURIComponent(username)}/playlists/createdfor`, {
+    headers: { 'Accept': 'application/json' }
+  });
+  
+  let userPlaylists: any[] = [];
+  let createdForPlaylists: any[] = [];
+  
+  if (userPlaylistsResponse.ok) {
+    const data = await userPlaylistsResponse.json();
+    userPlaylists = (data.playlists || []).map((p: any) => ({
+      id: p.playlist.identifier.split('/').pop(),
+      name: p.playlist.title || 'Untitled',
+      trackCount: p.playlist.track?.length || 0,
+      type: 'user',
+    }));
   }
   
-  const data = await response.json();
-  const playlists = (data.playlists || []).map((p: any) => ({
-    id: p.playlist.identifier.split('/').pop(),
-    name: p.playlist.title || 'Untitled',
-    trackCount: p.playlist.track?.length || 0,
-  }));
+  if (createdForResponse.ok) {
+    const data = await createdForResponse.json();
+    createdForPlaylists = (data.playlists || []).map((p: any) => ({
+      id: p.playlist.identifier.split('/').pop(),
+      name: p.playlist.title || 'Untitled',
+      trackCount: p.playlist.track?.length || 0,
+      type: 'createdfor',
+    }));
+  }
   
-  console.log(`[ListenBrainz] Found ${playlists.length} playlists for ${username}`);
-  return playlists;
+  // Combine with "created for" playlists first (they're usually more interesting)
+  const allPlaylists = [...createdForPlaylists, ...userPlaylists];
+  
+  console.log(`[ListenBrainz] Found ${userPlaylists.length} user playlists and ${createdForPlaylists.length} "created for" playlists for ${username}`);
+  return allPlaylists;
 });
 
 // Get ListenBrainz playlist tracks
@@ -2140,6 +2180,128 @@ ipcMain.handle('get-listenbrainz-playlist-tracks', async (_, { playlistId }) => 
   
   console.log(`[ListenBrainz] Fetched ${tracks.length} tracks from playlist ${playlistId}`);
   return tracks;
+});
+
+// ==================== AI PLAYLIST GENERATION ====================
+
+ipcMain.handle('get-ai-config', async () => {
+  return {
+    provider: store.get('aiProvider') as string || 'groq',
+    apiKey: store.get('aiApiKey') as string || '',
+  };
+});
+
+ipcMain.handle('save-ai-config', async (_, { provider, apiKey }: { provider: string; apiKey: string }) => {
+  store.set('aiProvider', provider);
+  store.set('aiApiKey', apiKey);
+  return true;
+});
+
+// Keep old handlers for backwards compatibility
+ipcMain.handle('get-openai-api-key', async () => {
+  return store.get('aiApiKey') as string || store.get('openaiApiKey') as string || '';
+});
+
+ipcMain.handle('save-openai-api-key', async (_, apiKey: string) => {
+  store.set('aiApiKey', apiKey);
+  store.set('aiProvider', 'openai');
+  return true;
+});
+
+ipcMain.handle('generate-ai-playlist', async (_, { prompt, trackCount, apiKey, provider = 'openai' }) => {
+  console.log(`[AI] Generating playlist with ${provider}: "${prompt}" with ${trackCount} tracks`);
+  
+  const systemPrompt = `You are a music expert assistant. Generate a playlist of exactly ${trackCount} songs based on the user's request. 
+Return ONLY a JSON object with this exact format, no other text:
+{
+  "name": "A creative playlist name",
+  "tracks": [
+    {"title": "Song Title", "artist": "Artist Name"},
+    ...
+  ]
+}
+Rules:
+- Include exactly ${trackCount} tracks
+- Use real, existing songs that actually exist
+- Include a mix of popular and lesser-known tracks when appropriate
+- Match the mood, genre, era, or theme requested
+- Be creative with the playlist name based on the theme`;
+
+  let content = '';
+  
+  if (provider === 'groq') {
+    // Groq API (free, fast)
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.8,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error?.message || `Groq API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    content = data.choices?.[0]?.message?.content || '';
+  } else {
+    // OpenAI API
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.8,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error?.message || `OpenAI API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    content = data.choices?.[0]?.message?.content || '';
+  }
+  
+  // Parse JSON from response (handle markdown code blocks)
+  let jsonStr = content;
+  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    jsonStr = jsonMatch[1];
+  }
+  
+  try {
+    const result = JSON.parse(jsonStr.trim());
+    console.log(`[AI] Generated playlist "${result.name}" with ${result.tracks?.length || 0} tracks`);
+    return {
+      name: result.name || 'AI Generated Playlist',
+      tracks: (result.tracks || []).map((t: any) => ({
+        title: t.title || t.song || 'Unknown',
+        artist: t.artist || 'Unknown',
+      })),
+    };
+  } catch (e) {
+    console.error('[AI] Failed to parse response:', content);
+    throw new Error('Failed to parse AI response. Please try again.');
+  }
 });
 
 // ==================== SPOTIFY URL SCRAPING ====================

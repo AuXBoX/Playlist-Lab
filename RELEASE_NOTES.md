@@ -1,14 +1,43 @@
 # Release Notes
 
+## v1.0.5
+
+### New Features
+- **Edit Playlists Auto-Load** - Playlists now load automatically when opening Edit Playlists (no need to click Refresh)
+- **Undo Support in Edit Playlists** - Multi-level undo for add/remove track operations with undo count display
+- **Split Search in Edit Playlists** - Separate Artist and Track search fields for more precise track finding
+- **ListenBrainz "Created For You"** - Now fetches troi-bot recommendations (Daily Jams, Weekly Jams, etc.) alongside user playlists
+- **Rating-Based Matching** - Prefer higher-rated tracks and optionally skip low-rated tracks (1-2 stars) unless perfect match
+- **Auto-Complete on Perfect Match** - Automatically create playlist without review if all tracks match 100%
+- **Playlist Name Prefixes** - Add source prefixes to playlist names (e.g., "SPOT: My Playlist", "DEEZ: Top 40")
+
+### Improvements
+- **Smart Playlist Filtering** - Smart playlists are now hidden from Edit Playlists (they can't be edited anyway)
+- **Live Album Detection** - Improved matching to penalize tracks from live albums even when track title doesn't say "Live"
+- **Unplugged/Concert Detection** - Added detection for "Unplugged", "In Concert" album patterns
+
+### Bug Fixes
+- Removed Plex tab from Browse Sources (redundant with Edit Playlists)
+
+### macOS Installation Note
+The app is not code-signed. If macOS shows "Playlist Lab is damaged and can't be opened":
+1. Open Terminal
+2. Run: `xattr -cr /Applications/Playlist\ Lab.app`
+3. Or: Right-click the app → Open → Open (first launch only)
+
+---
+
 ## v1.0.4
 
 ### New Features
+- **Spotify URL Import** - Import any public Spotify playlist by URL without needing API credentials
 - **M3U/M3U8 Import** - Import playlists from M3U and M3U8 files with #EXTINF tags or "Artist - Title" filenames
 - **iTunes XML Import** - Import playlists from iTunes/Music app library exports (File → Library → Export Library)
-- **ListenBrainz Import** - Import public playlists from any ListenBrainz user
+- **ListenBrainz Import** - Import public playlists from any ListenBrainz user by username
 - **Export Missing Tracks** - Export unmatched tracks to CSV after matching for easy reference
 - **Track Sorting** - Sort matched tracks by title, artist, status, or match score (click column headers)
 - **Track Reordering** - Drag and drop to reorder tracks before creating playlist
+- **Auto-Update Notifications** - Get notified when new versions are available with one-click download
 
 ### Improvements
 - **Larger Window** - Default size increased to 1400x950, minimum 900x700

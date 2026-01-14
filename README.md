@@ -13,7 +13,7 @@ Import playlists from external music services and match tracks to your Plex libr
 - **YouTube Music** - Import from URL or connect your account for personal playlists
 - **Amazon Music** - Import from public playlist URL
 - **Qobuz** - Import from playlist URL
-- **ListenBrainz** - Import public playlists by username
+- **ListenBrainz** - Import public playlists and personalized recommendations (Daily/Weekly Jams) by username
 - **M3U/M3U8 Files** - Import local playlist files
 - **iTunes XML** - Import playlists from iTunes/Music app library exports
 
@@ -46,9 +46,12 @@ Create personalized playlists based on your Plex listening history:
 - **Configurable Match Threshold** - Set minimum score for automatic matching (0-100%)
 - **Strict Mode** - Require exact artist matches
 - **Album Matching** - Include album name in matching criteria
+- **Rating Preferences** - Prefer higher-rated tracks, skip low-rated tracks unless perfect match
 - **Penalty Keywords** - Reduce scores for unwanted versions (live, karaoke, cover, etc.)
 - **Priority Keywords** - Boost scores for preferred versions (remastered, original, stereo, etc.)
 - **Editable Patterns** - Customize matching patterns for featured artists, versions, and various artists
+- **Auto-Complete** - Automatically create playlist if all tracks match 100%
+- **Playlist Prefixes** - Add source prefixes to playlist names (SPOT:, DEEZ:, APPL:, etc.)
 
 ### Auto-Update
 - Automatic update notifications when new versions are available
@@ -90,17 +93,6 @@ npm install
 ```bash
 npm run electron:dev
 ```
-
-### Build
-Run `scripts/build.bat` and select:
-1. **Platform** - Windows, macOS, Linux, or All
-2. **Build Type** - Portable/App, Installer, or Both
-
-### GitHub Management
-Run `scripts/github-manager.bat` for:
-- Commit and push changes
-- Create releases with multi-platform builds
-- Manage tags and releases
 
 ## How It Works
 

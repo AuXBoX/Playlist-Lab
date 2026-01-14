@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { MatchedPlaylist, matchPlaylistToPlex } from './discovery';
+import { MatchedPlaylist, matchPlaylistToPlex, applyPlaylistPrefix, MatchingSettings } from './discovery';
 
 export interface ImportProgress {
   playlistName: string;
@@ -21,6 +21,7 @@ interface ImportPageProps {
   onPlaylistSelect: (playlist: MatchedPlaylist) => void;
   importProgress: ImportProgress | null;
   setImportProgress: React.Dispatch<React.SetStateAction<ImportProgress | null>>;
+  matchingSettings: MatchingSettings;
 }
 
 interface SpotifyPlaylist {
@@ -55,9 +56,9 @@ interface PreImportPlaylist {
   url?: string;
 }
 
-type Tab = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'plex' | 'file' | 'listenbrainz';
+type Tab = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'plex' | 'file' | 'listenbrainz' | 'ai';
 
-export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, importProgress, setImportProgress }: ImportPageProps) {
+export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, importProgress, setImportProgress, matchingSettings }: ImportPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('deezer');
   
   // Spotify state
@@ -105,8 +106,19 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   
   // ListenBrainz state
   const [listenBrainzUsername, setListenBrainzUsername] = useState('');
-  const [listenBrainzPlaylists, setListenBrainzPlaylists] = useState<{ id: string; name: string; trackCount: number }[]>([]);
+  const [listenBrainzPlaylists, setListenBrainzPlaylists] = useState<{ id: string; name: string; trackCount: number; type?: string }[]>([]);
   const [isLoadingListenBrainz, setIsLoadingListenBrainz] = useState(false);
+  
+  // AI Playlist state
+  const [aiProvider, setAiProvider] = useState<'groq' | 'openai'>('groq');
+  const [aiApiKey, setAiApiKey] = useState<string>('');
+  const [aiApiKeySaved, setAiApiKeySaved] = useState<boolean | null>(null); // null = loading, false = no saved key, true = has saved key
+  const [showAiSetup, setShowAiSetup] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiTrackCount, setAiTrackCount] = useState(25);
+  const [aiGeneratedTracks, setAiGeneratedTracks] = useState<{ title: string; artist: string }[]>([]);
+  const [aiPlaylistName, setAiPlaylistName] = useState('');
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   
   // Deezer state
   const [deezerQuery, setDeezerQuery] = useState('');
@@ -216,6 +228,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
     loadPlexPlaylists();
     loadDeezerTopPlaylists();
     loadSchedules();
+    loadAiApiKey();
   }, []);
 
   // Load popular playlists when switching tabs (if not logged in)
@@ -224,6 +237,91 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
       loadDeezerTopPlaylists();
     }
   }, [activeTab]);
+
+  const loadAiApiKey = async () => {
+    try {
+      const config = await (window.api as any).getAiConfig();
+      console.log('[AI Config] Loaded:', config);
+      if (config.provider && (config.provider === 'groq' || config.provider === 'openai')) {
+        setAiProvider(config.provider);
+      }
+      setAiApiKey(config.apiKey || '');
+      setAiApiKeySaved(!!config.apiKey);
+    } catch (error) {
+      console.error('[AI Config] Error loading:', error);
+      setAiApiKey('');
+      setAiApiKeySaved(false);
+    }
+  };
+
+  const saveAiApiKey = async () => {
+    console.log('[AI Config] Saving:', { provider: aiProvider, apiKey: aiApiKey ? '***' : '' });
+    await (window.api as any).saveAiConfig({ provider: aiProvider, apiKey: aiApiKey });
+    setAiApiKeySaved(true);
+    setShowAiSetup(false);
+    setStatusMessage(`${aiProvider === 'groq' ? 'Groq' : 'OpenAI'} API key saved`);
+  };
+
+  const generateAiPlaylist = async () => {
+    if (!aiPrompt.trim() || !aiApiKey) return;
+    setIsGeneratingAi(true);
+    setAiGeneratedTracks([]);
+    setAiPlaylistName('');
+    try {
+      const result = await (window.api as any).generateAiPlaylist({ 
+        prompt: aiPrompt, 
+        trackCount: aiTrackCount,
+        apiKey: aiApiKey,
+        provider: aiProvider
+      });
+      setAiGeneratedTracks(result.tracks);
+      setAiPlaylistName(result.name || 'AI Generated Playlist');
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  };
+
+  const importAiPlaylist = async () => {
+    if (aiGeneratedTracks.length === 0) return;
+    
+    const playlistName = aiPlaylistName || 'AI Generated Playlist';
+    setImportProgress({
+      playlistName,
+      source: 'spotify',
+      current: 0,
+      total: aiGeneratedTracks.length,
+      currentTrack: '',
+      matchedCount: 0,
+    });
+    
+    const discoveryPlaylist = {
+      id: `ai-${Date.now()}`,
+      name: applyPlaylistPrefix(playlistName, 'ai', matchingSettings),
+      description: `Generated by AI: ${aiPrompt}`,
+      source: 'deezer' as const,
+      tracks: aiGeneratedTracks.map(t => ({ ...t, source: 'deezer' as const })),
+    };
+    
+    try {
+      const matched = await matchPlaylistToPlex(
+        discoveryPlaylist,
+        serverUrl,
+        window.api.searchTrack,
+        (current, total, trackName) => {
+          setImportProgress(prev => prev ? { ...prev, current, total, currentTrack: trackName } : null);
+        }
+      );
+      setImportProgress(null);
+      setAiGeneratedTracks([]);
+      setAiPrompt('');
+      onPlaylistSelect(matched);
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+      setImportProgress(null);
+    }
+  };
 
   const loadSchedules = async () => {
     const schedules = await window.api.getSchedules();
@@ -693,7 +791,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
     
     const discoveryPlaylist = {
       id: `${previewPlaylist.source}-${Date.now()}`,
-      name: playlistName,
+      name: applyPlaylistPrefix(playlistName, previewPlaylist.source, matchingSettings),
       description: `Imported from ${sourceName}`,
       source: 'deezer' as const,
       tracks: tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
@@ -787,7 +885,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
       
       const discoveryPlaylist = {
         id: `${source}-${Date.now()}`,
-        name: playlistName,
+        name: applyPlaylistPrefix(playlistName, source, matchingSettings),
         description: `Imported from ${sourceNames[source]}`,
         source: 'deezer' as const,
         tracks: tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
@@ -861,7 +959,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
       
       const discoveryPlaylist = {
         id: `youtube-${playlistId}`,
-        name: playlistName,
+        name: applyPlaylistPrefix(playlistName, 'youtube', matchingSettings),
         description: 'Imported from YouTube Music',
         source: 'deezer' as const,
         tracks: tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
@@ -923,7 +1021,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
       // Create a discovery playlist format
       const discoveryPlaylist = {
         id: `${source}-${playlistId}`,
-        name: playlistName,
+        name: applyPlaylistPrefix(playlistName, source, matchingSettings),
         description: `Imported from ${source === 'spotify' ? 'Spotify' : 'Deezer'}`,
         source: 'deezer' as const,
         tracks: tracks.map(t => ({ ...t, source: 'deezer' as const })),
@@ -961,11 +1059,12 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   const renderSpotifyTab = () => (
     <div className="import-tab-content">
       {/* URL Import - always visible */}
-      <div className="url-import-section" style={{ marginBottom: '24px', paddingBottom: '24px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+      <div className="url-import-section">
+        <h3>Import from Spotify</h3>
         <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>
-          Import any public Spotify playlist by URL (no login required)
+          Paste a Spotify playlist URL to import (no login required)
         </p>
-        <div className="search-bar">
+        <div className="search-bar-row">
           <input
             type="text"
             value={spotifyUrl}
@@ -978,11 +1077,14 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
             onClick={() => importDirectFromUrl('spotify', spotifyUrl, 'Spotify Playlist')}
             disabled={!spotifyUrl.trim() || importingPlaylist === spotifyUrl}
           >
-            {importingPlaylist === spotifyUrl ? 'Importing...' : 'Import'}
+            {importingPlaylist === spotifyUrl ? '...' : 'Import'}
           </button>
         </div>
       </div>
       
+      {/* Optional OAuth Login */}
+      <div style={{ marginTop: '24px', borderTop: '1px solid #333', paddingTop: '24px' }}>
+        <h3>Your Playlists (Optional)</h3>
       {!spotifyAuth ? (
         <div className="import-login-section">
           {showSpotifySetup ? (
@@ -1109,6 +1211,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
           )}
         </div>
       )}
+      </div>
     </div>
   );
 
@@ -1664,7 +1767,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
           <div 
             key={i} 
             className="import-playlist-card clickable"
-            onClick={() => openPreview('youtube', playlist.url, playlist.name, 0, undefined, playlist.url)}
+            onClick={() => showPreImportModal('youtube', playlist.url, playlist.name, 0, undefined, playlist.url)}
           >
             <div className="playlist-info">
               <span className="playlist-name">{playlist.name}</span>
@@ -1828,7 +1931,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
           <div 
             key={i} 
             className="import-playlist-card clickable"
-            onClick={() => openPreview('amazon', playlist.url, playlist.name, 0, undefined, playlist.url)}
+            onClick={() => showPreImportModal('amazon', playlist.url, playlist.name, 0, undefined, playlist.url)}
           >
             <div className="playlist-info">
               <span className="playlist-name">{playlist.name}</span>
@@ -1898,7 +2001,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
           <div 
             key={i} 
             className="import-playlist-card clickable"
-            onClick={() => openPreview('qobuz', playlist.url, playlist.name, 0, undefined, playlist.url)}
+            onClick={() => showPreImportModal('qobuz', playlist.url, playlist.name, 0, undefined, playlist.url)}
           >
             <div className="playlist-info">
               <span className="playlist-name">{playlist.name}</span>
@@ -2000,7 +2103,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
       
       const discoveryPlaylist = {
         id: `file-${Date.now()}`,
-        name: playlistName,
+        name: applyPlaylistPrefix(playlistName, 'file', matchingSettings),
         description: 'Imported from M3U file',
         source: 'deezer' as const,
         tracks: result.tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
@@ -2055,7 +2158,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
     
     const discoveryPlaylist = {
       id: `itunes-${Date.now()}`,
-      name: playlist.name,
+      name: applyPlaylistPrefix(playlist.name, 'file', matchingSettings),
       description: 'Imported from iTunes',
       source: 'deezer' as const,
       tracks: playlist.tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
@@ -2169,7 +2272,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
       
       const discoveryPlaylist = {
         id: `listenbrainz-${playlist.id}`,
-        name: playlist.name,
+        name: applyPlaylistPrefix(playlist.name, 'listenbrainz', matchingSettings),
         description: 'Imported from ListenBrainz',
         source: 'deezer' as const,
         tracks: tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
@@ -2192,46 +2295,248 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
     }
   };
 
-  const renderListenBrainzTab = () => (
+  const renderListenBrainzTab = () => {
+    const createdForPlaylists = listenBrainzPlaylists.filter(p => p.type === 'createdfor');
+    const userPlaylists = listenBrainzPlaylists.filter(p => p.type !== 'createdfor');
+    
+    return (
     <div className="import-tab-content">
-      <p style={{ color: '#a0a0a0', marginBottom: '16px' }}>
-        Import playlists from ListenBrainz. Enter a username to load their public playlists.
-      </p>
-      
-      <div className="search-bar" style={{ marginBottom: '24px' }}>
-        <input
-          type="text"
-          value={listenBrainzUsername}
-          onChange={e => setListenBrainzUsername(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && loadListenBrainzPlaylists()}
-          placeholder="Enter ListenBrainz username..."
-        />
-        <button 
-          className="btn btn-primary" 
-          onClick={loadListenBrainzPlaylists}
-          disabled={isLoadingListenBrainz || !listenBrainzUsername.trim()}
-        >
-          {isLoadingListenBrainz ? 'Loading...' : 'Load Playlists'}
-        </button>
+      <div className="url-import-section">
+        <h3>Import from ListenBrainz</h3>
+        <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>
+          Enter a ListenBrainz username to load their playlists and recommendations
+        </p>
+        <div className="search-bar-row">
+          <input
+            type="text"
+            value={listenBrainzUsername}
+            onChange={e => setListenBrainzUsername(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && loadListenBrainzPlaylists()}
+            placeholder="Enter ListenBrainz username..."
+          />
+          <button 
+            className="btn btn-primary" 
+            onClick={loadListenBrainzPlaylists}
+            disabled={isLoadingListenBrainz || !listenBrainzUsername.trim()}
+          >
+            {isLoadingListenBrainz ? '...' : 'Load Playlists'}
+          </button>
+        </div>
       </div>
       
-      {listenBrainzPlaylists.length > 0 && (
-        <div className="playlist-grid">
-          {listenBrainzPlaylists.map(playlist => (
-            <div 
-              key={playlist.id} 
-              className="import-playlist-card"
-              onClick={() => importListenBrainzPlaylist(playlist)}
-            >
-              <div className="playlist-info">
-                <span className="playlist-name">{playlist.name}</span>
-                <span className="playlist-meta">{playlist.trackCount} tracks</span>
+      {createdForPlaylists.length > 0 && (
+        <>
+          <h3 style={{ margin: '24px 0 12px' }}>🎵 Created For You (Daily/Weekly Jams)</h3>
+          <p style={{ color: '#a0a0a0', marginBottom: '12px', fontSize: '13px' }}>
+            Personalized recommendations from troi-bot
+          </p>
+          <div className="playlist-grid">
+            {createdForPlaylists.map(playlist => (
+              <div 
+                key={playlist.id} 
+                className="import-playlist-card clickable"
+                onClick={() => importListenBrainzPlaylist(playlist)}
+              >
+                <div className="playlist-info">
+                  <span className="playlist-name">{playlist.name}</span>
+                  <span className="playlist-meta">{playlist.trackCount} tracks</span>
+                </div>
+                <span className="playlist-badge" style={{ background: '#1db954' }}>Recommended</span>
               </div>
-              <span className="playlist-badge">ListenBrainz</span>
+            ))}
+          </div>
+        </>
+      )}
+      
+      {userPlaylists.length > 0 && (
+        <>
+          <h3 style={{ margin: '24px 0 12px' }}>User Playlists</h3>
+          <div className="playlist-grid">
+            {userPlaylists.map(playlist => (
+              <div 
+                key={playlist.id} 
+                className="import-playlist-card clickable"
+                onClick={() => importListenBrainzPlaylist(playlist)}
+              >
+                <div className="playlist-info">
+                  <span className="playlist-name">{playlist.name}</span>
+                  <span className="playlist-meta">{playlist.trackCount} tracks</span>
+                </div>
+                <span className="playlist-badge">ListenBrainz</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+    );
+  };
+
+  const renderAiTab = () => (
+    <div className="import-tab-content">
+      <div className="url-import-section">
+        <h3>AI Playlist Generator</h3>
+        <p style={{ color: '#a0a0a0', marginBottom: '16px' }}>
+          Describe the playlist you want and let AI generate a track list for you
+        </p>
+        
+        {aiApiKeySaved === null ? (
+          <div style={{ color: '#888' }}>Loading...</div>
+        ) : !aiApiKeySaved || showAiSetup ? (
+          <div className="ai-setup">
+            <div className="spotify-setup">
+                <h4>AI Provider Setup</h4>
+                <div style={{ marginBottom: '16px' }}>
+                  <div className="tab-bar" style={{ marginBottom: '16px' }}>
+                    <button 
+                      className={`tab-btn ${aiProvider === 'groq' ? 'active' : ''}`}
+                      onClick={() => { setAiProvider('groq'); setAiApiKey(''); }}
+                    >
+                      Groq (Free)
+                    </button>
+                    <button 
+                      className={`tab-btn ${aiProvider === 'openai' ? 'active' : ''}`}
+                      onClick={() => { setAiProvider('openai'); setAiApiKey(''); }}
+                    >
+                      OpenAI (Paid)
+                    </button>
+                  </div>
+                </div>
+                
+                <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
+                  {aiProvider === 'groq' ? (
+                    <>
+                      <p style={{ margin: '0 0 12px', fontWeight: 500 }}>Get a free Groq API key:</p>
+                      <ol style={{ margin: 0, paddingLeft: '20px', color: '#a0a0a0', fontSize: '14px', lineHeight: '1.8' }}>
+                        <li>Go to <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style={{ color: '#e5a01c' }}>console.groq.com/keys</a></li>
+                        <li>Sign up or log in (no credit card needed)</li>
+                        <li>Click "Create API Key"</li>
+                        <li>Copy and paste it below</li>
+                      </ol>
+                    </>
+                  ) : (
+                    <>
+                      <p style={{ margin: '0 0 12px', fontWeight: 500 }}>Get an OpenAI API key:</p>
+                      <ol style={{ margin: 0, paddingLeft: '20px', color: '#a0a0a0', fontSize: '14px', lineHeight: '1.8' }}>
+                        <li>Go to <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" style={{ color: '#e5a01c' }}>platform.openai.com/api-keys</a></li>
+                        <li>Ensure you have billing set up (or use existing subscription)</li>
+                        <li>Create a new API key</li>
+                        <li>Paste it below</li>
+                      </ol>
+                    </>
+                  )}
+                </div>
+                
+                <div className="input-group">
+                  <label>API Key</label>
+                  <input
+                    type="password"
+                    value={aiApiKey}
+                    onChange={e => setAiApiKey(e.target.value)}
+                    placeholder={aiProvider === 'groq' ? 'gsk_...' : 'sk-...'}
+                  />
+                </div>
+                <div className="button-row">
+                  <button className="btn btn-secondary" onClick={() => { setShowAiSetup(false); loadAiApiKey(); }}>Cancel</button>
+                  <button className="btn btn-primary" onClick={saveAiApiKey} disabled={!aiApiKey.trim()}>Save</button>
+                </div>
+              </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <span style={{ color: '#888', fontSize: '13px' }}>Using: {aiProvider === 'groq' ? 'Groq' : 'OpenAI'}</span>
+              <button 
+                className="btn btn-secondary btn-small"
+                onClick={() => setShowAiSetup(true)}
+              >
+                Change Provider
+              </button>
             </div>
-          ))}
+            <div className="input-group" style={{ marginBottom: '16px' }}>
+              <label>Describe your playlist</label>
+              <textarea
+                value={aiPrompt}
+                onChange={e => setAiPrompt(e.target.value)}
+                placeholder="e.g., Upbeat 80s synth-pop songs for a road trip, or Relaxing jazz for a rainy afternoon, or Songs similar to Radiohead and Portishead..."
+                rows={3}
+                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#1a1a1a', border: '1px solid #333', color: '#fff', resize: 'vertical' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '16px' }}>
+              <div className="input-group" style={{ margin: 0, flex: '0 0 auto' }}>
+                <label>Number of tracks</label>
+                <select 
+                  value={aiTrackCount} 
+                  onChange={e => setAiTrackCount(Number(e.target.value))}
+                  style={{ padding: '8px 12px', borderRadius: '6px', background: '#1a1a1a', border: '1px solid #333', color: '#fff' }}
+                >
+                  <option value={10}>10 tracks</option>
+                  <option value={15}>15 tracks</option>
+                  <option value={25}>25 tracks</option>
+                  <option value={50}>50 tracks</option>
+                  <option value={100}>100 tracks</option>
+                </select>
+              </div>
+              <button 
+                className="btn btn-primary"
+                onClick={generateAiPlaylist}
+                disabled={isGeneratingAi || !aiPrompt.trim()}
+                style={{ marginTop: '20px' }}
+              >
+                {isGeneratingAi ? 'Generating...' : 'Generate Playlist'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+      
+      {aiGeneratedTracks.length > 0 && (
+        <div style={{ marginTop: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div>
+              <input
+                type="text"
+                value={aiPlaylistName}
+                onChange={e => setAiPlaylistName(e.target.value)}
+                style={{ fontSize: '18px', fontWeight: 'bold', background: 'transparent', border: 'none', borderBottom: '1px solid #333', color: '#fff', padding: '4px 0', width: '300px' }}
+                placeholder="Playlist name..."
+              />
+              <p style={{ color: '#888', fontSize: '13px', marginTop: '4px' }}>{aiGeneratedTracks.length} tracks generated</p>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="btn btn-secondary" onClick={() => setAiGeneratedTracks([])}>
+                Clear
+              </button>
+              <button className="btn btn-primary" onClick={importAiPlaylist}>
+                Import to Plex
+              </button>
+            </div>
+          </div>
+          
+          <div className="preview-track-list" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            {aiGeneratedTracks.map((track, i) => (
+              <div key={i} className="preview-track-item">
+                <span className="preview-track-number">{i + 1}</span>
+                <div className="preview-track-info">
+                  <span className="preview-track-title">{track.title}</span>
+                  <span className="preview-track-artist">{track.artist}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
+      
+      <div style={{ marginTop: '24px', padding: '16px', background: '#1a1a1a', borderRadius: '8px' }}>
+        <h4 style={{ marginBottom: '8px', color: '#e5a01c' }}>Tips for better results</h4>
+        <ul style={{ color: '#888', fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
+          <li>Be specific about mood, era, or genre</li>
+          <li>Mention similar artists for style reference</li>
+          <li>Include context like "for working out" or "dinner party"</li>
+          <li>Try "deep cuts" or "lesser known tracks" for variety</li>
+        </ul>
+      </div>
     </div>
   );
 
@@ -2346,12 +2651,6 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
           Qobuz
         </button>
         <button 
-          className={`tab-btn ${activeTab === 'plex' ? 'active' : ''}`}
-          onClick={() => setActiveTab('plex')}
-        >
-          Plex
-        </button>
-        <button 
           className={`tab-btn ${activeTab === 'file' ? 'active' : ''}`}
           onClick={() => setActiveTab('file')}
         >
@@ -2363,6 +2662,12 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
         >
           ListenBrainz
         </button>
+        <button 
+          className={`tab-btn ${activeTab === 'ai' ? 'active' : ''}`}
+          onClick={() => setActiveTab('ai')}
+        >
+          AI
+        </button>
       </div>
       
       {activeTab === 'deezer' && renderDeezerTab()}
@@ -2372,9 +2677,9 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
       {activeTab === 'youtube' && renderYouTubeMusicTab()}
       {activeTab === 'amazon' && renderAmazonMusicTab()}
       {activeTab === 'qobuz' && renderQobuzTab()}
-      {activeTab === 'plex' && renderPlexTab()}
       {activeTab === 'file' && renderFileTab()}
       {activeTab === 'listenbrainz' && renderListenBrainzTab()}
+      {activeTab === 'ai' && renderAiTab()}
       
       {/* Pre-import modal */}
       {preImportPlaylist && (

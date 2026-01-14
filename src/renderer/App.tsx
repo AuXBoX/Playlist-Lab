@@ -36,7 +36,7 @@ declare global {
       saveSettings: (settings: any) => Promise<boolean>;
       searchTrack: (data: { serverUrl: string; query: string }) => Promise<any[]>;
       createPlaylist: (data: { serverUrl: string; title: string; trackKeys: string[] }) => Promise<boolean>;
-      getPlaylists: (data: { serverUrl: string }) => Promise<any[]>;
+      getPlaylists: (data: { serverUrl: string; includeSmart?: boolean }) => Promise<any[]>;
       getPlaylistTracks: (data: { serverUrl: string; playlistId: string }) => Promise<any[]>;
       addToPlaylist: (data: { serverUrl: string; playlistId: string; trackKey: string }) => Promise<boolean>;
       removeFromPlaylist: (data: { serverUrl: string; playlistId: string; playlistItemId: string }) => Promise<boolean>;
@@ -220,8 +220,15 @@ export default function App() {
   const [editPlaylistTracks, setEditPlaylistTracks] = useState<any[]>([]);
   const [isLoadingEditTracks, setIsLoadingEditTracks] = useState(false);
   const [editSearchQuery, setEditSearchQuery] = useState('');
+  const [editArtistQuery, setEditArtistQuery] = useState('');
+  const [editTrackQuery, setEditTrackQuery] = useState('');
   const [editSearchResults, setEditSearchResults] = useState<any[]>([]);
   const [isEditSearching, setIsEditSearching] = useState(false);
+  const [editSortField, setEditSortField] = useState<'none' | 'title' | 'artist'>('none');
+  const [editSortDir, setEditSortDir] = useState<'asc' | 'desc'>('asc');
+  const [editDraggedIndex, setEditDraggedIndex] = useState<number | null>(null);
+  const [editUndoHistory, setEditUndoHistory] = useState<{ action: 'add' | 'remove'; track: any }[]>([]);
+  const [isUndoing, setIsUndoing] = useState(false);
 
   // Matching settings state
   const [showMatchingSettings, setShowMatchingSettings] = useState(false);
@@ -699,6 +706,33 @@ export default function App() {
     }
   };
 
+  // Handle playlist selection with auto-complete check
+  const handlePlaylistSelect = async (playlist: MatchedPlaylist) => {
+    // Check if auto-complete is enabled and all tracks matched at 100%
+    if (matchingSettings.autoCompleteOnPerfectMatch) {
+      const matchedTracks = playlist.tracks.filter(t => t.matched);
+      const allPerfectMatch = playlist.tracks.length > 0 && 
+                              matchedTracks.length === playlist.tracks.length &&
+                              matchedTracks.every(t => t.score === 100);
+      
+      if (allPerfectMatch) {
+        // Auto-create the playlist
+        const trackKeys = matchedTracks.map(t => t.plexRatingKey!);
+        const success = await window.api.createPlaylist({ serverUrl: serverUrl!, title: playlist.name, trackKeys });
+        if (success) {
+          setCreatedPlaylists(prev => [...prev, playlist.id]);
+          setStatusMessage(`✓ Auto-created "${playlist.name}" with ${trackKeys.length} tracks (all 100% matched)`);
+          setTimeout(() => setStatusMessage(''), 5000);
+          // Don't show the review screen
+          return;
+        }
+      }
+    }
+    
+    // Show the review screen as normal
+    setSelectedPlaylist(playlist);
+  };
+
   // Manual search
   const handleManualSearch = async () => {
     console.log('Manual search triggered, serverUrl:', serverUrl, 'query:', manualSearchQuery);
@@ -862,7 +896,7 @@ export default function App() {
       case 'schedule':
         return renderSchedulePage();
       case 'import':
-        return <ImportPage serverUrl={serverUrl} onBack={() => setCurrentPage('import')} onPlaylistSelect={setSelectedPlaylist} importProgress={importProgress} setImportProgress={setImportProgress} />;
+        return <ImportPage serverUrl={serverUrl} onBack={() => setCurrentPage('import')} onPlaylistSelect={handlePlaylistSelect} importProgress={importProgress} setImportProgress={setImportProgress} matchingSettings={matchingSettings} />;
       case 'share':
         return <SharingPage serverUrl={serverUrl} onBack={() => setCurrentPage('share')} />;
       case 'backup':
@@ -1025,6 +1059,13 @@ export default function App() {
     </div>
   );
 
+  // Auto-load playlists when navigating to Edit Playlists page
+  useEffect(() => {
+    if (currentPage === 'edit' && serverUrl && editPlaylists.length === 0) {
+      loadEditPlaylists();
+    }
+  }, [currentPage, serverUrl]);
+
   // Edit Playlists functions
   const loadEditPlaylists = async () => {
     if (!serverUrl) return;
@@ -1056,11 +1097,29 @@ export default function App() {
   };
 
   const handleEditSearch = async () => {
-    if (!editSearchQuery.trim() || !serverUrl) return;
+    if ((!editArtistQuery.trim() && !editTrackQuery.trim()) || !serverUrl) return;
     setIsEditSearching(true);
     try {
-      const results = await window.api.searchTrack({ serverUrl, query: editSearchQuery });
-      setEditSearchResults(results);
+      // Build search query combining artist and track
+      let query = '';
+      if (editArtistQuery.trim() && editTrackQuery.trim()) {
+        query = `${editArtistQuery.trim()} ${editTrackQuery.trim()}`;
+      } else {
+        query = editArtistQuery.trim() || editTrackQuery.trim();
+      }
+      const results = await window.api.searchTrack({ serverUrl, query });
+      // Filter results if both fields are filled
+      let filteredResults = results;
+      if (editArtistQuery.trim() && editTrackQuery.trim()) {
+        const artistLower = editArtistQuery.trim().toLowerCase();
+        const trackLower = editTrackQuery.trim().toLowerCase();
+        filteredResults = results.filter((track: any) => {
+          const matchesArtist = (track.grandparentTitle || '').toLowerCase().includes(artistLower);
+          const matchesTrack = (track.title || '').toLowerCase().includes(trackLower);
+          return matchesArtist && matchesTrack;
+        });
+      }
+      setEditSearchResults(filteredResults);
     } catch (error) {
       console.error('Error searching:', error);
     } finally {
@@ -1076,11 +1135,14 @@ export default function App() {
       trackKey: track.ratingKey 
     });
     if (success) {
+      // Track for undo
+      setEditUndoHistory(prev => [...prev, { action: 'add', track }]);
       // Reload tracks
       const tracks = await window.api.getPlaylistTracks({ serverUrl, playlistId: editingPlaylist.ratingKey });
       setEditPlaylistTracks(tracks);
       setEditSearchResults([]);
-      setEditSearchQuery('');
+      setEditArtistQuery('');
+      setEditTrackQuery('');
     }
   };
 
@@ -1092,18 +1154,134 @@ export default function App() {
       playlistItemId: track.playlistItemID 
     });
     if (success) {
+      // Track for undo
+      setEditUndoHistory(prev => [...prev, { action: 'remove', track }]);
       setEditPlaylistTracks(prev => prev.filter(t => t.playlistItemID !== track.playlistItemID));
+    }
+  };
+
+  const handleEditUndo = async () => {
+    if (editUndoHistory.length === 0 || !editingPlaylist || !serverUrl || isUndoing) return;
+    setIsUndoing(true);
+    
+    const lastAction = editUndoHistory[editUndoHistory.length - 1];
+    try {
+      if (lastAction.action === 'add') {
+        // Undo add = remove the track
+        // Find the track in current playlist to get its playlistItemID
+        const trackInPlaylist = editPlaylistTracks.find(t => t.ratingKey === lastAction.track.ratingKey);
+        if (trackInPlaylist) {
+          await window.api.removeFromPlaylist({
+            serverUrl,
+            playlistId: editingPlaylist.ratingKey,
+            playlistItemId: trackInPlaylist.playlistItemID
+          });
+        }
+      } else {
+        // Undo remove = add the track back
+        await window.api.addToPlaylist({
+          serverUrl,
+          playlistId: editingPlaylist.ratingKey,
+          trackKey: lastAction.track.ratingKey
+        });
+      }
+      
+      // Remove from history
+      setEditUndoHistory(prev => prev.slice(0, -1));
+      
+      // Reload tracks
+      const tracks = await window.api.getPlaylistTracks({ serverUrl, playlistId: editingPlaylist.ratingKey });
+      setEditPlaylistTracks(tracks);
+    } catch (error) {
+      console.error('Error undoing:', error);
+    } finally {
+      setIsUndoing(false);
     }
   };
 
   const renderEditPlaylistsPage = () => {
     // If editing a specific playlist, show the detail view
     if (editingPlaylist) {
+      // Sorting logic
+      let tracksToShow = [...editPlaylistTracks];
+      if (editSortField !== 'none') {
+        tracksToShow.sort((a, b) => {
+          let cmp = 0;
+          if (editSortField === 'title') {
+            cmp = (a.title || '').localeCompare(b.title || '');
+          } else if (editSortField === 'artist') {
+            cmp = (a.grandparentTitle || '').localeCompare(b.grandparentTitle || '');
+          }
+          return editSortDir === 'asc' ? cmp : -cmp;
+        });
+      }
+
+      const handleEditSort = (field: 'title' | 'artist') => {
+        if (editSortField === field) {
+          if (editSortDir === 'asc') setEditSortDir('desc');
+          else { setEditSortField('none'); setEditSortDir('asc'); }
+        } else {
+          setEditSortField(field);
+          setEditSortDir('asc');
+        }
+      };
+
+      const handleEditDragStart = (index: number) => {
+        if (editSortField !== 'none') return;
+        setEditDraggedIndex(index);
+      };
+
+      const handleEditDragOver = (e: React.DragEvent, index: number) => {
+        e.preventDefault();
+        if (editSortField !== 'none' || editDraggedIndex === null || editDraggedIndex === index) return;
+      };
+
+      const handleEditDrop = async (targetIndex: number) => {
+        if (editSortField !== 'none' || editDraggedIndex === null || editDraggedIndex === targetIndex) {
+          setEditDraggedIndex(null);
+          return;
+        }
+        const newTracks = [...editPlaylistTracks];
+        const [moved] = newTracks.splice(editDraggedIndex, 1);
+        newTracks.splice(targetIndex, 0, moved);
+        setEditPlaylistTracks(newTracks);
+        setEditDraggedIndex(null);
+
+        // Update order in Plex
+        try {
+          const afterItemId = targetIndex > 0 ? newTracks[targetIndex - 1].playlistItemID : null;
+          await window.api.movePlaylistItem({
+            serverUrl: serverUrl!,
+            playlistId: editingPlaylist.ratingKey,
+            itemId: moved.playlistItemID,
+            afterId: afterItemId
+          });
+        } catch (error) {
+          console.error('Error reordering track:', error);
+          // Reload tracks to get correct order
+          const tracks = await window.api.getPlaylistTracks({ serverUrl: serverUrl!, playlistId: editingPlaylist.ratingKey });
+          setEditPlaylistTracks(tracks);
+        }
+      };
+
+      const editSortIcon = (field: string) => {
+        if (editSortField !== field) return '↕';
+        return editSortDir === 'asc' ? '↑' : '↓';
+      };
+
       return (
         <div className="page-content">
           <div className="page-header">
-            <button className="btn btn-secondary btn-small" onClick={() => setEditingPlaylist(null)}>← Back</button>
+            <button className="btn btn-secondary btn-small" onClick={() => { setEditingPlaylist(null); setEditSortField('none'); setEditSortDir('asc'); setEditUndoHistory([]); }}>← Back</button>
             <h1>{editingPlaylist.title}</h1>
+            <button 
+              className="btn btn-secondary btn-small" 
+              onClick={handleEditUndo} 
+              disabled={editUndoHistory.length === 0 || isUndoing}
+              title={editUndoHistory.length > 0 ? `Undo ${editUndoHistory[editUndoHistory.length - 1].action} (${editUndoHistory.length} actions)` : 'Nothing to undo'}
+            >
+              {isUndoing ? '...' : `↩ Undo${editUndoHistory.length > 0 ? ` (${editUndoHistory.length})` : ''}`}
+            </button>
           </div>
 
           <div className="card">
@@ -1111,12 +1289,19 @@ export default function App() {
             <div className="search-bar-row" style={{ marginBottom: '16px' }}>
               <input
                 type="text"
-                value={editSearchQuery}
-                onChange={e => setEditSearchQuery(e.target.value)}
+                value={editArtistQuery}
+                onChange={e => setEditArtistQuery(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleEditSearch()}
-                placeholder="Search for tracks to add..."
+                placeholder="Artist name..."
               />
-              <button className="btn btn-primary" onClick={handleEditSearch} disabled={isEditSearching}>
+              <input
+                type="text"
+                value={editTrackQuery}
+                onChange={e => setEditTrackQuery(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleEditSearch()}
+                placeholder="Track title..."
+              />
+              <button className="btn btn-primary" onClick={handleEditSearch} disabled={isEditSearching || (!editArtistQuery.trim() && !editTrackQuery.trim())}>
                 {isEditSearching ? '...' : 'Search'}
               </button>
             </div>
@@ -1145,24 +1330,53 @@ export default function App() {
             ) : editPlaylistTracks.length === 0 ? (
               <p className="empty-state">No tracks in this playlist</p>
             ) : (
-              <div className="edit-track-list">
-                {editPlaylistTracks.map((track: any, index: number) => (
-                  <div key={track.playlistItemID || track.ratingKey} className="edit-track-item">
-                    <span className="track-number">{index + 1}</span>
-                    <div className="track-info">
-                      <span className="track-title">{track.title}</span>
-                      <span className="track-artist">{track.grandparentTitle} - {track.parentTitle}</span>
-                    </div>
-                    <button 
-                      className="btn btn-small btn-danger" 
-                      onClick={() => handleRemoveTrackFromPlaylist(track)}
-                      title="Remove from playlist"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <>
+                <div className="track-list-header" style={{ display: 'flex', padding: '8px 12px', borderBottom: '1px solid #333', fontSize: '12px', color: '#888', gap: '8px' }}>
+                  <span style={{ width: '40px' }}>#</span>
+                  <span style={{ flex: 2, cursor: 'pointer' }} onClick={() => handleEditSort('title')} title="Sort by title">
+                    Title {editSortIcon('title')}
+                  </span>
+                  <span style={{ flex: 1, cursor: 'pointer' }} onClick={() => handleEditSort('artist')} title="Sort by artist">
+                    Artist {editSortIcon('artist')}
+                  </span>
+                  <span style={{ width: '80px' }}></span>
+                </div>
+                <div className="edit-track-list">
+                  {tracksToShow.map((track: any, index: number) => {
+                    const actualIndex = editPlaylistTracks.findIndex(t => t.playlistItemID === track.playlistItemID);
+                    return (
+                      <div 
+                        key={track.playlistItemID || track.ratingKey} 
+                        className={`edit-track-item ${editDraggedIndex === actualIndex ? 'dragging' : ''}`}
+                        draggable={editSortField === 'none'}
+                        onDragStart={() => handleEditDragStart(actualIndex)}
+                        onDragOver={(e) => handleEditDragOver(e, actualIndex)}
+                        onDrop={() => handleEditDrop(actualIndex)}
+                        onDragEnd={() => setEditDraggedIndex(null)}
+                        title={editSortField === 'none' ? 'Drag to reorder' : ''}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: editSortField === 'none' ? 'grab' : 'default' }}
+                      >
+                        <span className="track-number" style={{ width: '40px', color: '#666', fontSize: '12px' }}>{index + 1}</span>
+                        <div className="track-info" style={{ flex: 2 }}>
+                          <span className="track-title">{track.title}</span>
+                          <span className="track-artist" style={{ display: 'block', color: '#888', fontSize: '12px' }}>{track.parentTitle}</span>
+                        </div>
+                        <div style={{ flex: 1, color: '#888' }}>
+                          <span>{track.grandparentTitle}</span>
+                        </div>
+                        <button 
+                          className="btn btn-small btn-danger" 
+                          onClick={(e) => { e.stopPropagation(); handleRemoveTrackFromPlaylist(track); }}
+                          title="Remove from playlist"
+                          style={{ width: '80px' }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -1750,6 +1964,79 @@ export default function App() {
                 <input type="checkbox" checked={matchingSettings.penalizeLiveVersions} onChange={e => updateMatchingSettings({...matchingSettings, penalizeLiveVersions: e.target.checked})} />
                 Prefer studio over live versions
               </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.preferHigherRated} onChange={e => updateMatchingSettings({...matchingSettings, preferHigherRated: e.target.checked})} />
+                Prefer higher rated tracks
+              </label>
+              {matchingSettings.preferHigherRated && (
+                <div style={{ marginLeft: '24px', marginTop: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                    <span>Skip tracks rated below:</span>
+                    <select 
+                      value={matchingSettings.minRatingForMatch} 
+                      onChange={e => updateMatchingSettings({...matchingSettings, minRatingForMatch: parseInt(e.target.value)})}
+                      className="select select-small"
+                      style={{ width: 'auto' }}
+                    >
+                      <option value={0}>Don't skip any</option>
+                      <option value={2}>½ star (1/10)</option>
+                      <option value={4}>1 star (2/10)</option>
+                      <option value={6}>1½ stars (3/10)</option>
+                    </select>
+                    <span style={{ color: '#888', fontSize: '12px' }}>(unless perfect match)</span>
+                  </label>
+                </div>
+              )}
+              <label className="checkbox-label">
+                <input type="checkbox" checked={matchingSettings.autoCompleteOnPerfectMatch} onChange={e => updateMatchingSettings({...matchingSettings, autoCompleteOnPerfectMatch: e.target.checked})} />
+                Auto-create playlist if all tracks match 100%
+              </label>
+            </div>
+            
+            <div className="setting-group">
+              <h3>Playlist Name Prefixes</h3>
+              <p className="setting-hint">Add source prefixes to playlist names for easy identification</p>
+              <label className="checkbox-label">
+                <input 
+                  type="checkbox" 
+                  checked={matchingSettings.playlistPrefixes?.enabled || false} 
+                  onChange={e => updateMatchingSettings({
+                    ...matchingSettings, 
+                    playlistPrefixes: { ...matchingSettings.playlistPrefixes, enabled: e.target.checked }
+                  })} 
+                />
+                Enable playlist name prefixes
+              </label>
+              {matchingSettings.playlistPrefixes?.enabled && (
+                <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  {[
+                    { key: 'spotify', label: 'Spotify' },
+                    { key: 'deezer', label: 'Deezer' },
+                    { key: 'apple', label: 'Apple Music' },
+                    { key: 'tidal', label: 'Tidal' },
+                    { key: 'youtube', label: 'YouTube' },
+                    { key: 'amazon', label: 'Amazon' },
+                    { key: 'qobuz', label: 'Qobuz' },
+                    { key: 'listenbrainz', label: 'ListenBrainz' },
+                    { key: 'file', label: 'File/iTunes' },
+                    { key: 'ai', label: 'AI Generated' },
+                  ].map(({ key, label }) => (
+                    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <label style={{ width: '90px', fontSize: '12px', color: '#888' }}>{label}:</label>
+                      <input
+                        type="text"
+                        value={(matchingSettings.playlistPrefixes as any)?.[key] || ''}
+                        onChange={e => updateMatchingSettings({
+                          ...matchingSettings,
+                          playlistPrefixes: { ...matchingSettings.playlistPrefixes, [key]: e.target.value }
+                        })}
+                        style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }}
+                        placeholder={`e.g. ${key.toUpperCase().slice(0, 4)}:`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             
             <div className="setting-group">

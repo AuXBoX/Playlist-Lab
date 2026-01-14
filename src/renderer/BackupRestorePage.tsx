@@ -48,7 +48,7 @@ export default function BackupRestorePage({ serverUrl, onBack }: BackupRestorePa
   const loadPlaylists = async () => {
     setIsLoading(true);
     try {
-      const data = await window.api.getPlaylists({ serverUrl });
+      const data = await window.api.getPlaylists({ serverUrl, includeSmart: true });
       setPlaylists(data || []);
     } catch (error: any) {
       setStatusMessage(`Error: ${error.message}`);

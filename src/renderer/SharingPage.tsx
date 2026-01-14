@@ -67,7 +67,7 @@ export default function SharingPage({ serverUrl, onBack }: SharingPageProps) {
     
     try {
       // Load admin playlists first
-      const adminPlaylistsData = await window.api.getPlaylists({ serverUrl });
+      const adminPlaylistsData = await window.api.getPlaylists({ serverUrl, includeSmart: true });
       setAdminPlaylists(adminPlaylistsData || []);
       
       // Try both endpoints and combine results

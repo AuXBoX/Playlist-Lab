@@ -15,6 +15,23 @@ export interface MatchingSettings {
   preferNonCompilation: boolean;
   penalizeMonoVersions: boolean;
   penalizeLiveVersions: boolean;
+  preferHigherRated: boolean;
+  minRatingForMatch: number; // 0-10 scale (Plex uses 0-10), 0 = disabled
+  autoCompleteOnPerfectMatch: boolean; // Auto-create playlist if all tracks match 100%
+  // Playlist name prefixes by source
+  playlistPrefixes: {
+    enabled: boolean;
+    spotify: string;
+    deezer: string;
+    apple: string;
+    tidal: string;
+    youtube: string;
+    amazon: string;
+    qobuz: string;
+    listenbrainz: string;
+    file: string;
+    ai: string;
+  };
   customStripPatterns: string[];
   // Editable pattern lists
   featuredArtistPatterns: string[];
@@ -72,6 +89,22 @@ export const DEFAULT_MATCHING_SETTINGS: MatchingSettings = {
   preferNonCompilation: true,
   penalizeMonoVersions: true,
   penalizeLiveVersions: true,
+  preferHigherRated: true,
+  minRatingForMatch: 4, // Skip tracks rated below 2 stars (4/10) unless perfect match
+  autoCompleteOnPerfectMatch: false, // Auto-create playlist if all tracks match 100%
+  playlistPrefixes: {
+    enabled: false,
+    spotify: 'SPOT:',
+    deezer: 'DEEZ:',
+    apple: 'APPL:',
+    tidal: 'TIDL:',
+    youtube: 'YT:',
+    amazon: 'AMZN:',
+    qobuz: 'QOBZ:',
+    listenbrainz: 'LB:',
+    file: 'FILE:',
+    ai: 'AI:',
+  },
   customStripPatterns: [],
   featuredArtistPatterns: [...DEFAULT_FEATURED_ARTIST_PATTERNS],
   versionSuffixPatterns: [...DEFAULT_VERSION_SUFFIX_PATTERNS],
@@ -80,6 +113,30 @@ export const DEFAULT_MATCHING_SETTINGS: MatchingSettings = {
   penaltyKeywords: [...DEFAULT_PENALTY_KEYWORDS],
   priorityKeywords: [...DEFAULT_PRIORITY_KEYWORDS],
 };
+
+// Helper to apply playlist name prefix based on source
+export function applyPlaylistPrefix(name: string, source: string, settings: MatchingSettings): string {
+  if (!settings.playlistPrefixes?.enabled) return name;
+  
+  const prefixMap: Record<string, string> = {
+    spotify: settings.playlistPrefixes.spotify || 'SPOT:',
+    deezer: settings.playlistPrefixes.deezer || 'DEEZ:',
+    apple: settings.playlistPrefixes.apple || 'APPL:',
+    tidal: settings.playlistPrefixes.tidal || 'TIDL:',
+    youtube: settings.playlistPrefixes.youtube || 'YT:',
+    amazon: settings.playlistPrefixes.amazon || 'AMZN:',
+    qobuz: settings.playlistPrefixes.qobuz || 'QOBZ:',
+    listenbrainz: settings.playlistPrefixes.listenbrainz || 'LB:',
+    file: settings.playlistPrefixes.file || 'FILE:',
+    ai: settings.playlistPrefixes.ai || 'AI:',
+  };
+  
+  const prefix = prefixMap[source.toLowerCase()];
+  if (prefix) {
+    return `${prefix} ${name}`;
+  }
+  return name;
+}
 
 // Last.fm country names
 const LASTFM_COUNTRIES: Record<string, string> = {
@@ -546,7 +603,7 @@ function isMonoVersion(title: string): boolean {
 }
 
 /**
- * Check if title is a Live version - these should be deprioritized when source is studio
+ * Check if title/album is a Live version - these should be deprioritized when source is studio
  */
 function isLiveVersion(title: string): boolean {
   const livePatterns = [
@@ -556,6 +613,10 @@ function isLiveVersion(title: string): boolean {
     /\blive\s+(at|from|in)\s+/i, // Live at..., Live from...
     /\blive\s+version/i,        // Live Version
     /\blive\s+recording/i,      // Live Recording
+    /\blive$/i,                 // Ends with "Live" (for album names like "Greatest Hits Live")
+    /\bunplugged\b/i,           // MTV Unplugged etc.
+    /\bin\s+concert\b/i,        // In Concert
+    /\bconcert\s+(recording|album)\b/i, // Concert Recording/Album
   ];
   
   return livePatterns.some(pattern => pattern.test(title));
@@ -979,9 +1040,14 @@ async function findBestMatch(
       if (currentMatchingSettings.penalizeLiveVersions) {
         const sourceIsLive = isLiveVersion(track.title);
         const plexIsLive = isLiveVersion(plexTitle);
-        // Only penalize if source is NOT live but Plex version IS live
+        const albumIsLive = isLiveVersion(albumName); // Also check album name for "Greatest Hits Live" etc.
+        
+        // Only penalize if source is NOT live but Plex version IS live (track or album)
         if (!sourceIsLive && plexIsLive) {
           score -= 50; // Strong penalty - user likely wants studio version
+        } else if (!sourceIsLive && albumIsLive && !plexIsLive) {
+          // Album says "Live" but track title doesn't - still penalize but less severely
+          score -= 35; // Penalty for live album even if track title doesn't say live
         }
         // Small bonus if both are live (user wants live version)
         if (sourceIsLive && plexIsLive) {
@@ -1005,6 +1071,41 @@ async function findBestMatch(
         const keywordLower = keyword.toLowerCase();
         if (plexTitleLower.includes(keywordLower)) {
           score += 10;
+        }
+      }
+      
+      // Handle user ratings - prefer higher rated tracks, penalize/skip low rated
+      if (currentMatchingSettings.preferHigherRated) {
+        const userRating = result.userRating; // Plex uses 0-10 scale
+        
+        if (userRating !== undefined && userRating !== null) {
+          // Check if this is a "perfect match" (exact title + artist)
+          const cleanSourceTitle = normalizeForComparison(cleanTrackTitle(track.title));
+          const cleanPlexTitle = normalizeForComparison(cleanTrackTitle(plexTitle));
+          const cleanSourceArtist = normalizeForComparison(cleanArtistName(track.artist));
+          const cleanPlexArtist = normalizeForComparison(cleanArtistName(albumArtist || trackArtist || ''));
+          const isPerfectMatch = cleanSourceTitle === cleanPlexTitle && cleanSourceArtist === cleanPlexArtist;
+          
+          // If track is rated below minimum and NOT a perfect match, skip it entirely
+          if (currentMatchingSettings.minRatingForMatch > 0 && 
+              userRating < currentMatchingSettings.minRatingForMatch && 
+              !isPerfectMatch) {
+            continue; // Skip this low-rated track
+          }
+          
+          // Bonus for highly rated tracks (4-5 stars = 8-10)
+          if (userRating >= 8) {
+            score += 30; // Strong bonus for 4-5 star tracks
+          } else if (userRating >= 6) {
+            score += 15; // Moderate bonus for 3 star tracks
+          }
+          
+          // Penalty for low rated tracks (even if not skipped due to perfect match)
+          if (userRating <= 2) {
+            score -= 40; // Strong penalty for 1 star
+          } else if (userRating <= 4) {
+            score -= 20; // Moderate penalty for 2 stars
+          }
         }
       }
       

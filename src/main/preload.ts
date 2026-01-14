@@ -19,10 +19,11 @@ contextBridge.exposeInMainWorld('api', {
   // Plex operations
   searchTrack: (data: { serverUrl: string; query: string }) => ipcRenderer.invoke('search-track', data),
   createPlaylist: (data: { serverUrl: string; title: string; trackKeys: string[] }) => ipcRenderer.invoke('create-playlist', data),
-  getPlaylists: (data: { serverUrl: string }) => ipcRenderer.invoke('get-playlists', data),
+  getPlaylists: (data: { serverUrl: string; includeSmart?: boolean }) => ipcRenderer.invoke('get-playlists', data),
   getPlaylistTracks: (data: { serverUrl: string; playlistId: string }) => ipcRenderer.invoke('get-playlist-tracks', data),
   addToPlaylist: (data: { serverUrl: string; playlistId: string; trackKey: string }) => ipcRenderer.invoke('add-to-playlist', data),
   removeFromPlaylist: (data: { serverUrl: string; playlistId: string; playlistItemId: string }) => ipcRenderer.invoke('remove-from-playlist', data),
+  movePlaylistItem: (data: { serverUrl: string; playlistId: string; itemId: string; afterId: string | null }) => ipcRenderer.invoke('move-playlist-item', data),
   
   // Weekly mix operations
   getPlayHistory: (data: { serverUrl: string; libraryId: string }) => ipcRenderer.invoke('get-play-history', data),
@@ -124,6 +125,13 @@ contextBridge.exposeInMainWorld('api', {
   // ListenBrainz
   getListenBrainzPlaylists: (data: { username: string }) => ipcRenderer.invoke('get-listenbrainz-playlists', data),
   getListenBrainzPlaylistTracks: (data: { playlistId: string }) => ipcRenderer.invoke('get-listenbrainz-playlist-tracks', data),
+  
+  // OpenAI AI Playlist Generation
+  getAiConfig: () => ipcRenderer.invoke('get-ai-config'),
+  saveAiConfig: (data: { provider: string; apiKey: string }) => ipcRenderer.invoke('save-ai-config', data),
+  getOpenAiApiKey: () => ipcRenderer.invoke('get-openai-api-key'),
+  saveOpenAiApiKey: (apiKey: string) => ipcRenderer.invoke('save-openai-api-key', apiKey),
+  generateAiPlaylist: (data: { prompt: string; trackCount: number; apiKey: string; provider?: string }) => ipcRenderer.invoke('generate-ai-playlist', data),
   
   // Playlist sharing
   getHomeUsers: () => ipcRenderer.invoke('get-home-users'),

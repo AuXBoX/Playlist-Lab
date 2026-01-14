@@ -737,6 +737,11 @@ body {
   margin-top: 2px;
 }
 
+.edit-track-item.dragging {
+  opacity: 0.5;
+  background: rgba(229, 160, 28, 0.1);
+}
+
 .search-result-item .track-info {
   flex: 1;
   min-width: 0;
@@ -805,7 +810,6 @@ body {
 .import-page {
   padding: 20px;
   max-width: 900px;
-  margin: 0 auto;
 }
 
 .import-header {
