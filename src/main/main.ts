@@ -220,6 +220,7 @@ ipcMain.handle('get-settings', () => {
     libraryId: store.get('libraryId') as string | null,
     autoSync: store.get('autoSync', false) as boolean,
     matchingSettings: store.get('matchingSettings') as any | null,
+    mixSettings: store.get('mixSettings') as any | null,
   };
 });
 
@@ -229,6 +230,7 @@ ipcMain.handle('save-settings', (_, settings) => {
   if (settings.libraryId !== undefined) store.set('libraryId', settings.libraryId);
   if (settings.autoSync !== undefined) store.set('autoSync', settings.autoSync);
   if (settings.matchingSettings !== undefined) store.set('matchingSettings', settings.matchingSettings);
+  if (settings.mixSettings !== undefined) store.set('mixSettings', settings.mixSettings);
   return true;
 });
 
@@ -542,6 +544,387 @@ ipcMain.handle('get-stale-played-tracks', async (_, { serverUrl, libraryId, days
   const staleTracks = tracks.filter((t: any) => (t.lastViewedAt || 0) * 1000 < cutoff);
   console.log(`[get-stale-played-tracks] Tracks not played in ${daysAgo} days:`, staleTracks.length);
   return staleTracks.slice(0, limit);
+});
+
+// Get tracks for Time Capsule with artist diversity
+ipcMain.handle('get-time-capsule-tracks', async (_, { serverUrl, libraryId, daysAgo, targetCount, maxPerArtist }) => {
+  const token = store.get('plexToken') as string;
+  // Fetch a larger pool of tracks not played in X days, sorted by oldest first
+  const poolSize = targetCount * 10; // Get 10x to ensure diversity
+  const url = `${serverUrl}/library/sections/${libraryId}/all?type=10&sort=lastViewedAt:asc&lastViewedAt%3E%3E=0&X-Plex-Container-Size=${poolSize}&X-Plex-Token=${token}`;
+  console.log('[get-time-capsule-tracks] Fetching pool...');
+  const response = await fetch(url, { headers: PLEX_HEADERS });
+  if (!response.ok) {
+    console.log('[get-time-capsule-tracks] Failed:', response.status);
+    return [];
+  }
+  const data = await response.json();
+  const allTracks = data.MediaContainer?.Metadata || [];
+  
+  // Filter to tracks not played in X days
+  const cutoff = Date.now() - daysAgo * 24 * 60 * 60 * 1000;
+  const staleTracks = allTracks.filter((t: any) => (t.lastViewedAt || 0) * 1000 < cutoff);
+  console.log(`[get-time-capsule-tracks] Found ${staleTracks.length} tracks not played in ${daysAgo}+ days`);
+  
+  if (staleTracks.length === 0) return [];
+  
+  // Group tracks by artist
+  const tracksByArtist = new Map<string, any[]>();
+  for (const track of staleTracks) {
+    const artist = track.grandparentTitle || 'Unknown';
+    if (!tracksByArtist.has(artist)) {
+      tracksByArtist.set(artist, []);
+    }
+    tracksByArtist.get(artist)!.push(track);
+  }
+  
+  console.log(`[get-time-capsule-tracks] Tracks spread across ${tracksByArtist.size} artists`);
+  
+  // Select tracks with artist diversity using round-robin
+  const selectedTracks: any[] = [];
+  const artistQueues = Array.from(tracksByArtist.entries()).map(([artist, tracks]) => ({
+    artist,
+    tracks: [...tracks], // Copy array
+    selected: 0
+  }));
+  
+  // Shuffle artist order for variety
+  for (let i = artistQueues.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [artistQueues[i], artistQueues[j]] = [artistQueues[j], artistQueues[i]];
+  }
+  
+  // Round-robin selection: take one track from each artist in rotation
+  let hasMore = true;
+  while (selectedTracks.length < targetCount && hasMore) {
+    hasMore = false;
+    for (const queue of artistQueues) {
+      if (selectedTracks.length >= targetCount) break;
+      if (queue.selected >= maxPerArtist) continue; // Skip if artist hit max
+      if (queue.tracks.length === 0) continue;
+      
+      // Pick a random track from this artist's remaining tracks
+      const randomIndex = Math.floor(Math.random() * queue.tracks.length);
+      const track = queue.tracks.splice(randomIndex, 1)[0];
+      selectedTracks.push(track);
+      queue.selected++;
+      hasMore = true;
+    }
+  }
+  
+  // Log diversity stats
+  const artistCounts = new Map<string, number>();
+  for (const track of selectedTracks) {
+    const artist = track.grandparentTitle || 'Unknown';
+    artistCounts.set(artist, (artistCounts.get(artist) || 0) + 1);
+  }
+  console.log(`[get-time-capsule-tracks] Selected ${selectedTracks.length} tracks from ${artistCounts.size} artists`);
+  
+  return selectedTracks;
+});
+
+// Get custom filtered tracks for custom mix builder
+ipcMain.handle('get-custom-mix-tracks', async (_, { serverUrl, libraryId, options }) => {
+  const token = store.get('plexToken') as string;
+  const { 
+    type, // 'mostPlayed' | 'leastPlayed' | 'unplayed' | 'highRated' | 'recentlyAdded' | 'all'
+    limit = 100,
+    minRating = 0, // 0-10 scale (Plex uses 0-10)
+    addedWithin = 0, // days, 0 = any
+    yearFrom = 0,
+    yearTo = 0,
+    maxPerArtist = 999,
+    sortBy = 'random' // 'random' | 'playCount' | 'rating' | 'addedAt' | 'lastPlayed' | 'title'
+  } = options;
+  
+  // Build query parameters
+  let filters: string[] = ['type=10']; // tracks only
+  let sort = 'random';
+  
+  // Sort options
+  switch (sortBy) {
+    case 'playCount': sort = 'viewCount:desc'; break;
+    case 'rating': sort = 'userRating:desc'; break;
+    case 'addedAt': sort = 'addedAt:desc'; break;
+    case 'lastPlayed': sort = 'lastViewedAt:desc'; break;
+    case 'title': sort = 'titleSort:asc'; break;
+    default: sort = 'random';
+  }
+  
+  // Type-specific filters
+  switch (type) {
+    case 'mostPlayed':
+      filters.push('viewCount>>=1');
+      sort = 'viewCount:desc';
+      break;
+    case 'leastPlayed':
+      filters.push('viewCount>>=1');
+      sort = 'viewCount:asc';
+      break;
+    case 'unplayed':
+      filters.push('viewCount=0');
+      break;
+    case 'highRated':
+      filters.push('userRating>>=6'); // 3+ stars
+      sort = 'userRating:desc';
+      break;
+    case 'recentlyAdded':
+      sort = 'addedAt:desc';
+      break;
+  }
+  
+  // Rating filter (Plex uses 0-10 scale, 2 = 1 star, 10 = 5 stars)
+  if (minRating > 0) {
+    filters.push(`userRating>>=${minRating * 2}`);
+  }
+  
+  // Added within X days
+  if (addedWithin > 0) {
+    filters.push(`addedAt>>=-${addedWithin}d`);
+  }
+  
+  // Year range
+  if (yearFrom > 0) {
+    filters.push(`year>=${yearFrom}`);
+  }
+  if (yearTo > 0) {
+    filters.push(`year<=${yearTo}`);
+  }
+  
+  const filterStr = filters.join('&');
+  const fetchLimit = maxPerArtist < 999 ? limit * 5 : limit; // Fetch more if we need to filter by artist
+  const url = `${serverUrl}/library/sections/${libraryId}/all?${filterStr}&sort=${sort}&X-Plex-Container-Size=${fetchLimit}&X-Plex-Token=${token}`;
+  
+  console.log(`[get-custom-mix-tracks] Fetching with type=${type}, sort=${sortBy}`);
+  const response = await fetch(url, { headers: PLEX_HEADERS });
+  if (!response.ok) {
+    console.log('[get-custom-mix-tracks] Failed:', response.status);
+    return [];
+  }
+  
+  const data = await response.json();
+  let tracks = data.MediaContainer?.Metadata || [];
+  console.log(`[get-custom-mix-tracks] Fetched ${tracks.length} tracks`);
+  
+  // Apply max per artist filter if needed
+  if (maxPerArtist < 999) {
+    const artistCounts = new Map<string, number>();
+    const filteredTracks: any[] = [];
+    
+    for (const track of tracks) {
+      const artist = track.grandparentTitle || 'Unknown';
+      const count = artistCounts.get(artist) || 0;
+      if (count < maxPerArtist) {
+        filteredTracks.push(track);
+        artistCounts.set(artist, count + 1);
+      }
+      if (filteredTracks.length >= limit) break;
+    }
+    tracks = filteredTracks;
+    console.log(`[get-custom-mix-tracks] After artist filter: ${tracks.length} tracks from ${artistCounts.size} artists`);
+  }
+  
+  return tracks.slice(0, limit);
+});
+
+// Get genres from library
+ipcMain.handle('get-library-genres', async (_, { serverUrl, libraryId }) => {
+  const token = store.get('plexToken') as string;
+  // Get all unique genres from albums
+  const url = `${serverUrl}/library/sections/${libraryId}/all?type=9&X-Plex-Container-Size=0&X-Plex-Token=${token}`;
+  const response = await fetch(url, { headers: PLEX_HEADERS });
+  if (!response.ok) return [];
+  
+  // Get genre list from library metadata
+  const genreUrl = `${serverUrl}/library/sections/${libraryId}/genre?type=10&X-Plex-Token=${token}`;
+  const genreResponse = await fetch(genreUrl, { headers: PLEX_HEADERS });
+  if (!genreResponse.ok) return [];
+  
+  const data = await genreResponse.json();
+  const genres = (data.MediaContainer?.Directory || []).map((g: any) => ({
+    key: g.key,
+    title: g.title,
+    count: g.count || 0
+  }));
+  
+  // Sort by count descending
+  genres.sort((a: any, b: any) => (b.count || 0) - (a.count || 0));
+  console.log(`[get-library-genres] Found ${genres.length} genres`);
+  return genres.slice(0, 50); // Top 50 genres
+});
+
+// Advanced custom mix builder
+ipcMain.handle('build-custom-mix', async (_, { serverUrl, libraryId, options }) => {
+  const token = store.get('plexToken') as string;
+  const {
+    source = 'all', // 'all' | 'played' | 'unplayed' | 'recentlyPlayed' | 'topArtists'
+    historyDays = 0, // 0 = all time, otherwise limit to X days
+    topArtistsCount = 0, // If > 0, limit to top X artists from history
+    tracksPerArtist = 0, // If > 0, get X tracks per artist
+    genre = '', // Genre filter
+    minRating = 0,
+    yearFrom = 0,
+    yearTo = 0,
+    addedWithin = 0,
+    sortBy = 'random',
+    maxPerArtist = 999,
+    limit = 50
+  } = options;
+
+  console.log(`[build-custom-mix] Building with source=${source}, historyDays=${historyDays}, topArtists=${topArtistsCount}, genre=${genre}`);
+
+  // If using top artists approach
+  if (topArtistsCount > 0) {
+    // Get play history to find top artists
+    let historyUrl = `${serverUrl}/library/sections/${libraryId}/all?type=10&sort=lastViewedAt:desc&lastViewedAt>>=0&X-Plex-Container-Size=500&X-Plex-Token=${token}`;
+    const historyResponse = await fetch(historyUrl, { headers: PLEX_HEADERS });
+    if (!historyResponse.ok) return [];
+    
+    const historyData = await historyResponse.json();
+    let historyTracks = historyData.MediaContainer?.Metadata || [];
+    
+    // Filter by history days if specified
+    if (historyDays > 0) {
+      const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
+      historyTracks = historyTracks.filter((t: any) => (t.lastViewedAt || 0) * 1000 >= cutoff);
+    }
+    
+    // Count plays per artist
+    const artistCounts = new Map<string, number>();
+    for (const track of historyTracks) {
+      const artist = track.grandparentTitle || 'Unknown';
+      if (artist === 'Various Artists' || artist === 'Unknown' || artist === 'Soundtrack') continue;
+      artistCounts.set(artist, (artistCounts.get(artist) || 0) + 1);
+    }
+    
+    // Get top N artists
+    const topArtists = Array.from(artistCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, topArtistsCount)
+      .map(([name]) => name);
+    
+    console.log(`[build-custom-mix] Top ${topArtistsCount} artists:`, topArtists);
+    
+    // Get tracks from each artist
+    const allTracks: any[] = [];
+    const addedKeys = new Set<string>();
+    const tpa = tracksPerArtist || 5;
+    
+    for (const artistName of topArtists) {
+      // Find artist
+      const artistUrl = `${serverUrl}/library/sections/${libraryId}/all?type=8&title=${encodeURIComponent(artistName)}&X-Plex-Container-Size=1&X-Plex-Token=${token}`;
+      const artistResponse = await fetch(artistUrl, { headers: PLEX_HEADERS });
+      if (!artistResponse.ok) continue;
+      
+      const artistData = await artistResponse.json();
+      const artist = artistData.MediaContainer?.Metadata?.[0];
+      if (!artist) continue;
+      
+      // Get popular tracks from artist
+      const hubsUrl = `${serverUrl}/hubs/sections/${libraryId}?metadataItemId=${artist.ratingKey}&count=${tpa}&X-Plex-Token=${token}`;
+      const hubsResponse = await fetch(hubsUrl, { headers: PLEX_HEADERS });
+      
+      let artistTracks: any[] = [];
+      if (hubsResponse.ok) {
+        const hubsData = await hubsResponse.json();
+        const hubs = hubsData.MediaContainer?.Hub || [];
+        const popularHub = hubs.find((h: any) => h.title?.toLowerCase() === 'popular' || h.title?.toLowerCase() === 'top tracks');
+        if (popularHub?.Metadata?.length > 0) {
+          artistTracks = popularHub.Metadata.slice(0, tpa);
+        }
+      }
+      
+      // Fallback to viewCount sort
+      if (artistTracks.length === 0) {
+        const fallbackUrl = `${serverUrl}/library/metadata/${artist.ratingKey}/allLeaves?sort=viewCount:desc&X-Plex-Container-Size=${tpa}&X-Plex-Token=${token}`;
+        const fallbackResponse = await fetch(fallbackUrl, { headers: PLEX_HEADERS });
+        if (fallbackResponse.ok) {
+          const fallbackData = await fallbackResponse.json();
+          artistTracks = fallbackData.MediaContainer?.Metadata || [];
+        }
+      }
+      
+      // Apply genre filter if specified
+      if (genre) {
+        artistTracks = artistTracks.filter((t: any) => {
+          const trackGenres = (t.Genre || []).map((g: any) => g.tag?.toLowerCase());
+          return trackGenres.includes(genre.toLowerCase());
+        });
+      }
+      
+      for (const track of artistTracks.slice(0, tpa)) {
+        if (!addedKeys.has(track.ratingKey)) {
+          allTracks.push(track);
+          addedKeys.add(track.ratingKey);
+        }
+      }
+    }
+    
+    console.log(`[build-custom-mix] Got ${allTracks.length} tracks from top artists`);
+    return allTracks.slice(0, limit);
+  }
+  
+  // Standard query-based approach
+  let filters: string[] = ['type=10'];
+  let sort = sortBy === 'random' ? 'random' : 
+             sortBy === 'playCount' ? 'viewCount:desc' :
+             sortBy === 'rating' ? 'userRating:desc' :
+             sortBy === 'addedAt' ? 'addedAt:desc' :
+             sortBy === 'lastPlayed' ? 'lastViewedAt:desc' : 'random';
+  
+  // Source filters
+  if (source === 'played') {
+    filters.push('viewCount>>=1');
+  } else if (source === 'unplayed') {
+    filters.push('viewCount=0');
+  } else if (source === 'recentlyPlayed') {
+    filters.push('lastViewedAt>>=0');
+    sort = 'lastViewedAt:desc';
+  }
+  
+  // History days filter (for recently played)
+  if (historyDays > 0 && source === 'recentlyPlayed') {
+    filters.push(`lastViewedAt>>=-${historyDays}d`);
+  }
+  
+  // Other filters
+  if (minRating > 0) filters.push(`userRating>>=${minRating * 2}`);
+  if (yearFrom > 0) filters.push(`year>=${yearFrom}`);
+  if (yearTo > 0) filters.push(`year<=${yearTo}`);
+  if (addedWithin > 0) filters.push(`addedAt>>=-${addedWithin}d`);
+  if (genre) filters.push(`genre=${encodeURIComponent(genre)}`);
+  
+  const fetchLimit = maxPerArtist < 999 ? limit * 5 : limit;
+  const url = `${serverUrl}/library/sections/${libraryId}/all?${filters.join('&')}&sort=${sort}&X-Plex-Container-Size=${fetchLimit}&X-Plex-Token=${token}`;
+  
+  console.log(`[build-custom-mix] Query URL filters: ${filters.join('&')}`);
+  const response = await fetch(url, { headers: PLEX_HEADERS });
+  if (!response.ok) {
+    console.log('[build-custom-mix] Failed:', response.status);
+    return [];
+  }
+  
+  const data = await response.json();
+  let tracks = data.MediaContainer?.Metadata || [];
+  
+  // Apply max per artist
+  if (maxPerArtist < 999) {
+    const artistCounts = new Map<string, number>();
+    const filtered: any[] = [];
+    for (const track of tracks) {
+      const artist = track.grandparentTitle || 'Unknown';
+      const count = artistCounts.get(artist) || 0;
+      if (count < maxPerArtist) {
+        filtered.push(track);
+        artistCounts.set(artist, count + 1);
+      }
+      if (filtered.length >= limit) break;
+    }
+    tracks = filtered;
+  }
+  
+  console.log(`[build-custom-mix] Returning ${tracks.slice(0, limit).length} tracks`);
+  return tracks.slice(0, limit);
 });
 
 // Get tracks from same artist or album (for Daily Mix similarity)
@@ -2939,6 +3322,11 @@ ipcMain.handle('check-for-updates', async () => {
       }
     }
     
+    // Find the portable exe asset
+    const portableAsset = (release.assets || []).find((a: any) => 
+      a.name.includes('Portable') && a.name.endsWith('.exe')
+    );
+    
     return {
       hasUpdate,
       currentVersion: APP_VERSION,
@@ -2946,6 +3334,8 @@ ipcMain.handle('check-for-updates', async () => {
       releaseUrl: release.html_url,
       releaseNotes: release.body || '',
       publishedAt: release.published_at,
+      downloadUrl: portableAsset?.browser_download_url || null,
+      downloadSize: portableAsset?.size || 0,
     };
   } catch (error) {
     console.error('Update check failed:', error);
@@ -2960,4 +3350,51 @@ ipcMain.handle('get-app-version', () => APP_VERSION);
 ipcMain.handle('open-release-page', async (_, url) => {
   await shell.openExternal(url);
   return true;
+});
+
+// Download and install update
+ipcMain.handle('download-update', async (_, { downloadUrl, version }) => {
+  const downloadPath = path.join(app.getPath('temp'), `PlaylistLab-Portable-${version}.exe`);
+  
+  console.log(`[Update] Downloading from: ${downloadUrl}`);
+  console.log(`[Update] Saving to: ${downloadPath}`);
+  
+  try {
+    const response = await fetch(downloadUrl);
+    if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+    
+    const buffer = await response.arrayBuffer();
+    fs.writeFileSync(downloadPath, Buffer.from(buffer));
+    
+    console.log(`[Update] Download complete: ${downloadPath}`);
+    return { success: true, path: downloadPath };
+  } catch (error: any) {
+    console.error('[Update] Download error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Install update (launch the new exe and quit current app)
+ipcMain.handle('install-update', async (_, { installerPath }) => {
+  console.log(`[Update] Installing from: ${installerPath}`);
+  
+  try {
+    // Launch the new portable exe
+    const { spawn } = require('child_process');
+    spawn(installerPath, [], { 
+      detached: true, 
+      stdio: 'ignore',
+      shell: true 
+    }).unref();
+    
+    // Quit the current app after a short delay
+    setTimeout(() => {
+      app.quit();
+    }, 1000);
+    
+    return { success: true };
+  } catch (error: any) {
+    console.error('[Update] Install error:', error);
+    return { success: false, error: error.message };
+  }
 });

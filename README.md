@@ -29,9 +29,15 @@ Discover trending music and create playlists from charts:
 ### Generate Personal Mixes
 Create personalized playlists based on your Plex listening history:
 - **Your Weekly Mix** - Top tracks from your most-played artists
-- **Daily Mix** - ~150 tracks combining recent plays, related songs, and rediscoveries (tracks not played in 20+ days)
-- **Time Capsule** - Rediscover tracks you haven't played in 30+ days
+- **Daily Mix** - Recent plays + related songs + rediscoveries
+- **Time Capsule** - Rediscover tracks you haven't played recently (with artist diversity)
 - **New Music Mix** - Tracks from recently added albums
+- **Customizable Settings** - Adjust track counts, time thresholds, and artist limits for each mix type
+- **Create Custom Mix** - Build your own playlist with full control:
+  - **Source Options**: All Tracks, Played, Unplayed, Recently Played, Top Artists (with history period selection)
+  - **Filters**: Genre (from your library), Min rating, Added within, Year range
+  - **Expansion**: Add sonically similar tracks, Add tracks from similar artists
+  - **Output**: Track count, Max per artist, Sort by (Random/Play Count/Rating/Date Added/Last Played/Title), Shuffle toggle
 
 ### Playlist Management
 - **Edit Playlists** - Add/remove tracks, manually match unmatched tracks

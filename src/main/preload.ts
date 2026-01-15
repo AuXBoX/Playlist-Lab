@@ -35,6 +35,10 @@ contextBridge.exposeInMainWorld('api', {
   getRecentTracks: (data: { serverUrl: string; libraryId: string }) => ipcRenderer.invoke('get-recent-tracks', data),
   getMonthlyTracks: (data: { serverUrl: string; libraryId: string }) => ipcRenderer.invoke('get-monthly-tracks', data),
   getStalePlayedTracks: (data: { serverUrl: string; libraryId: string; daysAgo: number; limit: number }) => ipcRenderer.invoke('get-stale-played-tracks', data),
+  getTimeCapsuleTracks: (data: { serverUrl: string; libraryId: string; daysAgo: number; targetCount: number; maxPerArtist: number }) => ipcRenderer.invoke('get-time-capsule-tracks', data),
+  getCustomMixTracks: (data: { serverUrl: string; libraryId: string; options: any }) => ipcRenderer.invoke('get-custom-mix-tracks', data),
+  getLibraryGenres: (data: { serverUrl: string; libraryId: string }) => ipcRenderer.invoke('get-library-genres', data),
+  buildCustomMix: (data: { serverUrl: string; libraryId: string; options: any }) => ipcRenderer.invoke('build-custom-mix', data),
   getRelatedTracks: (data: { serverUrl: string; trackKey: string; limit: number }) => ipcRenderer.invoke('get-related-tracks', data),
   getSimilarTracks: (data: { serverUrl: string; trackKey: string }) => ipcRenderer.invoke('get-similar-tracks', data),
   getRecentAlbums: (data: { serverUrl: string; libraryId: string; limit: number }) => ipcRenderer.invoke('get-recent-albums', data),
@@ -144,4 +148,6 @@ contextBridge.exposeInMainWorld('api', {
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   openReleasePage: (url: string) => ipcRenderer.invoke('open-release-page', url),
+  downloadUpdate: (data: { downloadUrl: string; version: string }) => ipcRenderer.invoke('download-update', data),
+  installUpdate: (data: { installerPath: string }) => ipcRenderer.invoke('install-update', data),
 });

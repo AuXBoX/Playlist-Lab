@@ -1,5 +1,33 @@
 # Release Notes
 
+## v1.0.6
+
+### New Features
+- **Customizable Mix Settings** - New collapsible settings panel to customize how each personal mix is generated:
+  - **Weekly Mix**: Configure number of top artists (5-25) and tracks per artist (3-10)
+  - **Daily Mix**: Adjust recent tracks, related tracks, rediscovery tracks (25-100 each), and rediscovery age (7-60 days)
+  - **Time Capsule**: Set track count (15-100), "not played in" threshold (14-365 days), and max tracks per artist (1-10)
+  - **New Music Mix**: Choose number of recent albums (5-25) and tracks per album (2-10)
+- **Create Custom Mix** - Build your own personalized playlists with full control:
+  - **Source Options**: All Tracks, Played, Unplayed, Recently Played, Top Artists
+  - **History Period**: All Time, Last 7/14/30/60/90 Days (for Recently Played and Top Artists sources)
+  - **Top Artists Mode**: Select number of artists (5-50) and tracks per artist (3-20)
+  - **Filters**: Genre (populated from your library), Min rating (1-5 stars), Added within (days/months/year), Year range
+  - **Expansion Options**: 
+    - Add Sonically Similar Tracks (1-10 per seed track)
+    - Add Tracks from Similar Artists (3-20 artists, 1-10 tracks each)
+  - **Output Controls**: Track count (25-500), Max per artist, Sort by (Random/Play Count/Rating/Date Added/Last Played/Title), Shuffle toggle
+  - Custom playlist naming
+
+### Improvements
+- **Time Capsule Artist Diversity** - Completely rewritten algorithm ensures variety across artists using round-robin selection instead of pulling from limited session history
+- **Settings Persistence** - Mix settings are automatically saved and restored between sessions
+
+### Bug Fixes
+- Fixed Time Capsule only pulling tracks from 1-2 artists (now uses direct library query with artist diversity logic)
+
+---
+
 ## v1.0.5
 
 ### New Features
