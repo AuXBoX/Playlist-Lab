@@ -167,6 +167,9 @@ export interface MatchedTrack {
   plexRatingKey?: string;
   plexTitle?: string;
   plexArtist?: string;
+  plexAlbum?: string;
+  plexCodec?: string;
+  plexBitrate?: number;
   score?: number;
 }
 
@@ -854,6 +857,9 @@ export async function matchPlaylistToPlex(
       plexRatingKey: passesMinScore ? match?.ratingKey : undefined,
       plexTitle: passesMinScore ? match?.plexTitle : undefined,
       plexArtist: passesMinScore ? match?.plexArtist : undefined,
+      plexAlbum: passesMinScore ? match?.plexAlbum : undefined,
+      plexCodec: passesMinScore ? match?.plexCodec : undefined,
+      plexBitrate: passesMinScore ? match?.plexBitrate : undefined,
       score: match?.score,
     });
   }
@@ -873,7 +879,7 @@ async function findBestMatch(
   track: ExternalTrack,
   serverUrl: string,
   searchFn: (data: { serverUrl: string; query: string }) => Promise<any[]>
-): Promise<{ ratingKey: string; score: number; plexTitle: string; plexArtist: string } | null> {
+): Promise<{ ratingKey: string; score: number; plexTitle: string; plexArtist: string; plexAlbum: string; plexCodec?: string; plexBitrate?: number } | null> {
   try {
     // Skip very short titles (but allow acronyms like "T.N.T." which become "tnt")
     const titleWithoutPunctuation = track.title.replace(/[^a-zA-Z0-9]/g, '');
@@ -944,7 +950,7 @@ async function findBestMatch(
     if (!allResults.length) return null;
     
     // Find best match - STRONGLY prefer album artist matches over Various Artists
-    let bestMatch: { ratingKey: string; score: number; rankScore: number; plexTitle: string; plexArtist: string } | null = null;
+    let bestMatch: { ratingKey: string; score: number; rankScore: number; plexTitle: string; plexArtist: string; plexAlbum: string; plexCodec?: string; plexBitrate?: number } | null = null;
     
     for (const result of allResults) {
       const plexTitle = result.title || '';
@@ -1113,13 +1119,17 @@ async function findBestMatch(
         const plexArtistName = albumArtistMatches ? albumArtist : (trackArtist || albumArtist);
         // Use base score (0-100) for display, full score with bonuses for ranking
         const displayScore = Math.min(100, Math.max(0, calculateMatchScore(track.title, track.artist, plexTitle, plexArtistName)));
-        bestMatch = { ratingKey: result.ratingKey, score: displayScore, rankScore: score, plexTitle, plexArtist: plexArtistName };
+        // Extract codec and bitrate from Media array
+        const media = result.Media?.[0];
+        const codec = media?.audioCodec?.toUpperCase();
+        const bitrate = media?.bitrate;
+        bestMatch = { ratingKey: result.ratingKey, score: displayScore, rankScore: score, plexTitle, plexArtist: plexArtistName, plexAlbum: albumName, plexCodec: codec, plexBitrate: bitrate };
       }
     }
     
     // Return without rankScore (internal use only)
     if (bestMatch) {
-      return { ratingKey: bestMatch.ratingKey, score: bestMatch.score, plexTitle: bestMatch.plexTitle, plexArtist: bestMatch.plexArtist };
+      return { ratingKey: bestMatch.ratingKey, score: bestMatch.score, plexTitle: bestMatch.plexTitle, plexArtist: bestMatch.plexArtist, plexAlbum: bestMatch.plexAlbum, plexCodec: bestMatch.plexCodec, plexBitrate: bestMatch.plexBitrate };
     }
     return null;
   } catch {

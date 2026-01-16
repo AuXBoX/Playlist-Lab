@@ -214,6 +214,16 @@ body {
   animation: spin 1s linear infinite;
 }
 
+.spinner-small {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
@@ -318,6 +328,10 @@ body {
   max-height: 80vh;
   display: flex;
   flex-direction: column;
+}
+
+.modal-content.playlist-match-modal {
+  max-width: 950px;
 }
 
 .modal-header {
@@ -810,6 +824,7 @@ body {
 .import-page {
   padding: 20px;
   max-width: 900px;
+  overflow: visible; /* Prevent double scrollbar on macOS */
 }
 
 .import-header {
@@ -859,6 +874,7 @@ body {
 
 .import-tab-content {
   min-height: 400px;
+  overflow: visible; /* Prevent double scrollbar on macOS */
 }
 
 .url-import-section {
@@ -1663,6 +1679,7 @@ body {
 .page-content {
   padding: 24px;
   max-width: 1000px;
+  overflow: visible; /* Prevent double scrollbar on macOS */
 }
 
 .page-header {

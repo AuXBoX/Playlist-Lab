@@ -1,6 +1,6 @@
 {
   "name": "playlist-lab",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Import, generate, and manage your Plex playlists",
   "main": "dist/main/main.js",
   "author": {
@@ -50,12 +50,21 @@
       "output": "release"
     },
     "files": [
-      "dist/**/*"
+      "dist/**/*",
+      "package.json"
     ],
     "extraResources": [
       {
         "from": "src/renderer/logo.png",
         "to": "logo.png"
+      },
+      {
+        "from": "src/renderer/logo512.png",
+        "to": "logo512.png"
+      },
+      {
+        "from": "src/renderer/logo.ico",
+        "to": "logo.ico"
       }
     ],
     "win": {

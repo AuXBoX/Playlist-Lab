@@ -1,5 +1,41 @@
 # Release Notes
 
+## v1.0.8
+
+### New Features
+- **Individual Mix Generation** - Generate personal mixes one at a time instead of all at once. New "Generate Individual Mixes" section with buttons for Weekly Mix, Daily Mix, Time Capsule, and New Music Mix.
+- **Album & Format in Match Results** - Playlist matching modal now shows which album each matched track comes from, plus codec and bitrate (e.g., "FLAC 1411k", "MP3 320k")
+
+### Improvements
+- **Wider Match Results Modal** - Expanded from 600px to 950px to accommodate new Album and Format columns
+- **Mix Settings Persistence Fix** - Settings now properly merge with defaults when loading, preventing issues when saved settings are missing newer properties
+- **Custom Mix Top Artists Fix** - Selecting "Top Artists" as source now auto-sets artist count to 10 if it was 0
+- **Double Scrollbar Fix** - Fixed double scrollbars appearing on macOS in YouTube Music and Edit Playlists pages
+- **Windows Taskbar Icon** - Improved icon loading with nativeImage for better Windows compatibility
+
+### Bug Fixes
+- Fixed mix settings not being applied correctly when saved settings had missing properties
+- Fixed Custom Mix "Top Artists" source not working when first selected
+
+---
+
+## v1.0.7
+
+### New Features
+- **Missing Tracks Database** - When importing playlists, tracks that can't be matched are now stored with their original position. After adding the missing music to Plex, use "Missing Tracks" to retry matching and insert them at the correct position in the playlist.
+  - View all missing tracks organized by playlist
+  - Retry individual playlists or all at once
+  - Tracks are inserted at their original position when found
+  - Badge shows count of missing tracks in navigation
+- **Auto-Update with Download & Install** - Update notifications now offer one-click download and install (downloads the new portable exe, launches it, and closes the old version)
+- **Scrollable Release Notes** - Update modal now shows full release notes with scrolling instead of truncating
+
+### Improvements
+- Playlist creation now returns the Plex playlist ID for better tracking
+- Missing tracks store the "after track" reference for correct positioning when retrying
+
+---
+
 ## v1.0.6
 
 ### New Features

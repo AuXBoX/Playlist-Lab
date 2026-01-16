@@ -32,6 +32,7 @@ Create personalized playlists based on your Plex listening history:
 - **Daily Mix** - Recent plays + related songs + rediscoveries
 - **Time Capsule** - Rediscover tracks you haven't played recently (with artist diversity)
 - **New Music Mix** - Tracks from recently added albums
+- **Individual Generation** - Generate each mix type separately or all at once
 - **Customizable Settings** - Adjust track counts, time thresholds, and artist limits for each mix type
 - **Create Custom Mix** - Build your own playlist with full control:
   - **Source Options**: All Tracks, Played, Unplayed, Recently Played, Top Artists (with history period selection)
@@ -42,7 +43,9 @@ Create personalized playlists based on your Plex listening history:
 ### Playlist Management
 - **Edit Playlists** - Add/remove tracks, manually match unmatched tracks
 - **Sort & Reorder** - Sort tracks by title, artist, status, or score; drag-and-drop to reorder
+- **Album & Format Display** - See which album matched tracks come from, plus codec and bitrate
 - **Export Missing** - Export unmatched tracks to CSV for reference
+- **Missing Tracks Database** - Tracks that can't be matched during import are stored with their original position. After adding the missing music to Plex, retry matching to insert them at the correct position.
 - **Schedule Imports** - Auto-refresh playlists weekly, fortnightly, or monthly
 - **Backup & Restore** - Export playlists to portable JSON format, restore from backup
 - **Sharing** - Share playlists with Plex managed users
@@ -61,7 +64,7 @@ Create personalized playlists based on your Plex listening history:
 
 ### Auto-Update
 - Automatic update notifications when new versions are available
-- One-click download from GitHub releases
+- One-click download and install from GitHub releases
 
 ## Installation
 

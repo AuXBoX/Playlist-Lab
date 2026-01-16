@@ -3,10 +3,11 @@ import { fetchAllCharts, MatchedPlaylist, matchPlaylistToPlex, PLAYLIST_SCHEDULE
 import ImportPage, { ImportProgress } from './ImportPage';
 import SharingPage from './SharingPage';
 import BackupRestorePage from './BackupRestorePage';
+import MissingTracksPage from './MissingTracksPage';
 import logoImg from './logo.png';
 
 // Schedule types
-type ScheduleFrequency = 'weekly' | 'fortnightly' | 'monthly' | 'none';
+type ScheduleFrequency = 'daily' | 'weekly' | 'fortnightly' | 'monthly' | 'none';
 
 interface PlaylistSchedule {
   playlistId: string;
@@ -16,11 +17,14 @@ interface PlaylistSchedule {
   lastRun?: number;
   chartIds?: string[];
   country: string;
+  source?: 'deezer' | 'apple' | 'tidal' | 'spotify' | 'listenbrainz';
+  sourceUrl?: string;
+  username?: string; // For ListenBrainz
 }
 
 // Navigation types
 type NavSection = 'generate' | 'discover' | 'import' | 'manage';
-type NavPage = 'generate' | 'discover' | 'schedule' | 'import' | 'share' | 'backup' | 'edit';
+type NavPage = 'generate' | 'discover' | 'schedule' | 'import' | 'share' | 'backup' | 'edit' | 'missing';
 
 declare global {
   interface Window {
@@ -35,7 +39,7 @@ declare global {
       getSettings: () => Promise<{ country: string; libraryId: string | null; autoSync: boolean }>;
       saveSettings: (settings: any) => Promise<boolean>;
       searchTrack: (data: { serverUrl: string; query: string }) => Promise<any[]>;
-      createPlaylist: (data: { serverUrl: string; title: string; trackKeys: string[] }) => Promise<boolean>;
+      createPlaylist: (data: { serverUrl: string; title: string; trackKeys: string[] }) => Promise<{ success: boolean; playlistId?: string }>;
       getPlaylists: (data: { serverUrl: string; includeSmart?: boolean }) => Promise<any[]>;
       getPlaylistTracks: (data: { serverUrl: string; playlistId: string }) => Promise<any[]>;
       addToPlaylist: (data: { serverUrl: string; playlistId: string; trackKey: string }) => Promise<boolean>;
@@ -130,6 +134,14 @@ declare global {
       getUserPlaylists: (data: { serverUrl: string; userToken: string }) => Promise<any[]>;
       copyPlaylistToUser: (data: { serverUrl: string; sourcePlaylistId: string; targetUserToken: string; newTitle: string }) => Promise<boolean>;
       deleteUserPlaylist: (data: { serverUrl: string; playlistId: string; userToken: string }) => Promise<boolean>;
+      // Missing tracks
+      getMissingTracks: () => Promise<{ playlistId: string; playlistName: string; tracks: { title: string; artist: string; album?: string; position: number; afterTrackKey?: string; addedAt: number; source: string }[] }[]>;
+      addMissingTracks: (data: { playlistId: string; playlistName: string; tracks: any[] }) => Promise<boolean>;
+      removeMissingTrack: (data: { playlistId: string; title: string; artist: string }) => Promise<boolean>;
+      clearMissingTracks: (data: { playlistId: string }) => Promise<boolean>;
+      clearAllMissingTracks: () => Promise<boolean>;
+      getMissingTracksCount: () => Promise<number>;
+      insertTrackAtPosition: (data: { serverUrl: string; playlistId: string; trackKey: string; afterTrackKey?: string }) => Promise<{ success: boolean; error?: string }>;
       // Update checker
       checkForUpdates: () => Promise<{ hasUpdate: boolean; currentVersion?: string; latestVersion?: string; releaseUrl?: string; releaseNotes?: string; downloadUrl?: string; downloadSize?: number; error?: string }>;
       getAppVersion: () => Promise<string>;
@@ -195,6 +207,7 @@ export default function App() {
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCount, setGeneratedCount] = useState(0);
+  const [generatingMix, setGeneratingMix] = useState<string | null>(null); // Track which individual mix is being generated
   const [mixesSchedule, setMixesSchedule] = useState<{ enabled: boolean; frequency: 'daily' | 'weekly' | 'monthly'; lastRun?: number }>({ enabled: false, frequency: 'weekly' });
   
   const [selectedPlaylist, setSelectedPlaylist] = useState<MatchedPlaylist | null>(null);
@@ -221,6 +234,9 @@ export default function App() {
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [updateDownloading, setUpdateDownloading] = useState(false);
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState('');
+
+  // Missing tracks count for badge
+  const [missingTracksCount, setMissingTracksCount] = useState(0);
 
   // Edit playlists state
   const [editPlaylists, setEditPlaylists] = useState<any[]>([]);
@@ -329,9 +345,14 @@ export default function App() {
           setMatchingSettings(savedSettings.matchingSettings);
         }
         
-        // Load mix settings
+        // Load mix settings - merge with defaults to handle missing properties
         if (savedSettings.mixSettings) {
-          setMixSettings(savedSettings.mixSettings);
+          setMixSettings(prev => ({
+            weeklyMix: { ...prev.weeklyMix, ...savedSettings.mixSettings.weeklyMix },
+            dailyMix: { ...prev.dailyMix, ...savedSettings.mixSettings.dailyMix },
+            timeCapsule: { ...prev.timeCapsule, ...savedSettings.mixSettings.timeCapsule },
+            newMusic: { ...prev.newMusic, ...savedSettings.mixSettings.newMusic },
+          }));
         }
         
         if (authData.server) {
@@ -370,12 +391,24 @@ export default function App() {
       // Check for updates
       try {
         const update = await window.api.checkForUpdates();
-        if (update.hasUpdate) {
-          setUpdateInfo(update);
-          setShowUpdateModal(true);
+        if (update.hasUpdate && update.latestVersion) {
+          // Check if user already dismissed this version
+          const dismissedVersion = localStorage.getItem('dismissedUpdateVersion');
+          if (dismissedVersion !== update.latestVersion) {
+            setUpdateInfo(update);
+            setShowUpdateModal(true);
+          }
         }
       } catch (e) {
         console.log('Update check failed:', e);
+      }
+      
+      // Load missing tracks count
+      try {
+        const count = await window.api.getMissingTracksCount();
+        setMissingTracksCount(count);
+      } catch (e) {
+        console.log('Failed to load missing tracks count:', e);
       }
     }
     init();
@@ -489,6 +522,59 @@ export default function App() {
       setIsGenerating(false);
     }
   }, [serverUrl, settings.libraryId]);
+
+  // Individual mix generation handlers
+  const handleGenerateSingleMix = async (mixType: 'weekly' | 'daily' | 'timeCapsule' | 'newMusic') => {
+    if (!serverUrl || !settings.libraryId) return;
+    
+    setGeneratingMix(mixType);
+    const mixNames: Record<string, string> = {
+      weekly: 'Your Weekly Mix',
+      daily: 'Daily Mix',
+      timeCapsule: 'Time Capsule',
+      newMusic: 'New Music Mix'
+    };
+    
+    try {
+      // Delete existing playlist of this type
+      setStatusMessage(`Cleaning up old ${mixNames[mixType]}...`);
+      const existingPlaylists = await window.api.getPlaylists({ serverUrl });
+      for (const p of existingPlaylists) {
+        if (p.title === mixNames[mixType]) {
+          await window.api.deletePlaylist({ serverUrl, playlistId: p.ratingKey });
+        }
+      }
+      
+      setStatusMessage(`Creating ${mixNames[mixType]}...`);
+      let success = false;
+      
+      switch (mixType) {
+        case 'weekly':
+          success = await generateWeeklyMix();
+          break;
+        case 'daily':
+          success = await createDailyMix();
+          break;
+        case 'timeCapsule':
+          success = await createTimeCapsule();
+          break;
+        case 'newMusic':
+          success = await createNewMusicMix();
+          break;
+      }
+      
+      if (success) {
+        setStatusMessage(`${mixNames[mixType]} created!`);
+      } else {
+        setStatusMessage(`Could not create ${mixNames[mixType]} - not enough tracks.`);
+      }
+      setTimeout(() => setStatusMessage(''), 4000);
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    } finally {
+      setGeneratingMix(null);
+    }
+  };
 
   const generateWeeklyMix = async () => {
     console.log('Generating Weekly Mix...');
@@ -883,8 +969,8 @@ export default function App() {
           
           const trackKeys = playlist.tracks.filter(t => t.matched && t.plexRatingKey).map(t => t.plexRatingKey!);
           if (trackKeys.length > 0) {
-            const success = await window.api.createPlaylist({ serverUrl, title: playlistTitle, trackKeys });
-            if (success) {
+            const result = await window.api.createPlaylist({ serverUrl, title: playlistTitle, trackKeys });
+            if (result.success) {
               await window.api.setRefreshTime({ playlistId: playlist.id, timestamp: Date.now() });
               setCreatedPlaylists(prev => [...prev, playlist.id]);
               syncedCount++;
@@ -906,16 +992,58 @@ export default function App() {
 
   const handleCreatePlaylist = async (playlist: MatchedPlaylist) => {
     if (!serverUrl) return;
-    const trackKeys = playlist.tracks.filter(t => t.matched && t.plexRatingKey).map(t => t.plexRatingKey!);
+    const matchedTracks = playlist.tracks.filter(t => t.matched && t.plexRatingKey);
+    const trackKeys = matchedTracks.map(t => t.plexRatingKey!);
     if (trackKeys.length === 0) {
       setStatusMessage('No matched tracks to create playlist.');
       return;
     }
-    const success = await window.api.createPlaylist({ serverUrl, title: playlist.name, trackKeys });
-    if (success) {
+    const result = await window.api.createPlaylist({ serverUrl, title: playlist.name, trackKeys });
+    if (result.success) {
       setCreatedPlaylists(prev => [...prev, playlist.id]);
-      setStatusMessage(`Created "${playlist.name}" with ${trackKeys.length} tracks!`);
-      setTimeout(() => setStatusMessage(''), 3000);
+      
+      // Store missing tracks if any
+      const missingTracks = playlist.tracks
+        .map((t, idx) => ({ ...t, position: idx }))
+        .filter(t => !t.matched);
+      
+      if (missingTracks.length > 0 && result.playlistId) {
+        // Build afterTrackKey references for correct positioning
+        const missingWithPosition = missingTracks.map(track => {
+          // Find the track that should come before this one
+          let afterTrackKey: string | undefined;
+          for (let i = track.position - 1; i >= 0; i--) {
+            const prevTrack = playlist.tracks[i];
+            if (prevTrack.matched && prevTrack.plexRatingKey) {
+              afterTrackKey = prevTrack.plexRatingKey;
+              break;
+            }
+          }
+          return {
+            title: track.title,
+            artist: track.artist,
+            position: track.position,
+            afterTrackKey,
+            addedAt: Date.now(),
+            source: playlist.source || 'import',
+          };
+        });
+        
+        await window.api.addMissingTracks({
+          playlistId: result.playlistId,
+          playlistName: playlist.name,
+          tracks: missingWithPosition,
+        });
+        
+        // Update missing tracks count badge
+        const count = await window.api.getMissingTracksCount();
+        setMissingTracksCount(count);
+        
+        setStatusMessage(`Created "${playlist.name}" with ${trackKeys.length} tracks. ${missingTracks.length} tracks saved to Missing Tracks.`);
+      } else {
+        setStatusMessage(`Created "${playlist.name}" with ${trackKeys.length} tracks!`);
+      }
+      setTimeout(() => setStatusMessage(''), 5000);
     }
   };
 
@@ -931,8 +1059,8 @@ export default function App() {
       if (allPerfectMatch) {
         // Auto-create the playlist
         const trackKeys = matchedTracks.map(t => t.plexRatingKey!);
-        const success = await window.api.createPlaylist({ serverUrl: serverUrl!, title: playlist.name, trackKeys });
-        if (success) {
+        const result = await window.api.createPlaylist({ serverUrl: serverUrl!, title: playlist.name, trackKeys });
+        if (result.success) {
           setCreatedPlaylists(prev => [...prev, playlist.id]);
           setStatusMessage(`✓ Auto-created "${playlist.name}" with ${trackKeys.length} tracks (all 100% matched)`);
           setTimeout(() => setStatusMessage(''), 5000);
@@ -971,12 +1099,19 @@ export default function App() {
     if (!selectedPlaylist || manualSearchTrack === null) return;
     const updatedTracks = [...selectedPlaylist.tracks];
     const plexArtist = plexTrack.grandparentTitle || plexTrack.originalTitle || '';
+    const plexAlbum = plexTrack.parentTitle || '';
+    const media = plexTrack.Media?.[0];
+    const plexCodec = media?.audioCodec?.toUpperCase();
+    const plexBitrate = media?.bitrate;
     updatedTracks[manualSearchTrack.index] = { 
       ...updatedTracks[manualSearchTrack.index], 
       matched: true, 
       plexRatingKey: plexTrack.ratingKey, 
       plexTitle: plexTrack.title,
       plexArtist: plexArtist,
+      plexAlbum: plexAlbum,
+      plexCodec: plexCodec,
+      plexBitrate: plexBitrate,
       score: 100 
     };
     const updatedPlaylist = { ...selectedPlaylist, tracks: updatedTracks, matchedCount: updatedTracks.filter(t => t.matched).length };
@@ -1058,6 +1193,22 @@ export default function App() {
               <div className={`nav-item ${currentPage === 'backup' ? 'active' : ''}`} onClick={() => setCurrentPage('backup')}>
                 Backup & Restore
               </div>
+              <div className={`nav-item ${currentPage === 'missing' ? 'active' : ''}`} onClick={() => setCurrentPage('missing')}>
+                Missing Tracks
+                {missingTracksCount > 0 && (
+                  <span style={{ 
+                    marginLeft: '8px', 
+                    background: '#f85149', 
+                    color: '#fff', 
+                    padding: '2px 6px', 
+                    borderRadius: '10px', 
+                    fontSize: '11px',
+                    fontWeight: 500
+                  }}>
+                    {missingTracksCount}
+                  </span>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1114,6 +1265,8 @@ export default function App() {
         return <SharingPage serverUrl={serverUrl} onBack={() => setCurrentPage('share')} />;
       case 'backup':
         return <BackupRestorePage serverUrl={serverUrl} onBack={() => setCurrentPage('backup')} />;
+      case 'missing':
+        return <MissingTracksPage serverUrl={serverUrl} onBack={() => setCurrentPage('missing')} onCountChange={setMissingTracksCount} />;
       case 'edit':
         return renderEditPlaylistsPage();
       default:
@@ -1164,7 +1317,15 @@ export default function App() {
                   <span style={{ fontSize: '12px', color: '#a0a0a0' }}>Track Source</span>
                   <select 
                     value={customMixOptions.source}
-                    onChange={e => setCustomMixOptions(s => ({ ...s, source: e.target.value as any }))}
+                    onChange={e => {
+                      const newSource = e.target.value as any;
+                      setCustomMixOptions(s => ({ 
+                        ...s, 
+                        source: newSource,
+                        // Auto-set topArtistsCount when switching to topArtists source
+                        topArtistsCount: newSource === 'topArtists' && s.topArtistsCount === 0 ? 10 : s.topArtistsCount
+                      }));
+                    }}
                     style={{ padding: '8px', borderRadius: '4px', background: '#2a2a2a', border: '1px solid #444', color: '#fff' }}
                   >
                     <option value="all">All Tracks</option>
@@ -1659,6 +1820,47 @@ export default function App() {
         )}
       </div>
       
+      <div className="card">
+        <h3 style={{ marginBottom: '12px' }}>Generate Individual Mixes</h3>
+        <p style={{ fontSize: '12px', color: '#a0a0a0', marginBottom: '16px' }}>Create specific playlists one at a time</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => handleGenerateSingleMix('weekly')} 
+            disabled={isGenerating || generatingMix !== null || !settings.libraryId}
+          >
+            {generatingMix === 'weekly' ? 'Creating...' : 'Your Weekly Mix'}
+          </button>
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => handleGenerateSingleMix('daily')} 
+            disabled={isGenerating || generatingMix !== null || !settings.libraryId}
+          >
+            {generatingMix === 'daily' ? 'Creating...' : 'Daily Mix'}
+          </button>
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => handleGenerateSingleMix('timeCapsule')} 
+            disabled={isGenerating || generatingMix !== null || !settings.libraryId}
+          >
+            {generatingMix === 'timeCapsule' ? 'Creating...' : 'Time Capsule'}
+          </button>
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => handleGenerateSingleMix('newMusic')} 
+            disabled={isGenerating || generatingMix !== null || !settings.libraryId}
+          >
+            {generatingMix === 'newMusic' ? 'Creating...' : 'New Music Mix'}
+          </button>
+        </div>
+        {generatingMix && statusMessage && (
+          <div className="status-box" style={{ marginTop: '12px' }}>
+            <div className="spinner" />
+            <span>{statusMessage}</span>
+          </div>
+        )}
+      </div>
+      
       <div className="card info-card">
         <h3>What gets created:</h3>
         <ul>
@@ -2114,6 +2316,7 @@ export default function App() {
                 let next = lastRun ? new Date(lastRun) : start;
                 if (lastRun) {
                   switch (schedule.frequency) {
+                    case 'daily': next.setDate(next.getDate() + 1); break;
                     case 'weekly': next.setDate(next.getDate() + 7); break;
                     case 'fortnightly': next.setDate(next.getDate() + 14); break;
                     case 'monthly': next.setMonth(next.getMonth() + 1); break;
@@ -2121,6 +2324,7 @@ export default function App() {
                 }
                 while (next <= now) {
                   switch (schedule.frequency) {
+                    case 'daily': next.setDate(next.getDate() + 1); break;
                     case 'weekly': next.setDate(next.getDate() + 7); break;
                     case 'fortnightly': next.setDate(next.getDate() + 14); break;
                     case 'monthly': next.setMonth(next.getMonth() + 1); break;
@@ -2212,7 +2416,7 @@ export default function App() {
     
     return (
       <div className="modal-overlay" onClick={() => setSelectedPlaylist(null)}>
-        <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <div className="modal-content playlist-match-modal" onClick={e => e.stopPropagation()}>
           <div className="modal-header">
             <div>
               <h2>{selectedPlaylist.name}</h2>
@@ -2257,6 +2461,8 @@ export default function App() {
             <span style={{ flex: 1, cursor: 'pointer' }} onClick={() => handleSort('artist')} title="Sort by artist">
               Artist {sortIcon('artist')}
             </span>
+            <span style={{ flex: 1 }}>Album</span>
+            <span style={{ width: '100px', textAlign: 'center' }}>Format</span>
             <span style={{ width: '50px', cursor: 'pointer', textAlign: 'right' }} onClick={() => handleSort('score')} title="Sort by match score">
               Score {sortIcon('score')}
             </span>
@@ -2291,6 +2497,14 @@ export default function App() {
                     {track.matched && track.plexArtist && track.plexArtist !== track.artist && (
                       <span className="track-plex-match" style={{ display: 'block' }}>→ {track.plexArtist}</span>
                     )}
+                  </div>
+                  <div style={{ flex: 1, color: '#888', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {track.matched && track.plexAlbum ? track.plexAlbum : '—'}
+                  </div>
+                  <div style={{ width: '100px', textAlign: 'center', color: '#888', fontSize: '11px' }}>
+                    {track.matched && track.plexCodec ? (
+                      <span>{track.plexCodec}{track.plexBitrate ? ` ${Math.round(track.plexBitrate)}k` : ''}</span>
+                    ) : '—'}
                   </div>
                   <span style={{ width: '50px', textAlign: 'right' }}>
                     {track.matched ? track.score && <span className="track-score">{Math.round(track.score)}%</span> : <span className="track-search-hint">🔍</span>}
@@ -2845,7 +3059,13 @@ export default function App() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                  <button className="btn btn-secondary" onClick={() => setShowUpdateModal(false)}>
+                  <button className="btn btn-secondary" onClick={() => {
+                    // Remember this version was dismissed so we don't show again
+                    if (updateInfo.latestVersion) {
+                      localStorage.setItem('dismissedUpdateVersion', updateInfo.latestVersion);
+                    }
+                    setShowUpdateModal(false);
+                  }}>
                     Later
                   </button>
                   {updateInfo.downloadUrl ? (

@@ -48,12 +48,13 @@ interface ExternalTrack {
 }
 
 interface PreImportPlaylist {
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz';
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'ai';
   id: string;
   name: string;
   image?: string;
   trackCount: number;
   url?: string;
+  tracks?: { title: string; artist: string }[]; // Pre-fetched tracks for direct import
 }
 
 type Tab = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'plex' | 'file' | 'listenbrainz' | 'ai';
@@ -68,6 +69,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   const [spotifyPlaylists, setSpotifyPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [isLoadingSpotify, setIsLoadingSpotify] = useState(false);
   const [spotifyUrl, setSpotifyUrl] = useState('');
+  const [fetchingUrl, setFetchingUrl] = useState<string | null>(null); // Track URL being fetched before progress shows
   
   // Deezer state (with optional login)
   const [deezerAuth, setDeezerAuth] = useState<{ user: any; accessToken: string | null } | null>(null);
@@ -211,12 +213,13 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
 
   // Schedule modal state
   const [schedulePlaylist, setSchedulePlaylist] = useState<{
-    source: 'deezer' | 'apple' | 'tidal' | 'spotify' | 'youtube' | 'amazon' | 'qobuz';
+    source: 'deezer' | 'apple' | 'tidal' | 'spotify' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz';
     id: string;
     name: string;
     url?: string;
+    username?: string; // For ListenBrainz
   } | null>(null);
-  const [scheduleFrequency, setScheduleFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [scheduleFrequency, setScheduleFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
   const [existingSchedules, setExistingSchedules] = useState<any[]>([]);
 
   // Load auth states on mount
@@ -677,13 +680,15 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   };
 
   const openScheduleModal = (
-    source: 'deezer' | 'apple' | 'tidal' | 'spotify' | 'youtube' | 'amazon' | 'qobuz',
+    source: 'deezer' | 'apple' | 'tidal' | 'spotify' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz',
     id: string,
     name: string,
-    url?: string
+    url?: string,
+    username?: string
   ) => {
-    setSchedulePlaylist({ source, id, name, url });
-    setScheduleFrequency('weekly');
+    setSchedulePlaylist({ source, id, name, url, username });
+    // Default to daily for ListenBrainz (daily jams), weekly for others
+    setScheduleFrequency(source === 'listenbrainz' ? 'daily' : 'weekly');
   };
 
   const isPlaylistScheduled = (source: string, id: string) => {
@@ -693,7 +698,7 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   const saveSchedule = async () => {
     if (!schedulePlaylist) return;
     
-    const schedule = {
+    const schedule: any = {
       playlistId: `import-${schedulePlaylist.source}-${schedulePlaylist.id}`,
       playlistName: schedulePlaylist.name,
       frequency: scheduleFrequency,
@@ -702,6 +707,11 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
       source: schedulePlaylist.source,
       sourceUrl: schedulePlaylist.url || schedulePlaylist.id,
     };
+    
+    // Include username for ListenBrainz
+    if (schedulePlaylist.username) {
+      schedule.username = schedulePlaylist.username;
+    }
     
     await window.api.saveSchedule(schedule);
     await loadSchedules();
@@ -821,17 +831,17 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
     }
   };
 
-  // Direct import from URL without preview
+  // Fetch playlist from URL and show name editing modal
   const importDirectFromUrl = async (source: 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'spotify', url: string, name: string) => {
-    setImportingPlaylist(url);
-    setImportProgress({
-      playlistName: name,
-      source: source === 'youtube' || source === 'amazon' || source === 'qobuz' || source === 'spotify' ? 'spotify' : source,
-      current: 0,
-      total: 0,
-      currentTrack: 'Fetching playlist...',
-      matchedCount: 0,
-    });
+    setFetchingUrl(url);
+    
+    // Clear the URL input field immediately
+    if (source === 'spotify') setSpotifyUrl('');
+    else if (source === 'apple') setAppleMusicUrl('');
+    else if (source === 'tidal') setTidalUrl('');
+    else if (source === 'youtube') setYtMusicUrl('');
+    else if (source === 'amazon') setAmazonMusicUrl('');
+    else if (source === 'qobuz') setQobuzUrl('');
     
     try {
       let tracks: { title: string; artist: string }[];
@@ -865,28 +875,63 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
         tracks = [];
       }
       
+      setFetchingUrl(null);
+      
       if (tracks.length === 0) {
         setStatusMessage('No tracks found. The playlist may be private or the service blocked the request.');
-        setImportProgress(null);
-        setImportingPlaylist(null);
         return;
       }
       
-      setImportProgress(prev => prev ? { ...prev, total: tracks.length, currentTrack: '' } : null);
-      
-      const sourceNames: Record<string, string> = {
-        apple: 'Apple Music',
-        tidal: 'Tidal',
-        youtube: 'YouTube Music',
-        amazon: 'Amazon Music',
-        qobuz: 'Qobuz',
-        spotify: 'Spotify',
-      };
-      
+      // Show modal with fetched tracks for name editing
+      setPreImportPlaylist({
+        source,
+        id: url,
+        name: playlistName,
+        trackCount: tracks.length,
+        url,
+        tracks,
+      });
+      setEditedPlaylistName(playlistName);
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+      setFetchingUrl(null);
+    }
+  };
+
+  // Actually perform the import after name editing
+  const doImportWithTracks = async (
+    source: string,
+    name: string,
+    tracks: { title: string; artist: string }[],
+    url?: string
+  ) => {
+    setImportingPlaylist(url || 'import');
+    setImportProgress({
+      playlistName: name,
+      source: (source === 'youtube' || source === 'amazon' || source === 'qobuz' || source === 'spotify' || source === 'listenbrainz' || source === 'file' || source === 'ai') ? 'spotify' : source as any,
+      current: 0,
+      total: tracks.length,
+      currentTrack: '',
+      matchedCount: 0,
+    });
+    
+    const sourceNames: Record<string, string> = {
+      apple: 'Apple Music',
+      tidal: 'Tidal',
+      youtube: 'YouTube Music',
+      amazon: 'Amazon Music',
+      qobuz: 'Qobuz',
+      spotify: 'Spotify',
+      listenbrainz: 'ListenBrainz',
+      file: 'File',
+      ai: 'AI',
+    };
+    
+    try {
       const discoveryPlaylist = {
         id: `${source}-${Date.now()}`,
-        name: applyPlaylistPrefix(playlistName, source, matchingSettings),
-        description: `Imported from ${sourceNames[source]}`,
+        name: applyPlaylistPrefix(name, source, matchingSettings),
+        description: `Imported from ${sourceNames[source] || source}`,
         source: 'deezer' as const,
         tracks: tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
       };
@@ -917,15 +962,18 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
 
   const startImport = () => {
     if (!preImportPlaylist) return;
-    const { source, id, image, url } = preImportPlaylist;
+    const { source, id, image, url, tracks } = preImportPlaylist;
     const name = editedPlaylistName.trim() || preImportPlaylist.name;
     setPreImportPlaylist(null);
     
-    // URL-based imports (Apple, Tidal, YouTube, Amazon, Qobuz)
-    if ((source === 'apple' || source === 'tidal' || source === 'youtube' || source === 'amazon' || source === 'qobuz') && url) {
-      importDirectFromUrl(source, url, name);
-    } else if (source === 'youtube' && !url) {
-      // YouTube with OAuth - import by playlist ID
+    // If tracks are pre-fetched (from URL scraping), use them directly
+    if (tracks && tracks.length > 0) {
+      doImportWithTracks(source, name, tracks, url);
+      return;
+    }
+    
+    // YouTube with OAuth - import by playlist ID
+    if (source === 'youtube' && !url) {
       importYouTubePlaylistById(id, name, image);
     } else {
       // Spotify and Deezer use ID-based import
@@ -1069,15 +1117,15 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
             type="text"
             value={spotifyUrl}
             onChange={e => setSpotifyUrl(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && spotifyUrl.trim() && importDirectFromUrl('spotify', spotifyUrl, 'Spotify Playlist')}
+            onKeyDown={e => e.key === 'Enter' && spotifyUrl.trim() && !fetchingUrl && importDirectFromUrl('spotify', spotifyUrl, 'Spotify Playlist')}
             placeholder="https://open.spotify.com/playlist/..."
           />
           <button 
             className="btn btn-primary"
             onClick={() => importDirectFromUrl('spotify', spotifyUrl, 'Spotify Playlist')}
-            disabled={!spotifyUrl.trim() || importingPlaylist === spotifyUrl}
+            disabled={!spotifyUrl.trim() || !!fetchingUrl}
           >
-            {importingPlaylist === spotifyUrl ? '...' : 'Import'}
+            {fetchingUrl ? <span className="spinner-small" /> : 'Import'}
           </button>
         </div>
       </div>
@@ -2092,38 +2140,19 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
       }
       
       const playlistName = result.name || 'Imported Playlist';
-      setImportProgress({
-        playlistName,
-        source: 'spotify',
-        current: 0,
-        total: result.tracks.length,
-        currentTrack: '',
-        matchedCount: 0,
-      });
-      
-      const discoveryPlaylist = {
-        id: `file-${Date.now()}`,
-        name: applyPlaylistPrefix(playlistName, 'file', matchingSettings),
-        description: 'Imported from M3U file',
-        source: 'deezer' as const,
-        tracks: result.tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
-      };
-      
-      const matched = await matchPlaylistToPlex(
-        discoveryPlaylist,
-        serverUrl,
-        window.api.searchTrack,
-        (current, total, trackName) => {
-          setImportProgress(prev => prev ? { ...prev, current, total, currentTrack: trackName } : null);
-        }
-      );
-      
-      setImportProgress(null);
       setIsLoadingFile(false);
-      onPlaylistSelect(matched);
+      
+      // Show modal for name editing
+      setPreImportPlaylist({
+        source: 'file',
+        id: `file-${Date.now()}`,
+        name: playlistName,
+        trackCount: result.tracks.length,
+        tracks: result.tracks,
+      });
+      setEditedPlaylistName(playlistName);
     } catch (error: any) {
       setStatusMessage(`Error: ${error.message}`);
-      setImportProgress(null);
       setIsLoadingFile(false);
     }
   };
@@ -2147,39 +2176,15 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   };
 
   const importiTunesPlaylist = async (playlist: { name: string; tracks: { title: string; artist: string }[] }) => {
-    setImportProgress({
-      playlistName: playlist.name,
-      source: 'spotify',
-      current: 0,
-      total: playlist.tracks.length,
-      currentTrack: '',
-      matchedCount: 0,
-    });
-    
-    const discoveryPlaylist = {
+    // Show modal for name editing
+    setPreImportPlaylist({
+      source: 'file',
       id: `itunes-${Date.now()}`,
-      name: applyPlaylistPrefix(playlist.name, 'file', matchingSettings),
-      description: 'Imported from iTunes',
-      source: 'deezer' as const,
-      tracks: playlist.tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
-    };
-    
-    try {
-      const matched = await matchPlaylistToPlex(
-        discoveryPlaylist,
-        serverUrl,
-        window.api.searchTrack,
-        (current, total, trackName) => {
-          setImportProgress(prev => prev ? { ...prev, current, total, currentTrack: trackName } : null);
-        }
-      );
-      setImportProgress(null);
-      setiTunesPlaylists([]);
-      onPlaylistSelect(matched);
-    } catch (error: any) {
-      setStatusMessage(`Error: ${error.message}`);
-      setImportProgress(null);
-    }
+      name: playlist.name,
+      trackCount: playlist.tracks.length,
+      tracks: playlist.tracks,
+    });
+    setEditedPlaylistName(playlist.name);
   };
 
   const renderFileTab = () => (
@@ -2250,48 +2255,30 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   };
 
   const importListenBrainzPlaylist = async (playlist: { id: string; name: string; trackCount: number }) => {
-    setImportProgress({
-      playlistName: playlist.name,
-      source: 'spotify',
-      current: 0,
-      total: playlist.trackCount,
-      currentTrack: 'Fetching tracks...',
-      matchedCount: 0,
-    });
+    setFetchingUrl(playlist.id);
     
     try {
       const tracks = await window.api.getListenBrainzPlaylistTracks({ playlistId: playlist.id });
       
+      setFetchingUrl(null);
+      
       if (tracks.length === 0) {
         setStatusMessage('No tracks found in playlist');
-        setImportProgress(null);
         return;
       }
       
-      setImportProgress(prev => prev ? { ...prev, total: tracks.length, currentTrack: '' } : null);
-      
-      const discoveryPlaylist = {
-        id: `listenbrainz-${playlist.id}`,
-        name: applyPlaylistPrefix(playlist.name, 'listenbrainz', matchingSettings),
-        description: 'Imported from ListenBrainz',
-        source: 'deezer' as const,
-        tracks: tracks.map((t: any) => ({ ...t, source: 'deezer' as const })),
-      };
-      
-      const matched = await matchPlaylistToPlex(
-        discoveryPlaylist,
-        serverUrl,
-        window.api.searchTrack,
-        (current, total, trackName) => {
-          setImportProgress(prev => prev ? { ...prev, current, total, currentTrack: trackName } : null);
-        }
-      );
-      
-      setImportProgress(null);
-      onPlaylistSelect(matched);
+      // Show modal for name editing
+      setPreImportPlaylist({
+        source: 'listenbrainz',
+        id: playlist.id,
+        name: playlist.name,
+        trackCount: tracks.length,
+        tracks,
+      });
+      setEditedPlaylistName(playlist.name);
     } catch (error: any) {
       setStatusMessage(`Error: ${error.message}`);
-      setImportProgress(null);
+      setFetchingUrl(null);
     }
   };
 
@@ -2328,20 +2315,43 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
         <>
           <h3 style={{ margin: '24px 0 12px' }}>🎵 Created For You (Daily/Weekly Jams)</h3>
           <p style={{ color: '#a0a0a0', marginBottom: '12px', fontSize: '13px' }}>
-            Personalized recommendations from troi-bot
+            Personalized recommendations from troi-bot - schedule to auto-update
           </p>
           <div className="playlist-grid">
             {createdForPlaylists.map(playlist => (
               <div 
                 key={playlist.id} 
-                className="import-playlist-card clickable"
-                onClick={() => importListenBrainzPlaylist(playlist)}
+                className="import-playlist-card"
               >
-                <div className="playlist-info">
+                <div 
+                  className="playlist-info clickable"
+                  onClick={() => importListenBrainzPlaylist(playlist)}
+                  style={{ flex: 1, cursor: 'pointer' }}
+                >
                   <span className="playlist-name">{playlist.name}</span>
                   <span className="playlist-meta">{playlist.trackCount} tracks</span>
                 </div>
-                <span className="playlist-badge" style={{ background: '#1db954' }}>Recommended</span>
+                <div className="playlist-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button
+                    className="btn btn-small btn-primary"
+                    onClick={(e) => { e.stopPropagation(); importListenBrainzPlaylist(playlist); }}
+                    title="Import playlist"
+                  >
+                    Import
+                  </button>
+                  <button 
+                    className={`btn btn-small ${isPlaylistScheduled('listenbrainz', playlist.id) ? 'btn-scheduled' : 'btn-secondary'}`}
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      isPlaylistScheduled('listenbrainz', playlist.id) 
+                        ? removeSchedule('listenbrainz', playlist.id)
+                        : openScheduleModal('listenbrainz', playlist.id, playlist.name, undefined, listenBrainzUsername); 
+                    }}
+                    title={isPlaylistScheduled('listenbrainz', playlist.id) ? 'Remove schedule' : 'Schedule auto-refresh'}
+                  >
+                    {isPlaylistScheduled('listenbrainz', playlist.id) ? '✓ Scheduled' : 'Schedule'}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -2355,14 +2365,37 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
             {userPlaylists.map(playlist => (
               <div 
                 key={playlist.id} 
-                className="import-playlist-card clickable"
-                onClick={() => importListenBrainzPlaylist(playlist)}
+                className="import-playlist-card"
               >
-                <div className="playlist-info">
+                <div 
+                  className="playlist-info clickable"
+                  onClick={() => importListenBrainzPlaylist(playlist)}
+                  style={{ flex: 1, cursor: 'pointer' }}
+                >
                   <span className="playlist-name">{playlist.name}</span>
                   <span className="playlist-meta">{playlist.trackCount} tracks</span>
                 </div>
-                <span className="playlist-badge">ListenBrainz</span>
+                <div className="playlist-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button
+                    className="btn btn-small btn-primary"
+                    onClick={(e) => { e.stopPropagation(); importListenBrainzPlaylist(playlist); }}
+                    title="Import playlist"
+                  >
+                    Import
+                  </button>
+                  <button 
+                    className={`btn btn-small ${isPlaylistScheduled('listenbrainz', playlist.id) ? 'btn-scheduled' : 'btn-secondary'}`}
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      isPlaylistScheduled('listenbrainz', playlist.id) 
+                        ? removeSchedule('listenbrainz', playlist.id)
+                        : openScheduleModal('listenbrainz', playlist.id, playlist.name, undefined, listenBrainzUsername); 
+                    }}
+                    title={isPlaylistScheduled('listenbrainz', playlist.id) ? 'Remove schedule' : 'Schedule auto-refresh'}
+                  >
+                    {isPlaylistScheduled('listenbrainz', playlist.id) ? '✓ Scheduled' : 'Schedule'}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -2699,7 +2732,10 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
                  preImportPlaylist.source === 'tidal' ? 'Tidal' :
                  preImportPlaylist.source === 'youtube' ? 'YouTube Music' :
                  preImportPlaylist.source === 'amazon' ? 'Amazon Music' :
-                 preImportPlaylist.source === 'qobuz' ? 'Qobuz' : 'Unknown'}
+                 preImportPlaylist.source === 'qobuz' ? 'Qobuz' :
+                 preImportPlaylist.source === 'listenbrainz' ? 'ListenBrainz' :
+                 preImportPlaylist.source === 'file' ? 'File' :
+                 preImportPlaylist.source === 'ai' ? 'AI' : 'Unknown'}
               </p>
             </div>
             
@@ -2713,6 +2749,12 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
                 autoFocus
               />
             </div>
+            
+            {matchingSettings.playlistPrefixes?.enabled && (
+              <p style={{ color: '#888', fontSize: '12px', marginTop: '-8px' }}>
+                Prefix "{matchingSettings.playlistPrefixes[preImportPlaylist.source as keyof typeof matchingSettings.playlistPrefixes] || ''}" will be added
+              </p>
+            )}
             
             <div className="button-row">
               <button className="btn btn-secondary" onClick={() => setPreImportPlaylist(null)}>Cancel</button>
@@ -2730,12 +2772,25 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
           <div className="modal schedule-modal" onClick={e => e.stopPropagation()}>
             <h3>Schedule Playlist</h3>
             <p style={{ color: '#a0a0a0', marginBottom: '16px' }}>
-              Auto-refresh "{schedulePlaylist.name}" from {schedulePlaylist.source === 'apple' ? 'Apple Music' : schedulePlaylist.source.charAt(0).toUpperCase() + schedulePlaylist.source.slice(1)}
+              Auto-refresh "{schedulePlaylist.name}" from {
+                schedulePlaylist.source === 'apple' ? 'Apple Music' : 
+                schedulePlaylist.source === 'listenbrainz' ? 'ListenBrainz' :
+                schedulePlaylist.source.charAt(0).toUpperCase() + schedulePlaylist.source.slice(1)
+              }
             </p>
             
             <div className="input-group">
               <label>Refresh Frequency</label>
               <div className="radio-group">
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="frequency"
+                    checked={scheduleFrequency === 'daily'}
+                    onChange={() => setScheduleFrequency('daily')}
+                  />
+                  Daily
+                </label>
                 <label className="radio-label">
                   <input
                     type="radio"
@@ -2765,6 +2820,10 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
                 </label>
               </div>
             </div>
+            
+            <p style={{ color: '#888', fontSize: '12px', marginTop: '12px' }}>
+              Scheduled updates will clear and replace playlist contents, preserving custom artwork.
+            </p>
             
             <div className="button-row">
               <button className="btn btn-secondary" onClick={() => setSchedulePlaylist(null)}>Cancel</button>

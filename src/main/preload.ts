@@ -144,6 +144,15 @@ contextBridge.exposeInMainWorld('api', {
   copyPlaylistToUser: (data: { serverUrl: string; sourcePlaylistId: string; targetUserToken: string; newTitle: string }) => ipcRenderer.invoke('copy-playlist-to-user', data),
   deleteUserPlaylist: (data: { serverUrl: string; playlistId: string; userToken: string }) => ipcRenderer.invoke('delete-user-playlist', data),
   
+  // Missing tracks
+  getMissingTracks: () => ipcRenderer.invoke('get-missing-tracks'),
+  addMissingTracks: (data: { playlistId: string; playlistName: string; tracks: any[] }) => ipcRenderer.invoke('add-missing-tracks', data),
+  removeMissingTrack: (data: { playlistId: string; title: string; artist: string }) => ipcRenderer.invoke('remove-missing-track', data),
+  clearMissingTracks: (data: { playlistId: string }) => ipcRenderer.invoke('clear-missing-tracks', data),
+  clearAllMissingTracks: () => ipcRenderer.invoke('clear-all-missing-tracks'),
+  getMissingTracksCount: () => ipcRenderer.invoke('get-missing-tracks-count'),
+  insertTrackAtPosition: (data: { serverUrl: string; playlistId: string; trackKey: string; afterTrackKey?: string }) => ipcRenderer.invoke('insert-track-at-position', data),
+  
   // Update checker
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),

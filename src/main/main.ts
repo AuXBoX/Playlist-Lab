@@ -1,7 +1,41 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import Store from 'electron-store';
+
+// Read version from package.json (works in both dev and production)
+function getAppVersion(): string {
+  // First try app.getVersion() which reads from package.json
+  const electronVersion = app.getVersion();
+  if (electronVersion && electronVersion !== '0.0.0') {
+    return electronVersion;
+  }
+  
+  // Fallback: read package.json directly
+  try {
+    const isDev = !app.isPackaged;
+    const packagePath = isDev 
+      ? path.join(app.getAppPath(), 'package.json')
+      : path.join(process.resourcesPath, 'app', 'package.json');
+    
+    if (fs.existsSync(packagePath)) {
+      const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
+      if (pkg.version) return pkg.version;
+    }
+    
+    // Try alternate location for asar packages
+    const asarPath = path.join(process.resourcesPath, 'app.asar', 'package.json');
+    if (fs.existsSync(asarPath)) {
+      const pkg = JSON.parse(fs.readFileSync(asarPath, 'utf-8'));
+      if (pkg.version) return pkg.version;
+    }
+  } catch (e) {
+    console.error('Failed to read version from package.json:', e);
+  }
+  
+  // Last resort fallback
+  return '1.0.8';
+}
 
 // Configure store to use playlist-lab folder in AppData
 const store = new Store({
@@ -20,15 +54,48 @@ const CLIENT_ID = (store.get('clientId') as string) || (() => {
 const isDev = !app.isPackaged;
 
 function createWindow() {
-  // Get the icon path - different locations for dev vs prod (use .ico for Windows)
+  // Get the icon path - different locations for dev vs prod
+  const isWindows = process.platform === 'win32';
+  
   let iconPath: string;
   if (isDev) {
-    iconPath = path.join(__dirname, '../../src/renderer/logo.ico');
+    // In dev, try .ico first on Windows, then fall back to .png
+    const icoPath = path.join(app.getAppPath(), 'src/renderer/logo.ico');
+    const pngPath = path.join(app.getAppPath(), 'src/renderer/logo512.png');
+    
+    if (isWindows && fs.existsSync(icoPath)) {
+      iconPath = icoPath;
+    } else {
+      iconPath = pngPath;
+    }
   } else {
     // In production, check extraResources first, then dist/renderer
-    const resourcePath = path.join(process.resourcesPath, 'logo.ico');
-    const distPath = path.join(__dirname, '../renderer/logo.ico');
-    iconPath = require('fs').existsSync(resourcePath) ? resourcePath : distPath;
+    const iconFile = isWindows ? 'logo.ico' : 'logo512.png';
+    const resourcePath = path.join(process.resourcesPath, iconFile);
+    const distPath = path.join(__dirname, '../renderer', iconFile);
+    
+    if (fs.existsSync(resourcePath)) {
+      iconPath = resourcePath;
+    } else if (fs.existsSync(distPath)) {
+      iconPath = distPath;
+    } else {
+      // Fallback to png
+      const pngResourcePath = path.join(process.resourcesPath, 'logo512.png');
+      const pngDistPath = path.join(__dirname, '../renderer/logo512.png');
+      iconPath = fs.existsSync(pngResourcePath) ? pngResourcePath : pngDistPath;
+    }
+  }
+  
+  console.log('[createWindow] Icon path:', iconPath, 'exists:', fs.existsSync(iconPath));
+  
+  // Load icon using nativeImage for better Windows compatibility
+  let appIcon;
+  if (fs.existsSync(iconPath)) {
+    appIcon = nativeImage.createFromPath(iconPath);
+    if (appIcon.isEmpty()) {
+      console.log('[createWindow] Warning: Icon loaded but is empty');
+      appIcon = undefined;
+    }
   }
 
   mainWindow = new BrowserWindow({
@@ -51,7 +118,7 @@ function createWindow() {
       symbolColor: '#e6edf3',
       height: 32,
     },
-    icon: iconPath,
+    icon: appIcon || iconPath,
   });
 
   mainWindow.once('ready-to-show', () => {
@@ -342,11 +409,19 @@ ipcMain.handle('create-playlist', async (_, { serverUrl, title, trackKeys }) => 
   if (!response.ok) {
     const text = await response.text();
     console.log(`[create-playlist] Failed: ${response.status} - ${text}`);
-  } else {
-    console.log(`[create-playlist] Success!`);
+    return { success: false };
   }
   
-  return response.ok;
+  // Get the created playlist ID from response
+  try {
+    const data = await response.json();
+    const playlistId = data.MediaContainer?.Metadata?.[0]?.ratingKey;
+    console.log(`[create-playlist] Success! Playlist ID: ${playlistId}`);
+    return { success: true, playlistId };
+  } catch {
+    console.log(`[create-playlist] Success but couldn't get playlist ID`);
+    return { success: true };
+  }
 });
 
 // Get existing playlists (excludes smart playlists for editing)
@@ -1056,7 +1131,7 @@ ipcMain.handle('needs-refresh', (_, { playlistId, scheduleHours }) => {
 });
 
 // Playlist schedule types
-export type ScheduleFrequency = 'weekly' | 'fortnightly' | 'monthly' | 'none';
+export type ScheduleFrequency = 'daily' | 'weekly' | 'fortnightly' | 'monthly' | 'none';
 
 export interface PlaylistSchedule {
   playlistId: string;
@@ -1067,8 +1142,9 @@ export interface PlaylistSchedule {
   chartIds?: string[]; // For ARIA charts, which charts to include
   country: string;
   // For external playlist imports
-  source?: 'deezer' | 'apple' | 'tidal' | 'spotify';
-  sourceUrl?: string; // URL for Apple/Tidal, playlist ID for Deezer/Spotify
+  source?: 'deezer' | 'apple' | 'tidal' | 'spotify' | 'listenbrainz';
+  sourceUrl?: string; // URL for Apple/Tidal, playlist ID for Deezer/Spotify/ListenBrainz
+  username?: string; // For ListenBrainz - store the username
 }
 
 // Get all playlist schedules
@@ -1120,6 +1196,9 @@ ipcMain.handle('get-due-schedules', () => {
       // Calculate next run based on frequency
       nextRun = new Date(lastRun);
       switch (schedule.frequency) {
+        case 'daily':
+          nextRun.setDate(nextRun.getDate() + 1);
+          break;
         case 'weekly':
           nextRun.setDate(nextRun.getDate() + 7);
           break;
@@ -2709,6 +2788,24 @@ ipcMain.handle('scrape-spotify-playlist', async (_, { url }) => {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
     
+    // Block ALL external protocol links (spotify:, etc.) from triggering OS handlers
+    scrapeWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    scrapeWindow.webContents.on('will-navigate', (event, navUrl) => {
+      if (!navUrl.startsWith('https://') && !navUrl.startsWith('http://')) {
+        event.preventDefault();
+      }
+    });
+    scrapeWindow.webContents.on('will-frame-navigate', (event) => {
+      const navUrl = event.url;
+      if (!navUrl.startsWith('https://') && !navUrl.startsWith('http://')) {
+        event.preventDefault();
+      }
+    });
+    // Prevent any external protocol from being opened
+    scrapeWindow.webContents.session.setPermissionRequestHandler((_, permission, callback) => {
+      callback(false);
+    });
+    
     const timeout = setTimeout(() => {
       console.log('[Spotify] Scrape timeout');
       scrapeWindow.close();
@@ -3291,9 +3388,165 @@ ipcMain.handle('delete-user-playlist', async (_, { serverUrl, playlistId, userTo
   return response.ok;
 });
 
+// ==================== MISSING TRACKS DATABASE ====================
+
+// Structure for missing tracks:
+// {
+//   playlistId: string,           // Plex playlist ratingKey
+//   playlistName: string,         // Playlist name for display
+//   tracks: [{
+//     title: string,
+//     artist: string,
+//     album?: string,
+//     position: number,           // Original position in playlist (0-indexed)
+//     afterTrackKey?: string,     // ratingKey of track this should come after (null = first)
+//     addedAt: number,            // Timestamp when added to missing list
+//     source: string,             // Where it was imported from
+//   }]
+// }
+
+interface MissingTrack {
+  title: string;
+  artist: string;
+  album?: string;
+  position: number;
+  afterTrackKey?: string;
+  addedAt: number;
+  source: string;
+}
+
+interface MissingPlaylistEntry {
+  playlistId: string;
+  playlistName: string;
+  tracks: MissingTrack[];
+}
+
+// Get all missing tracks
+ipcMain.handle('get-missing-tracks', () => {
+  return store.get('missingTracks', []) as MissingPlaylistEntry[];
+});
+
+// Add missing tracks for a playlist
+ipcMain.handle('add-missing-tracks', (_, { playlistId, playlistName, tracks }: { playlistId: string; playlistName: string; tracks: MissingTrack[] }) => {
+  const allMissing = store.get('missingTracks', []) as MissingPlaylistEntry[];
+  
+  // Find existing entry for this playlist
+  const existingIndex = allMissing.findIndex(m => m.playlistId === playlistId);
+  
+  if (existingIndex >= 0) {
+    // Merge tracks, avoiding duplicates
+    const existing = allMissing[existingIndex];
+    for (const track of tracks) {
+      const isDupe = existing.tracks.some(t => 
+        t.title.toLowerCase() === track.title.toLowerCase() && 
+        t.artist.toLowerCase() === track.artist.toLowerCase()
+      );
+      if (!isDupe) {
+        existing.tracks.push(track);
+      }
+    }
+    allMissing[existingIndex] = existing;
+  } else {
+    // Add new entry
+    allMissing.push({ playlistId, playlistName, tracks });
+  }
+  
+  store.set('missingTracks', allMissing);
+  console.log(`[Missing Tracks] Added ${tracks.length} tracks for playlist "${playlistName}"`);
+  return true;
+});
+
+// Remove a specific missing track
+ipcMain.handle('remove-missing-track', (_, { playlistId, title, artist }: { playlistId: string; title: string; artist: string }) => {
+  const allMissing = store.get('missingTracks', []) as MissingPlaylistEntry[];
+  const entry = allMissing.find(m => m.playlistId === playlistId);
+  
+  if (entry) {
+    entry.tracks = entry.tracks.filter(t => 
+      !(t.title.toLowerCase() === title.toLowerCase() && t.artist.toLowerCase() === artist.toLowerCase())
+    );
+    
+    // Remove entry if no tracks left
+    if (entry.tracks.length === 0) {
+      const index = allMissing.indexOf(entry);
+      allMissing.splice(index, 1);
+    }
+    
+    store.set('missingTracks', allMissing);
+  }
+  return true;
+});
+
+// Clear all missing tracks for a playlist
+ipcMain.handle('clear-missing-tracks', (_, { playlistId }: { playlistId: string }) => {
+  const allMissing = store.get('missingTracks', []) as MissingPlaylistEntry[];
+  const filtered = allMissing.filter(m => m.playlistId !== playlistId);
+  store.set('missingTracks', filtered);
+  return true;
+});
+
+// Clear all missing tracks
+ipcMain.handle('clear-all-missing-tracks', () => {
+  store.set('missingTracks', []);
+  return true;
+});
+
+// Get total count of missing tracks
+ipcMain.handle('get-missing-tracks-count', () => {
+  const allMissing = store.get('missingTracks', []) as MissingPlaylistEntry[];
+  return allMissing.reduce((sum, entry) => sum + entry.tracks.length, 0);
+});
+
+// Insert track at correct position in playlist
+ipcMain.handle('insert-track-at-position', async (_, { serverUrl, playlistId, trackKey, afterTrackKey }) => {
+  const token = store.get('plexToken') as string;
+  const server = store.get('plexServer') as any;
+  
+  // First add the track to the playlist
+  const uri = `server://${server.clientId}/com.plexapp.plugins.library/library/metadata/${trackKey}`;
+  const addUrl = `${serverUrl}/playlists/${playlistId}/items?uri=${encodeURIComponent(uri)}&X-Plex-Token=${token}`;
+  const addResponse = await fetch(addUrl, { method: 'PUT', headers: PLEX_HEADERS });
+  
+  if (!addResponse.ok) {
+    console.log('[insert-track-at-position] Failed to add track');
+    return { success: false, error: 'Failed to add track' };
+  }
+  
+  // Get the playlist items to find the newly added track's playlistItemID
+  const itemsUrl = `${serverUrl}/playlists/${playlistId}/items?X-Plex-Token=${token}`;
+  const itemsResponse = await fetch(itemsUrl, { headers: PLEX_HEADERS });
+  if (!itemsResponse.ok) {
+    return { success: true }; // Track added but couldn't reorder
+  }
+  
+  const itemsData = await itemsResponse.json();
+  const items = itemsData.MediaContainer?.Metadata || [];
+  
+  // Find the newly added item (should be at the end)
+  const newItem = items.find((item: any) => item.ratingKey === trackKey);
+  if (!newItem || !newItem.playlistItemID) {
+    return { success: true }; // Track added but couldn't find it to reorder
+  }
+  
+  // If afterTrackKey is provided, move the track to the correct position
+  if (afterTrackKey) {
+    const afterItem = items.find((item: any) => item.ratingKey === afterTrackKey);
+    if (afterItem && afterItem.playlistItemID) {
+      const moveUrl = `${serverUrl}/playlists/${playlistId}/items/${newItem.playlistItemID}/move?after=${afterItem.playlistItemID}&X-Plex-Token=${token}`;
+      await fetch(moveUrl, { method: 'PUT', headers: PLEX_HEADERS });
+    }
+  } else {
+    // Move to beginning (no after parameter)
+    const moveUrl = `${serverUrl}/playlists/${playlistId}/items/${newItem.playlistItemID}/move?X-Plex-Token=${token}`;
+    await fetch(moveUrl, { method: 'PUT', headers: PLEX_HEADERS });
+  }
+  
+  return { success: true };
+});
+
 // ==================== UPDATE CHECKER ====================
 
-const APP_VERSION = app.getVersion();
+const APP_VERSION = getAppVersion();
 const GITHUB_REPO = 'AuXBoX/Playlist-Lab';
 
 // Check for updates from GitHub releases
@@ -3308,19 +3561,28 @@ ipcMain.handle('check-for-updates', async () => {
     const release = await response.json();
     const latestVersion = release.tag_name.replace(/^v/, '');
     
-    // Compare versions
+    // Compare versions - only update if latest is strictly greater
     const current = APP_VERSION.split('.').map(Number);
     const latest = latestVersion.split('.').map(Number);
     
+    console.log(`[Update Check] Current: ${APP_VERSION}, Latest: ${latestVersion}`);
+    
     let hasUpdate = false;
     for (let i = 0; i < 3; i++) {
-      if ((latest[i] || 0) > (current[i] || 0)) {
+      const latestPart = latest[i] || 0;
+      const currentPart = current[i] || 0;
+      if (latestPart > currentPart) {
         hasUpdate = true;
         break;
-      } else if ((latest[i] || 0) < (current[i] || 0)) {
+      } else if (latestPart < currentPart) {
+        // Current is newer than latest (dev build or pre-release)
+        hasUpdate = false;
         break;
       }
+      // If equal, continue to next part
     }
+    
+    console.log(`[Update Check] Has update: ${hasUpdate}`);
     
     // Find the portable exe asset
     const portableAsset = (release.assets || []).find((a: any) => 
