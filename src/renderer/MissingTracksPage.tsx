@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { findBestMatchForTrack } from './discovery';
 
 interface MissingTrack {
   title: string;
@@ -64,42 +65,30 @@ export default function MissingTracksPage({ serverUrl, onBack, onCountChange }: 
       setRetryProgress({ current: i + 1, total: entry.tracks.length, track: `${track.artist} - ${track.title}` });
 
       try {
-        // Search for the track
-        const results = await window.api.searchTrack({ 
-          serverUrl, 
-          query: `${track.artist} ${track.title}` 
-        });
+        // Use the proper matching logic from discovery module
+        const match = await findBestMatchForTrack(
+          { title: track.title, artist: track.artist, album: track.album },
+          serverUrl,
+          window.api.searchTrack
+        );
 
-        if (results.length > 0) {
-          // Find best match
-          const match = results.find((r: any) => {
-            const titleMatch = r.title?.toLowerCase().includes(track.title.toLowerCase()) ||
-                              track.title.toLowerCase().includes(r.title?.toLowerCase());
-            const artistMatch = r.grandparentTitle?.toLowerCase().includes(track.artist.toLowerCase()) ||
-                               track.artist.toLowerCase().includes(r.grandparentTitle?.toLowerCase());
-            return titleMatch && artistMatch;
-          }) || results[0];
+        if (match) {
+          // Insert track at correct position
+          const result = await window.api.insertTrackAtPosition({
+            serverUrl,
+            playlistId: entry.playlistId,
+            trackKey: match.ratingKey,
+            afterTrackKey: track.afterTrackKey,
+          });
 
-          if (match) {
-            // Insert track at correct position
-            const result = await window.api.insertTrackAtPosition({
-              serverUrl,
+          if (result.success) {
+            // Remove from missing tracks
+            await window.api.removeMissingTrack({
               playlistId: entry.playlistId,
-              trackKey: match.ratingKey,
-              afterTrackKey: track.afterTrackKey,
+              title: track.title,
+              artist: track.artist,
             });
-
-            if (result.success) {
-              // Remove from missing tracks
-              await window.api.removeMissingTrack({
-                playlistId: entry.playlistId,
-                title: track.title,
-                artist: track.artist,
-              });
-              foundCount++;
-            } else {
-              notFoundCount++;
-            }
+            foundCount++;
           } else {
             notFoundCount++;
           }
@@ -107,6 +96,7 @@ export default function MissingTracksPage({ serverUrl, onBack, onCountChange }: 
           notFoundCount++;
         }
       } catch (error) {
+        console.error('Error retrying track:', error);
         notFoundCount++;
       }
     }
@@ -147,8 +137,8 @@ export default function MissingTracksPage({ serverUrl, onBack, onCountChange }: 
   };
 
   return (
-    <div className="page-container">
-      <div className="page-header">
+    <div className="page-container" style={{ padding: '20px' }}>
+      <div className="page-header" style={{ marginBottom: '20px' }}>
         <button className="btn btn-secondary" onClick={onBack}>← Back</button>
         <h1>Missing Tracks</h1>
         <div style={{ flex: 1 }} />
@@ -165,13 +155,13 @@ export default function MissingTracksPage({ serverUrl, onBack, onCountChange }: 
       </div>
 
       {statusMessage && (
-        <div className="status-message" style={{ margin: '16px 0', padding: '12px', background: 'rgba(88, 166, 255, 0.1)', borderRadius: '6px', color: '#58a6ff' }}>
+        <div className="status-message" style={{ margin: '0 0 16px 0', padding: '12px', background: 'rgba(88, 166, 255, 0.1)', borderRadius: '6px', color: '#58a6ff' }}>
           {statusMessage}
         </div>
       )}
 
       {retryProgress && (
-        <div className="retry-progress" style={{ margin: '16px 0', padding: '16px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+        <div className="retry-progress" style={{ margin: '0 0 16px 0', padding: '16px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
           <div style={{ marginBottom: '8px', color: '#58a6ff' }}>
             Searching... ({retryProgress.current}/{retryProgress.total})
           </div>
@@ -180,7 +170,7 @@ export default function MissingTracksPage({ serverUrl, onBack, onCountChange }: 
       )}
 
       {isLoading ? (
-        <div className="loading-state">Loading missing tracks...</div>
+        <div className="loading-state" style={{ padding: '60px 20px' }}>Loading missing tracks...</div>
       ) : totalMissing === 0 ? (
         <div className="empty-state" style={{ textAlign: 'center', padding: '60px 20px', color: '#a0a0a0' }}>
           <div style={{ fontSize: '48px', marginBottom: '16px' }}>✓</div>
@@ -189,9 +179,9 @@ export default function MissingTracksPage({ serverUrl, onBack, onCountChange }: 
         </div>
       ) : (
         <div className="missing-tracks-list">
-          <p style={{ color: '#a0a0a0', marginBottom: '16px' }}>
+          <p style={{ color: '#a0a0a0', marginBottom: '20px', lineHeight: '1.6' }}>
             {totalMissing} track{totalMissing !== 1 ? 's' : ''} from {missingEntries.length} playlist{missingEntries.length !== 1 ? 's' : ''} couldn't be matched.
-            Add the missing music to your Plex library, then click "Retry" to add them to the playlists.
+            Add the missing music to your Plex library, then click "Retry" to search again using your matching settings.
           </p>
 
           {missingEntries.map(entry => (
@@ -217,7 +207,7 @@ export default function MissingTracksPage({ serverUrl, onBack, onCountChange }: 
                 </span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 500, color: '#e6edf3' }}>{entry.playlistName}</div>
-                  <div style={{ fontSize: '13px', color: '#a0a0a0' }}>
+                  <div style={{ fontSize: '13px', color: '#a0a0a0', marginTop: '4px' }}>
                     {entry.tracks.length} missing track{entry.tracks.length !== 1 ? 's' : ''}
                   </div>
                 </div>
@@ -264,8 +254,11 @@ export default function MissingTracksPage({ serverUrl, onBack, onCountChange }: 
                         #{track.position + 1}
                       </div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ color: '#e6edf3' }}>{track.title}</div>
+                        <div style={{ color: '#e6edf3', marginBottom: '4px' }}>{track.title}</div>
                         <div style={{ fontSize: '13px', color: '#a0a0a0' }}>{track.artist}</div>
+                        {track.album && (
+                          <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>{track.album}</div>
+                        )}
                       </div>
                       <div style={{ fontSize: '12px', color: '#666' }}>
                         {formatDate(track.addedAt)}

@@ -875,6 +875,23 @@ export async function matchPlaylistToPlex(
   };
 }
 
+// Export wrapper for use in other components (like Missing Tracks page)
+export async function findBestMatchForTrack(
+  track: ExternalTrack,
+  serverUrl: string,
+  searchFn: (data: { serverUrl: string; query: string }) => Promise<any[]>
+): Promise<{ ratingKey: string; score: number } | null> {
+  const match = await findBestMatch(track, serverUrl, searchFn);
+  if (!match) return null;
+  
+  // Apply minimum score filter
+  if (match.score < currentMatchingSettings.minMatchScore) {
+    return null;
+  }
+  
+  return { ratingKey: match.ratingKey, score: match.score };
+}
+
 async function findBestMatch(
   track: ExternalTrack,
   serverUrl: string,

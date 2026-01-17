@@ -1,5 +1,18 @@
 # Release Notes
 
+## v1.0.9
+
+### Improvements
+- **Missing Tracks Matching** - Missing Tracks page now uses the same sophisticated matching algorithm as the import process, respecting all your matching settings. This significantly improves the ability to find tracks that were previously missed due to partial matches.
+- **Better Page Spacing** - Added proper padding and spacing to Missing Tracks page for improved readability
+- **Album Display** - Missing tracks now show album name when available
+
+### Bug Fixes
+- **Update Notification Fix** - Fixed update modal appearing every time the app opens even when already on the latest version. The app now properly reads version from package.json and remembers when you dismiss an update.
+- **Version Detection** - Improved version detection for portable builds with multiple fallback methods
+
+---
+
 ## v1.0.8
 
 ### New Features
