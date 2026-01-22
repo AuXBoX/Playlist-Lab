@@ -7,34 +7,47 @@ import Store from 'electron-store';
 function getAppVersion(): string {
   // First try app.getVersion() which reads from package.json
   const electronVersion = app.getVersion();
+  console.log('[getAppVersion] app.getVersion():', electronVersion);
+  
   if (electronVersion && electronVersion !== '0.0.0') {
+    console.log('[getAppVersion] Using Electron version:', electronVersion);
     return electronVersion;
   }
   
   // Fallback: read package.json directly
   try {
     const isDev = !app.isPackaged;
-    const packagePath = isDev 
-      ? path.join(app.getAppPath(), 'package.json')
-      : path.join(process.resourcesPath, 'app', 'package.json');
+    console.log('[getAppVersion] isDev:', isDev, 'isPackaged:', app.isPackaged);
     
-    if (fs.existsSync(packagePath)) {
-      const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
-      if (pkg.version) return pkg.version;
+    // Try multiple possible locations
+    const possiblePaths = [
+      path.join(app.getAppPath(), 'package.json'),
+      path.join(process.resourcesPath, 'app', 'package.json'),
+      path.join(process.resourcesPath, 'app.asar', 'package.json'),
+      path.join(__dirname, '..', 'package.json'),
+      path.join(__dirname, '..', '..', 'package.json'),
+    ];
+    
+    for (const packagePath of possiblePaths) {
+      console.log('[getAppVersion] Trying:', packagePath);
+      if (fs.existsSync(packagePath)) {
+        console.log('[getAppVersion] Found package.json at:', packagePath);
+        const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
+        if (pkg.version) {
+          console.log('[getAppVersion] Read version:', pkg.version);
+          return pkg.version;
+        }
+      }
     }
     
-    // Try alternate location for asar packages
-    const asarPath = path.join(process.resourcesPath, 'app.asar', 'package.json');
-    if (fs.existsSync(asarPath)) {
-      const pkg = JSON.parse(fs.readFileSync(asarPath, 'utf-8'));
-      if (pkg.version) return pkg.version;
-    }
+    console.log('[getAppVersion] No package.json found in any location');
   } catch (e) {
-    console.error('Failed to read version from package.json:', e);
+    console.error('[getAppVersion] Failed to read version from package.json:', e);
   }
   
-  // Last resort fallback
-  return '1.0.8';
+  // Last resort fallback - this should never be reached
+  console.log('[getAppVersion] Using fallback version: 1.1.0');
+  return '1.1.0';
 }
 
 // Configure store to use playlist-lab folder in AppData
@@ -146,6 +159,11 @@ function createWindow() {
     }
   });
 
+  // Disable cache for production builds
+  if (!isDev) {
+    mainWindow.webContents.session.clearCache();
+  }
+
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
@@ -153,15 +171,38 @@ function createWindow() {
     const indexPath = path.join(__dirname, '../renderer/index.html');
     console.log('Loading:', indexPath);
     console.log('Exists:', require('fs').existsSync(indexPath));
-    mainWindow.loadFile(indexPath).catch(err => {
+    
+    // Add cache-busting query parameter with app version
+    const version = getAppVersion();
+    mainWindow.loadFile(indexPath, { 
+      query: { v: version.replace(/\./g, '') } 
+    }).catch(err => {
       console.error('Failed to load index.html:', err);
       mainWindow?.show();
     });
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
+  
+  // ALWAYS clear cache in production to ensure fresh loads
+  if (!isDev) {
+    try {
+      const currentVersion = getAppVersion();
+      console.log(`[app] Current version: ${currentVersion}, clearing all cache...`);
+      const { session } = require('electron');
+      await session.defaultSession.clearCache();
+      await session.defaultSession.clearStorageData({
+        storages: ['appcache', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
+      });
+      store.set('lastAppVersion', currentVersion);
+      console.log('[app] Cache cleared successfully');
+    } catch (e) {
+      console.error('[app] Failed to clear cache:', e);
+    }
+  }
+  
   createWindow();
 });
 
@@ -3636,23 +3677,42 @@ ipcMain.handle('download-update', async (_, { downloadUrl, version }) => {
   }
 });
 
-// Install update (launch the new exe and quit current app)
+// Install update (replace current exe and relaunch)
 ipcMain.handle('install-update', async (_, { installerPath }) => {
   console.log(`[Update] Installing from: ${installerPath}`);
   
   try {
-    // Launch the new portable exe
+    const currentExePath = app.getPath('exe');
+    const currentExeDir = path.dirname(currentExePath);
+    const backupPath = path.join(currentExeDir, 'PlaylistLab-old.exe');
+    
+    console.log(`[Update] Current exe: ${currentExePath}`);
+    console.log(`[Update] Backup path: ${backupPath}`);
+    
+    // For portable apps, we need to replace the current exe
+    // 1. Rename current exe to backup
+    if (fs.existsSync(backupPath)) {
+      fs.unlinkSync(backupPath); // Remove old backup if exists
+    }
+    fs.renameSync(currentExePath, backupPath);
+    
+    // 2. Copy new exe to current location
+    fs.copyFileSync(installerPath, currentExePath);
+    
+    console.log(`[Update] Replaced exe successfully`);
+    
+    // 3. Launch the new exe
     const { spawn } = require('child_process');
-    spawn(installerPath, [], { 
+    spawn(currentExePath, [], { 
       detached: true, 
       stdio: 'ignore',
       shell: true 
     }).unref();
     
-    // Quit the current app after a short delay
+    // 4. Quit the current app
     setTimeout(() => {
       app.quit();
-    }, 1000);
+    }, 500);
     
     return { success: true };
   } catch (error: any) {

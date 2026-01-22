@@ -1,5 +1,21 @@
 # Release Notes
 
+## v1.1.0
+
+### Critical Fixes
+- **Infinite Loading Screen Fix** - Added comprehensive error handling and 10-second safety timeout to prevent app from hanging during initialization. All API calls during startup now have proper error handling to ensure the app always loads.
+- **Improved Version Detection** - Enhanced version reading with multiple fallback methods and extensive logging to properly detect app version in portable builds.
+
+### Improvements
+- **Better Error Recovery** - Failed API calls during startup (libraries, servers, schedules) no longer block the app from loading
+- **Startup Reliability** - Added safety timeout that forces the app to show after 10 seconds even if some initialization steps fail
+
+### Bug Fixes
+- **Loading Hang Prevention** - App will no longer get stuck at loading screen if server connection fails or API calls timeout
+- **Graceful Degradation** - App now continues to function even if some features fail to initialize
+
+---
+
 ## v1.0.9
 
 ### Improvements

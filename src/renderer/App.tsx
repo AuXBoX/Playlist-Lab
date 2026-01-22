@@ -237,6 +237,9 @@ export default function App() {
 
   // Missing tracks count for badge
   const [missingTracksCount, setMissingTracksCount] = useState(0);
+  
+  // App version
+  const [appVersion, setAppVersion] = useState('');
 
   // Edit playlists state
   const [editPlaylists, setEditPlaylists] = useState<any[]>([]);
@@ -327,27 +330,34 @@ export default function App() {
   }, [mixSettings, auth.token]);
 
   useEffect(() => {
+    // Safety timeout - if loading takes more than 10 seconds, force show the app
+    const safetyTimeout = setTimeout(() => {
+      console.warn('Loading timeout - forcing app to show');
+      setIsLoading(false);
+    }, 10000);
+    
     async function init() {
-      const authData = await window.api.getAuth();
-      setAuth(authData);
-      
-      if (authData.token) {
-        const savedSettings = await window.api.getSettings();
-        setSettings({
-          country: savedSettings.country || 'global',
-          libraryId: savedSettings.libraryId || '',
-          autoSync: savedSettings.autoSync || false,
-        });
+      try {
+        const authData = await window.api.getAuth();
+        setAuth(authData);
         
-        // Load matching settings
-        if (savedSettings.matchingSettings) {
-          setMatchingSettingsState(savedSettings.matchingSettings);
-          setMatchingSettings(savedSettings.matchingSettings);
-        }
-        
-        // Load mix settings - merge with defaults to handle missing properties
-        if (savedSettings.mixSettings) {
-          setMixSettings(prev => ({
+        if (authData.token) {
+          const savedSettings = await window.api.getSettings();
+          setSettings({
+            country: savedSettings.country || 'global',
+            libraryId: savedSettings.libraryId || '',
+            autoSync: savedSettings.autoSync || false,
+          });
+          
+          // Load matching settings
+          if (savedSettings.matchingSettings) {
+            setMatchingSettingsState(savedSettings.matchingSettings);
+            setMatchingSettings(savedSettings.matchingSettings);
+          }
+          
+          // Load mix settings - merge with defaults to handle missing properties
+          if (savedSettings.mixSettings) {
+            setMixSettings(prev => ({
             weeklyMix: { ...prev.weeklyMix, ...savedSettings.mixSettings.weeklyMix },
             dailyMix: { ...prev.dailyMix, ...savedSettings.mixSettings.dailyMix },
             timeCapsule: { ...prev.timeCapsule, ...savedSettings.mixSettings.timeCapsule },
@@ -359,31 +369,48 @@ export default function App() {
           const url = authData.server.connections?.[0]?.uri;
           setServerUrl(url);
           if (url) {
-            const libs = await window.api.getLibraries({ serverUrl: url });
-            setLibraries(libs);
+            try {
+              const libs = await window.api.getLibraries({ serverUrl: url });
+              setLibraries(libs);
+            } catch (error) {
+              console.error('Failed to load libraries:', error);
+              // Don't block loading if libraries fail
+            }
           }
         } else {
-          const serverList = await window.api.getServers();
-          setServers(serverList);
+          try {
+            const serverList = await window.api.getServers();
+            setServers(serverList);
+          } catch (error) {
+            console.error('Failed to load servers:', error);
+          }
         }
         
-        const savedSchedules = await window.api.getSchedules();
-        setSchedules(savedSchedules);
+        try {
+          const savedSchedules = await window.api.getSchedules();
+          setSchedules(savedSchedules);
+        } catch (error) {
+          console.error('Failed to load schedules:', error);
+        }
         
-        const savedMixesSchedule = await window.api.getMixesSchedule();
-        setMixesSchedule(savedMixesSchedule);
-        
-        // Check if mixes schedule is due
-        if (savedMixesSchedule.enabled && authData.server && savedSettings.libraryId) {
-          const isDue = await window.api.checkMixesScheduleDue();
-          if (isDue) {
-            console.log('Mixes schedule is due, auto-generating...');
-            // Will trigger after component mounts
-            setTimeout(() => {
-              const generateBtn = document.querySelector('[data-auto-generate]') as HTMLButtonElement;
-              if (generateBtn) generateBtn.click();
-            }, 1000);
+        try {
+          const savedMixesSchedule = await window.api.getMixesSchedule();
+          setMixesSchedule(savedMixesSchedule);
+          
+          // Check if mixes schedule is due
+          if (savedMixesSchedule.enabled && authData.server && savedSettings.libraryId) {
+            const isDue = await window.api.checkMixesScheduleDue();
+            if (isDue) {
+              console.log('Mixes schedule is due, auto-generating...');
+              // Will trigger after component mounts
+              setTimeout(() => {
+                const generateBtn = document.querySelector('[data-auto-generate]') as HTMLButtonElement;
+                if (generateBtn) generateBtn.click();
+              }, 1000);
+            }
           }
+        } catch (error) {
+          console.error('Failed to load mixes schedule:', error);
         }
       }
       setIsLoading(false);
@@ -410,6 +437,20 @@ export default function App() {
       } catch (e) {
         console.log('Failed to load missing tracks count:', e);
       }
+      
+      // Load app version
+      try {
+        const version = await window.api.getAppVersion();
+        setAppVersion(version);
+      } catch (e) {
+        console.log('Failed to load app version:', e);
+      }
+    } catch (error) {
+      console.error('Init failed:', error);
+      setIsLoading(false);
+    } finally {
+      clearTimeout(safetyTimeout);
+    }
     }
     init();
   }, []);
@@ -1214,8 +1255,19 @@ export default function App() {
         </div>
       </nav>
       
-      {/* Matching Settings */}
+      {/* Version and Matching Settings */}
       <div className="sidebar-matching">
+        {appVersion && (
+          <div style={{ 
+            textAlign: 'center', 
+            fontSize: '13px', 
+            color: '#a0a0a0',
+            padding: '8px 0 12px 0',
+            fontWeight: 500
+          }}>
+            v{appVersion}
+          </div>
+        )}
         <button className="btn btn-secondary btn-small btn-full" onClick={() => setShowMatchingSettings(true)}>
           ⚙️ Matching Settings
         </button>
@@ -3068,44 +3120,12 @@ export default function App() {
                   }}>
                     Later
                   </button>
-                  {updateInfo.downloadUrl ? (
-                    <button className="btn btn-primary" onClick={async () => {
-                      if (!updateInfo.downloadUrl || !updateInfo.latestVersion) return;
-                      setUpdateDownloading(true);
-                      setUpdateDownloadProgress('Downloading update...');
-                      try {
-                        const result = await window.api.downloadUpdate({ 
-                          downloadUrl: updateInfo.downloadUrl, 
-                          version: updateInfo.latestVersion 
-                        });
-                        if (result.success && result.path) {
-                          setUpdateDownloadProgress('Installing update...');
-                          await window.api.installUpdate({ installerPath: result.path });
-                        } else {
-                          setUpdateDownloadProgress(`Download failed: ${result.error}`);
-                          setTimeout(() => {
-                            setUpdateDownloading(false);
-                            setUpdateDownloadProgress('');
-                          }, 3000);
-                        }
-                      } catch (e: any) {
-                        setUpdateDownloadProgress(`Error: ${e.message}`);
-                        setTimeout(() => {
-                          setUpdateDownloading(false);
-                          setUpdateDownloadProgress('');
-                        }, 3000);
-                      }
-                    }}>
-                      Download & Install
-                    </button>
-                  ) : (
-                    <button className="btn btn-primary" onClick={() => {
-                      if (updateInfo.releaseUrl) window.api.openReleasePage(updateInfo.releaseUrl);
-                      setShowUpdateModal(false);
-                    }}>
-                      View Release
-                    </button>
-                  )}
+                  <button className="btn btn-primary" onClick={() => {
+                    if (updateInfo.releaseUrl) window.api.openReleasePage(updateInfo.releaseUrl);
+                    setShowUpdateModal(false);
+                  }}>
+                    Download Update
+                  </button>
                 </div>
               )}
             </div>
