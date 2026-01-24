@@ -1,5 +1,12 @@
 # Release Notes
 
+## v1.1.1
+
+### Bug Fixes
+- **Build Error Fix** - Fixed duplicate function declaration (`handleSpotifySearch`) that prevented the app from building successfully
+
+---
+
 ## v1.1.0
 
 ### Critical Fixes

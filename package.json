@@ -1,6 +1,6 @@
 {
   "name": "playlist-lab",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Import, generate, and manage your Plex playlists",
   "main": "dist/main/main.js",
   "author": {

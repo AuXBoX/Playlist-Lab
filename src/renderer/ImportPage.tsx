@@ -70,6 +70,9 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
   const [isLoadingSpotify, setIsLoadingSpotify] = useState(false);
   const [spotifyUrl, setSpotifyUrl] = useState('');
   const [fetchingUrl, setFetchingUrl] = useState<string | null>(null); // Track URL being fetched before progress shows
+  const [spotifySearchQuery, setSpotifySearchQuery] = useState('');
+  const [spotifySearchResults, setSpotifySearchResults] = useState<SpotifyPlaylist[]>([]);
+  const [isSearchingSpotify, setIsSearchingSpotify] = useState(false);
   
   // Deezer state (with optional login)
   const [deezerAuth, setDeezerAuth] = useState<{ user: any; accessToken: string | null } | null>(null);
@@ -653,6 +656,20 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
     setSpotifyPlaylists([]);
   };
 
+  const handleSpotifySearch = async () => {
+    if (!spotifySearchQuery.trim()) return;
+    
+    setIsSearchingSpotify(true);
+    try {
+      const playlists = await window.api.searchSpotifyPlaylists({ query: spotifySearchQuery });
+      setSpotifySearchResults(playlists);
+    } catch (error: any) {
+      setStatusMessage(`Error: ${error.message}`);
+    } finally {
+      setIsSearchingSpotify(false);
+    }
+  };
+
   const handleDeezerSearch = async () => {
     if (!deezerQuery.trim()) return;
     
@@ -1106,9 +1123,78 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
 
   const renderSpotifyTab = () => (
     <div className="import-tab-content">
-      {/* URL Import - always visible */}
-      <div className="url-import-section">
-        <h3>Import from Spotify</h3>
+      {/* Search bar at the top */}
+      <div className="deezer-search">
+        <div className="search-bar-row">
+          <input
+            type="text"
+            value={spotifySearchQuery}
+            onChange={e => setSpotifySearchQuery(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSpotifySearch()}
+            placeholder="Search Spotify playlists..."
+          />
+          <button 
+            className="btn btn-primary"
+            onClick={handleSpotifySearch}
+            disabled={isSearchingSpotify || !spotifySearchQuery.trim()}
+          >
+            {isSearchingSpotify ? '...' : 'Search'}
+          </button>
+        </div>
+      </div>
+
+      {/* Search Results */}
+      {spotifySearchResults.length > 0 && (
+        <>
+          <h3 style={{ margin: '16px 0 8px' }}>Search Results</h3>
+          <div className="playlist-grid">
+            {spotifySearchResults.map(playlist => {
+              const matched = matchedPlaylists.get(playlist.id);
+              return (
+                <div 
+                  key={playlist.id} 
+                  className="import-playlist-card clickable"
+                  onClick={() => openPreview('spotify', playlist.id, playlist.name, playlist.trackCount, playlist.image)}
+                >
+                  {playlist.image && <img src={playlist.image} alt="" className="playlist-image" />}
+                  <div className="playlist-info">
+                    <span className="playlist-name">{playlist.name}</span>
+                    <span className="playlist-meta">{playlist.trackCount} tracks • {playlist.owner}</span>
+                  </div>
+                  <div className="button-group">
+                    <button
+                      className={`btn btn-small ${matched ? 'btn-secondary' : 'btn-primary'}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        matched ? onPlaylistSelect(matched) : showPreImportModal('spotify', playlist.id, playlist.name, playlist.trackCount, playlist.image);
+                      }}
+                      disabled={importingPlaylist === playlist.id}
+                    >
+                      {importingPlaylist === playlist.id ? '...' : matched ? `View (${matched.matchedCount}/${matched.totalCount})` : 'Import'}
+                    </button>
+                    <button 
+                      className={`btn btn-small ${isPlaylistScheduled('spotify', playlist.id) ? 'btn-scheduled' : 'btn-secondary'}`}
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        isPlaylistScheduled('spotify', playlist.id) 
+                          ? removeSchedule('spotify', playlist.id)
+                          : openScheduleModal('spotify', playlist.id, playlist.name); 
+                      }}
+                      title={isPlaylistScheduled('spotify', playlist.id) ? 'Remove schedule' : 'Schedule auto-refresh'}
+                    >
+                      {isPlaylistScheduled('spotify', playlist.id) ? 'Scheduled' : 'Schedule'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* URL Import */}
+      <div className="url-import-section" style={{ marginTop: spotifySearchResults.length > 0 ? '24px' : '0', borderTop: spotifySearchResults.length > 0 ? '1px solid #333' : 'none', paddingTop: spotifySearchResults.length > 0 ? '24px' : '0' }}>
+        <h3>Import from URL</h3>
         <p style={{ color: '#a0a0a0', marginBottom: '12px' }}>
           Paste a Spotify playlist URL to import (no login required)
         </p>
@@ -1129,6 +1215,74 @@ export default function ImportPage({ serverUrl, onBack, onPlaylistSelect, import
           </button>
         </div>
       </div>
+
+      {/* Search Spotify playlists (no login required) */}
+      <div style={{ marginTop: '16px' }}>
+        <div className="search-bar-row">
+          <input
+            type="text"
+            value={spotifySearchQuery}
+            onChange={e => setSpotifySearchQuery(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSpotifySearch()}
+            placeholder="Search Spotify playlists..."
+          />
+          <button 
+            className="btn btn-primary"
+            onClick={handleSpotifySearch}
+            disabled={isSearchingSpotify || !spotifySearchQuery.trim()}
+          >
+            {isSearchingSpotify ? '...' : 'Search'}
+          </button>
+        </div>
+      </div>
+
+      {spotifySearchResults.length > 0 && (
+        <>
+          <h3 style={{ margin: '16px 0 8px' }}>Search Results</h3>
+          <div className="playlist-grid">
+            {spotifySearchResults.map(playlist => {
+              const matched = matchedPlaylists.get(playlist.id);
+              return (
+                <div 
+                  key={playlist.id} 
+                  className="import-playlist-card clickable"
+                  onClick={() => openPreview('spotify', playlist.id, playlist.name, playlist.trackCount, playlist.image)}
+                >
+                  {playlist.image && <img src={playlist.image} alt="" className="playlist-image" />}
+                  <div className="playlist-info">
+                    <span className="playlist-name">{playlist.name}</span>
+                    <span className="playlist-meta">{playlist.trackCount} tracks • {playlist.owner}</span>
+                  </div>
+                  <div className="button-group">
+                    <button
+                      className={`btn btn-small ${matched ? 'btn-secondary' : 'btn-primary'}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        matched ? onPlaylistSelect(matched) : showPreImportModal('spotify', playlist.id, playlist.name, playlist.trackCount, playlist.image);
+                      }}
+                      disabled={importingPlaylist === playlist.id}
+                    >
+                      {importingPlaylist === playlist.id ? '...' : matched ? `View (${matched.matchedCount}/${matched.totalCount})` : 'Import'}
+                    </button>
+                    <button 
+                      className={`btn btn-small ${isPlaylistScheduled('spotify', playlist.id) ? 'btn-scheduled' : 'btn-secondary'}`}
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        isPlaylistScheduled('spotify', playlist.id) 
+                          ? removeSchedule('spotify', playlist.id)
+                          : openScheduleModal('spotify', playlist.id, playlist.name); 
+                      }}
+                      title={isPlaylistScheduled('spotify', playlist.id) ? 'Remove schedule' : 'Schedule auto-refresh'}
+                    >
+                      {isPlaylistScheduled('spotify', playlist.id) ? 'Scheduled' : 'Schedule'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
       
       {/* Optional OAuth Login */}
       <div style={{ marginTop: '24px', borderTop: '1px solid #333', paddingTop: '24px' }}>

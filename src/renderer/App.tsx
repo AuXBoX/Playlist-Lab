@@ -208,7 +208,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCount, setGeneratedCount] = useState(0);
   const [generatingMix, setGeneratingMix] = useState<string | null>(null); // Track which individual mix is being generated
-  const [mixesSchedule, setMixesSchedule] = useState<{ enabled: boolean; frequency: 'daily' | 'weekly' | 'monthly'; lastRun?: number }>({ enabled: false, frequency: 'weekly' });
+  const [mixesSchedule, setMixesSchedule] = useState<{ enabled: boolean; frequency: 'daily' | 'weekly' | 'monthly'; lastRun?: string }>({ enabled: false, frequency: 'weekly' });
   
   const [selectedPlaylist, setSelectedPlaylist] = useState<MatchedPlaylist | null>(null);
   const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false);
@@ -365,6 +365,16 @@ export default function App() {
           }));
         }
         
+        // Load mixes schedule
+        try {
+          const schedule = await window.api.getMixesSchedule();
+          if (schedule) {
+            setMixesSchedule(schedule);
+          }
+        } catch (error) {
+          console.error('Failed to load mixes schedule:', error);
+        }
+        
         if (authData.server) {
           const url = authData.server.connections?.[0]?.uri;
           setServerUrl(url);
@@ -391,26 +401,6 @@ export default function App() {
           setSchedules(savedSchedules);
         } catch (error) {
           console.error('Failed to load schedules:', error);
-        }
-        
-        try {
-          const savedMixesSchedule = await window.api.getMixesSchedule();
-          setMixesSchedule(savedMixesSchedule);
-          
-          // Check if mixes schedule is due
-          if (savedMixesSchedule.enabled && authData.server && savedSettings.libraryId) {
-            const isDue = await window.api.checkMixesScheduleDue();
-            if (isDue) {
-              console.log('Mixes schedule is due, auto-generating...');
-              // Will trigger after component mounts
-              setTimeout(() => {
-                const generateBtn = document.querySelector('[data-auto-generate]') as HTMLButtonElement;
-                if (generateBtn) generateBtn.click();
-              }, 1000);
-            }
-          }
-        } catch (error) {
-          console.error('Failed to load mixes schedule:', error);
         }
       }
       setIsLoading(false);
@@ -549,11 +539,6 @@ export default function App() {
       setStatusMessage('Creating Daily Mix...');
       const dailyMixCreated = await createDailyMix();
       if (dailyMixCreated) setGeneratedCount(c => c + 1);
-
-      // Mark schedule as run
-      await window.api.markMixesScheduleRun();
-      const updatedSchedule = await window.api.getMixesSchedule();
-      setMixesSchedule(updatedSchedule);
 
       setStatusMessage(`Done! Created playlists.`);
       setTimeout(() => setStatusMessage(''), 5000);

@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('api', {
   getSpotifyPlaylists: () => ipcRenderer.invoke('get-spotify-playlists'),
   getSpotifyPlaylistTracks: (data: { playlistId: string }) => ipcRenderer.invoke('get-spotify-playlist-tracks', data),
   logoutSpotify: () => ipcRenderer.invoke('logout-spotify'),
+  searchSpotifyPlaylists: (data: { query: string }) => ipcRenderer.invoke('search-spotify-playlists', data),
   
   // Deezer integration
   searchDeezerPlaylists: (data: { query: string }) => ipcRenderer.invoke('search-deezer-playlists', data),

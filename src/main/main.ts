@@ -1858,6 +1858,60 @@ ipcMain.handle('search-deezer-playlists', async (_, { query }) => {
   }));
 });
 
+// Search Spotify playlists (public - no auth required)
+ipcMain.handle('search-spotify-playlists', async (_, { query }) => {
+  try {
+    // Get client credentials token (public access)
+    const credentials = store.get('spotifyCredentials') as { clientId: string; clientSecret: string } | undefined;
+    
+    let accessToken: string;
+    
+    if (credentials?.clientId && credentials?.clientSecret) {
+      // Use saved credentials
+      const tokenResponse = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': 'Basic ' + Buffer.from(`${credentials.clientId}:${credentials.clientSecret}`).toString('base64'),
+        },
+        body: 'grant_type=client_credentials',
+      });
+      
+      if (!tokenResponse.ok) throw new Error('Failed to get Spotify access token');
+      const tokenData = await tokenResponse.json();
+      accessToken = tokenData.access_token;
+    } else {
+      throw new Error('Spotify credentials not configured. Please set up Spotify in the app.');
+    }
+    
+    // Search for playlists
+    const searchResponse = await fetch(
+      `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=playlist&limit=25`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
+    );
+    
+    if (!searchResponse.ok) throw new Error('Failed to search Spotify playlists');
+    
+    const searchData = await searchResponse.json();
+    
+    return (searchData.playlists?.items || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description || '',
+      trackCount: p.tracks?.total || 0,
+      image: p.images?.[0]?.url,
+      owner: p.owner?.display_name || 'Spotify',
+    }));
+  } catch (error: any) {
+    console.error('Spotify search error:', error);
+    throw error;
+  }
+});
+
 // Get tracks from a Deezer playlist
 ipcMain.handle('get-deezer-playlist-tracks', async (_, { playlistId }) => {
   const tracks: any[] = [];

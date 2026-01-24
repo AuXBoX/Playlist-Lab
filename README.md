@@ -2,6 +2,8 @@
 
 A desktop app for importing, generating, and managing playlists on your Plex Media Server.
 
+**Current Version:** v1.1.1
+
 ## Features
 
 ### Import Playlists
