@@ -20,7 +20,9 @@
       "buildNumber": "1",
       "icon": "./assets/icon-ios.png",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"],
+        "UIBackgroundModes": [
+          "audio"
+        ],
         "NSMicrophoneUsageDescription": "This app does not use the microphone.",
         "NSCameraUsageDescription": "This app does not use the camera."
       }
@@ -41,12 +43,10 @@
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
-    "plugins": [
-      "expo-router"
-    ],
+    "plugins": [],
     "extra": {
       "eas": {
-        "projectId": "your-project-id"
+        "projectId": "cb3f56e4-cd6a-4fb0-b8a5-43e3ca935b04"
       }
     },
     "updates": {
@@ -55,6 +55,7 @@
     "notification": {
       "icon": "./assets/notification-icon.png",
       "color": "#4fc3f7"
-    }
+    },
+    "owner": "auxbox"
   }
 }
