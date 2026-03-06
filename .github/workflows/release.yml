@@ -49,16 +49,19 @@ jobs:
       - name: Build shared package
         run: |
           cd packages/shared
+          npm ci --legacy-peer-deps
           npm run build
       
       - name: Build server
         run: |
           cd apps/server
+          npm ci --legacy-peer-deps
           npm run build
       
       - name: Build web app
         run: |
           cd apps/web
+          npm ci --legacy-peer-deps
           npm run build
       
       # Linux-specific build
@@ -166,17 +169,6 @@ jobs:
         run: |
           cd apps/mobile
           eas build --platform android --profile production --non-interactive --no-wait
-      
-      - name: Comment build URL
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.repos.createCommitComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-              body: '🤖 Android build started! Check status at https://expo.dev'
-            })
 
   # Create GitHub Release
   create-release:
@@ -213,22 +205,6 @@ jobs:
             release-artifacts/**/*.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Comment on release
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const tag = context.ref.replace('refs/tags/', '');
-            github.rest.repos.createCommitComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-              body: `🎉 Release ${tag} created!\n\n` +
-                    `📦 Server installers: Windows, macOS, Linux\n` +
-                    `💻 Desktop app: Windows, macOS, Linux\n` +
-                    `📱 Mobile apps: Building on Expo (check https://expo.dev)\n\n` +
-                    `Download from: https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/${tag}`
-            })
 
   # Build and push Docker image
   build-docker:
