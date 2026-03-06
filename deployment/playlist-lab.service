@@ -1,0 +1,46 @@
+[Unit]
+Description=Playlist Lab Server
+Documentation=https://github.com/yourusername/playlist-lab
+After=network.target
+
+[Service]
+Type=simple
+User=playlist-lab
+Group=playlist-lab
+WorkingDirectory=/opt/playlist-lab/apps/server
+
+# Start command
+ExecStart=/usr/bin/node dist/index.js
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=200
+StartLimitBurst=5
+
+# Logging
+StandardOutput=append:/var/log/playlist-lab/output.log
+StandardError=append:/var/log/playlist-lab/error.log
+SyslogIdentifier=playlist-lab
+
+# Environment
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=DATABASE_PATH=/var/lib/playlist-lab/playlist-lab.db
+
+# Load additional environment variables from file
+EnvironmentFile=/opt/playlist-lab/.env.production
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/playlist-lab /var/log/playlist-lab
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

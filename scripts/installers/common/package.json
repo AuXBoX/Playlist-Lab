@@ -1,0 +1,9 @@
+{
+  "name": "playlist-lab-tray",
+  "version": "1.0.0",
+  "description": "Playlist Lab Server tray application",
+  "main": "tray-app.js",
+  "dependencies": {
+    "systray": "^1.0.5"
+  }
+}

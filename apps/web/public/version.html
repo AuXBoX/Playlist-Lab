@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Version Check</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #1a1a1a;
+            color: #fff;
+            padding: 2rem;
+        }
+        .check {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: #2a2a2a;
+            border-radius: 4px;
+        }
+        .pass { border-left: 4px solid #4caf50; }
+        .fail { border-left: 4px solid #f44336; }
+        h1 { color: #667eea; }
+    </style>
+</head>
+<body>
+    <h1>Playlist Lab - Version Check</h1>
+    <p>This page helps verify if the new code is being served.</p>
+    
+    <div class="check pass">
+        <strong>✓ This page loaded</strong><br>
+        If you can see this, the Vite dev server is running.
+    </div>
+    
+    <div class="check" id="timestamp-check">
+        <strong>Checking for BUILD_TIMESTAMP...</strong><br>
+        <span id="timestamp-result">Loading...</span>
+    </div>
+    
+    <div class="check" id="console-check">
+        <strong>Check your browser console (F12)</strong><br>
+        You should see: <code>[ImportPage] Component mounted - BUILD_TIMESTAMP: 2025-01-XX-FORCE-REFRESH</code>
+    </div>
+    
+    <div class="check">
+        <strong>Next Steps:</strong><br>
+        1. Go to <a href="/" style="color: #667eea;">http://localhost:5173</a><br>
+        2. Press F12 to open DevTools<br>
+        3. Go to Console tab<br>
+        4. Look for the BUILD_TIMESTAMP message<br>
+        5. If you DON'T see it, your browser is caching old JavaScript
+    </div>
+    
+    <div class="check fail">
+        <strong>⚠ If browser is caching:</strong><br>
+        1. Close ALL browser windows<br>
+        2. Open in Incognito/Private mode<br>
+        3. Try a different browser<br>
+        4. Clear ALL browser data (Ctrl+Shift+Delete)
+    </div>
+    
+    <script>
+        // Try to fetch and check the ImportPage source
+        fetch('/src/pages/ImportPage.tsx')
+            .then(r => r.text())
+            .then(text => {
+                const hasTimestamp = text.includes('BUILD_TIMESTAMP: 2025-01-XX-FORCE-REFRESH');
+                const check = document.getElementById('timestamp-check');
+                const result = document.getElementById('timestamp-result');
+                
+                if (hasTimestamp) {
+                    check.classList.add('pass');
+                    result.innerHTML = '✓ BUILD_TIMESTAMP found in source file!<br>The new code is on the server.';
+                } else {
+                    check.classList.add('fail');
+                    result.innerHTML = '✗ BUILD_TIMESTAMP NOT found in source file!<br>The file was not saved correctly.';
+                }
+            })
+            .catch(err => {
+                const check = document.getElementById('timestamp-check');
+                const result = document.getElementById('timestamp-result');
+                check.classList.add('fail');
+                result.innerHTML = '✗ Could not fetch source file: ' + err.message;
+            });
+    </script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plex Authentication - Playlist Lab</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 500px;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 20px;
+      font-size: 28px;
+    }
+    p {
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 15px;
+    }
+    .success {
+      color: #4caf50;
+      font-size: 48px;
+      margin-bottom: 20px;
+    }
+    .instructions {
+      background: #f5f5f5;
+      border-left: 4px solid #667eea;
+      padding: 15px;
+      margin: 20px 0;
+      text-align: left;
+    }
+    .instructions ol {
+      margin: 10px 0;
+      padding-left: 20px;
+    }
+    .instructions li {
+      margin: 8px 0;
+    }
+    button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 12px 30px;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    button:hover {
+      background: #5568d3;
+    }
+    .auto-close {
+      color: #999;
+      font-size: 14px;
+      margin-top: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="success">✓</div>
+    <h1>Authentication Successful!</h1>
+    <p>You have successfully authenticated with Plex.</p>
+    
+    <div class="instructions">
+      <strong>Next Steps:</strong>
+      <ol>
+        <li>Close this tab/window</li>
+        <li>Return to the Playlist Lab login page</li>
+        <li>Wait a few seconds for automatic login</li>
+      </ol>
+    </div>
+
+    <p>If you're not automatically logged in within 10 seconds, click the "Sign in with Plex" button again.</p>
+
+    <button onclick="window.close()">Close This Window</button>
+
+    <p class="auto-close">This window will attempt to close automatically in <span id="countdown">3</span> seconds...</p>
+  </div>
+
+  <script>
+    // Try to close the window automatically after 3 seconds
+    let countdown = 3;
+    const countdownEl = document.getElementById('countdown');
+    
+    const timer = setInterval(() => {
+      countdown--;
+      if (countdownEl) {
+        countdownEl.textContent = countdown;
+      }
+      
+      if (countdown <= 0) {
+        clearInterval(timer);
+        // Try to close the window
+        window.close();
+        
+        // If window.close() doesn't work (it often doesn't for windows not opened by script),
+        // show a message
+        setTimeout(() => {
+          const autoCloseEl = document.querySelector('.auto-close');
+          if (autoCloseEl) {
+            autoCloseEl.innerHTML = 'Please close this window manually and return to Playlist Lab.';
+          }
+        }, 500);
+      }
+    }, 1000);
+  </script>
+</body>
+</html>

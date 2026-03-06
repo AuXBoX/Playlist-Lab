@@ -1,0 +1,253 @@
+// Copy this entire file content and paste it into apps/server/src/services/matching.ts
+
+/**
+ * Matching Service - Complete implementation ported from desktop app
+ */
+
+import { MatchingSettings } from '../database/types';
+import { logger } from '../utils/logger';
+import { ExternalTrack } from './scrapers';
+import { PlexClient } from './plex';
+
+export interface MatchedTrack {
+  title: string;
+  artist: string;
+  album?: string;
+  matched: boolean;
+  plexRatingKey?: string;
+  plexTitle?: string;
+  plexArtist?: string;
+  plexAlbum?: string;
+  plexCodec?: string;
+  plexBitrate?: number;
+  score?: number;
+}
+
+let currentMatchingSettings: MatchingSettings;
+
+export async function matchPlaylist(
+  tracks: ExternalTrack[],
+  serverUrl: string,
+  plexToken: string,
+  libraryId: string | undefined,
+  settings: MatchingSettings
+): Promise<MatchedTrack[]> {
+  logger.info('[Matching] Starting', { trackCount: tracks.length });
+  currentMatchingSettings = settings;
+  
+  if (currentMatchingSettings.minMatchScore <= 1) {
+    currentMatchingSettings.minMatchScore = currentMatchingSettings.minMatchScore * 100;
+  }
+  
+  const plexClient = new PlexClient(serverUrl, plexToken);
+  const matchedTracks: MatchedTrack[] = [];
+  
+  for (let i = 0; i < tracks.length; i++) {
+    const track = tracks[i];
+    logger.info(`[Matching] ${i + 1}/${tracks.length}: ${track.artist} - ${track.title}`);
+    
+    try {
+      const match = await findBestMatch(track, plexClient, libraryId);
+      const passesMinScore = match !== null && match.score >= currentMatchingSettings.minMatchScore;
+      
+      matchedTracks.push({
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        matched: passesMinScore,
+        plexRatingKey: passesMinScore ? match?.ratingKey : undefined,
+        plexTitle: passesMinScore ? match?.plexTitle : undefined,
+        plexArtist: passesMinScore ? match?.plexArtist : undefined,
+        plexAlbum: passesMinScore ? match?.plexAlbum : undefined,
+        plexCodec: passesMinScore ? match?.plexCodec : undefined,
+        plexBitrate: passesMinScore ? match?.plexBitrate : undefined,
+        score: match?.score,
+      });
+    } catch (error: any) {
+      logger.error(`[Matching] Error`, { track: `${track.artist} - ${track.title}`, error: error.message });
+      matchedTracks.push({ title: track.title, artist: track.artist, album: track.album, matched: false });
+    }
+  }
+  
+  const matchedCount = matchedTracks.filter(t => t.matched).length;
+  logger.info('[Matching] Complete', { total: matchedTracks.length, matched: matchedCount });
+  return matchedTracks;
+}
+
+async function findBestMatch(
+  track: ExternalTrack,
+  plexClient: PlexClient,
+  libraryId: string | undefined
+): Promise<{ ratingKey: string; score: number; plexTitle: string; plexArtist: string; plexAlbum: string; plexCodec?: string; plexBitrate?: number } | null> {
+  try {
+    const titleWithoutPunctuation = track.title.replace(/[^a-zA-Z0-9]/g, '');
+    if (titleWithoutPunctuation.length < 2) return null;
+    
+    const cleanedArtist = cleanArtistName(track.artist);
+    const coreTitle = getCoreTitle(track.title);
+    
+    const normalizeSearch = (s: string) => s
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\u2018\u2019\u201A\u201B\u0027\u0060\u00B4'`´]/g, '')
+      .replace(/\//g, ' ').replace(/\./g, '')
+      .replace(/[^\w\s\-]/g, ' ').replace(/\s+/g, ' ').trim();
+    
+    const searchTitle = normalizeSearch(coreTitle);
+    const searchArtist = normalizeSearch(cleanedArtist);
+    const searchQueries = [
+      `${searchArtist} ${searchTitle}`,
+      `${searchTitle} ${searchArtist}`,
+      searchTitle
+    ];
+    
+    const allResults: any[] = [];
+    for (const query of [...new Set(searchQueries)].filter(q => q.trim().length > 1)) {
+      const results = await plexClient.searchTrack(query, libraryId);
+      for (const r of results) {
+        if (!allResults.some(existing => existing.ratingKey === r.ratingKey)) {
+          allResults.push(r);
+        }
+      }
+    }
+    
+    if (!allResults.length) return null;
+    
+    let bestMatch: { ratingKey: string; score: number; rankScore: number; plexTitle: string; plexArtist: string; plexAlbum: string; plexCodec?: string; plexBitrate?: number } | null = null;
+    
+    for (const result of allResults) {
+      const plexTitle = result.title || '';
+      const albumArtist = result.grandparentTitle || '';
+      const albumName = result.parentTitle || '';
+      const trackArtist = result.originalTitle || '';
+      
+      if (!titlesMatch(track.title, plexTitle)) continue;
+      
+      const albumArtistMatches = albumArtist && artistsMatch(track.artist, albumArtist);
+      const trackArtistMatches = trackArtist && artistsMatch(track.artist, trackArtist);
+      
+      if (!albumArtistMatches && !trackArtistMatches) continue;
+      
+      const plexArtist = albumArtistMatches ? albumArtist : (trackArtist || albumArtist);
+      let score = calculateMatchScore(track.title, track.artist, plexTitle, plexArtist);
+      
+      if (currentMatchingSettings.preferNonCompilation && albumArtistMatches) {
+        score += 50;
+      }
+      
+      if (!bestMatch || score > bestMatch.rankScore) {
+        const displayScore = Math.min(100, Math.max(0, calculateMatchScore(track.title, track.artist, plexTitle, plexArtist)));
+        const media = result.Media?.[0];
+        bestMatch = { 
+          ratingKey: result.ratingKey, 
+          score: displayScore, 
+          rankScore: score, 
+          plexTitle, 
+          plexArtist, 
+          plexAlbum: albumName, 
+          plexCodec: media?.audioCodec?.toUpperCase(), 
+          plexBitrate: media?.bitrate 
+        };
+      }
+    }
+    
+    if (bestMatch) {
+      return { 
+        ratingKey: bestMatch.ratingKey, 
+        score: bestMatch.score, 
+        plexTitle: bestMatch.plexTitle, 
+        plexArtist: bestMatch.plexArtist, 
+        plexAlbum: bestMatch.plexAlbum, 
+        plexCodec: bestMatch.plexCodec, 
+        plexBitrate: bestMatch.plexBitrate 
+      };
+    }
+    return null;
+  } catch (error: any) {
+    logger.error('[Matching] Error in findBestMatch', { error: error.message });
+    return null;
+  }
+}
+
+function getCoreTitle(title: string): string {
+  let core = title;
+  if (currentMatchingSettings.stripParentheses) core = core.replace(/\([^)]*\)/g, '');
+  if (currentMatchingSettings.stripBrackets) core = core.replace(/\[[^\]]*\]/g, '');
+  return core.replace(/\s+/g, ' ').trim();
+}
+
+function cleanTrackTitle(title: string): string {
+  let cleaned = title;
+  if (currentMatchingSettings.stripParentheses) cleaned = cleaned.replace(/\([^)]*\)/g, '');
+  if (currentMatchingSettings.stripBrackets) cleaned = cleaned.replace(/\[[^\]]*\]/g, '');
+  return cleaned.replace(/\s+/g, ' ').trim() || title;
+}
+
+function cleanArtistName(artist: string): string {
+  if (!artist) return '';
+  let cleaned = artist;
+  if (currentMatchingSettings.useFirstArtistOnly && cleaned.includes(',')) {
+    cleaned = cleaned.split(',')[0].trim();
+  }
+  if (currentMatchingSettings.ignoreFeaturedArtists) {
+    for (const pattern of currentMatchingSettings.featuredArtistPatterns) {
+      const regex = new RegExp(`\\s+${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.?\\s+.+$`, 'gi');
+      cleaned = cleaned.replace(regex, '');
+    }
+  }
+  return cleaned.replace(/\s+/g, ' ').trim() || artist;
+}
+
+function normalizeForComparison(str: string): string {
+  return str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u2018\u2019\u201A\u201B\u0027\u0060\u00B4'`´]/g, '')
+    .replace(/[\u201C\u201D\u201E\u201F"]/g, '')
+    .replace(/\$/g, 's').replace(/\//g, '').replace(/\./g, '')
+    .replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function titlesMatch(sourceTitle: string, plexTitle: string): boolean {
+  const cleanSource = normalizeForComparison(cleanTrackTitle(sourceTitle));
+  const cleanPlex = normalizeForComparison(cleanTrackTitle(plexTitle));
+  if (cleanSource === cleanPlex) return true;
+  if (cleanSource.replace(/\s+/g, '') === cleanPlex.replace(/\s+/g, '')) return true;
+  if (cleanSource.includes(cleanPlex) || cleanPlex.includes(cleanSource)) return true;
+  return false;
+}
+
+function artistsMatch(sourceArtist: string, plexArtist: string): boolean {
+  const cleanSource = normalizeForComparison(cleanArtistName(sourceArtist));
+  const cleanPlex = normalizeForComparison(cleanArtistName(plexArtist));
+  if (cleanSource === cleanPlex) return true;
+  if (cleanSource.includes(cleanPlex) || cleanPlex.includes(cleanSource)) return true;
+  return false;
+}
+
+function calculateMatchScore(sourceTitle: string, sourceArtist: string, plexTitle: string, plexArtist: string): number {
+  const cleanSourceTitle = cleanTrackTitle(sourceTitle).toLowerCase();
+  const cleanPlexTitle = cleanTrackTitle(plexTitle).toLowerCase();
+  const cleanSourceArtist = cleanArtistName(sourceArtist).toLowerCase();
+  const cleanPlexArtist = cleanArtistName(plexArtist).toLowerCase();
+  
+  let titleScore = 0;
+  if (cleanSourceTitle === cleanPlexTitle) {
+    titleScore = 100;
+  } else if (cleanSourceTitle.includes(cleanPlexTitle) || cleanPlexTitle.includes(cleanSourceTitle)) {
+    titleScore = 90;
+  } else {
+    const sourceWords = cleanSourceTitle.split(/\s+/);
+    const plexWords = cleanPlexTitle.split(/\s+/);
+    const matches = sourceWords.filter(w => plexWords.some(pw => pw.includes(w) || w.includes(pw))).length;
+    titleScore = Math.round((matches / Math.max(sourceWords.length, plexWords.length)) * 80);
+  }
+  
+  let artistScore = 0;
+  if (cleanSourceArtist === cleanPlexArtist) {
+    artistScore = 100;
+  } else if (cleanSourceArtist.includes(cleanPlexArtist) || cleanPlexArtist.includes(cleanSourceArtist)) {
+    artistScore = 90;
+  } else {
+    artistScore = 70;
+  }
+  
+  return Math.round(titleScore * 0.7 + artistScore * 0.3);
+}

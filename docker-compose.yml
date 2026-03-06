@@ -1,0 +1,46 @@
+# Convenience symlink to docker/docker-compose.yml
+# This allows running `docker-compose up` from the project root
+
+version: '3.8'
+
+services:
+  playlist-lab-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: playlist-lab-server
+    ports:
+      - "3001:3001"
+    volumes:
+      - playlist-lab-data:/data
+      - playlist-lab-logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PATH=/data/playlist-lab.db
+      - SESSION_SECRET=${SESSION_SECRET:-change-me-in-production}
+      - PORT=3001
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CACHE_MAX_AGE_HOURS=${CACHE_MAX_AGE_HOURS:-24}
+      - SCRAPER_SCHEDULE=${SCRAPER_SCHEDULE:-0 2 * * *}
+      - RATE_LIMIT_WINDOW_MS=${RATE_LIMIT_WINDOW_MS:-60000}
+      - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS:-100}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:5173}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - playlist-lab-network
+
+networks:
+  playlist-lab-network:
+    driver: bridge
+
+volumes:
+  playlist-lab-data:
+    driver: local
+  playlist-lab-logs:
+    driver: local

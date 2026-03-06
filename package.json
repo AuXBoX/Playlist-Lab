@@ -1,6 +1,6 @@
 {
   "name": "playlist-lab",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "description": "Import, generate, and manage your Plex playlists",
   "main": "dist/main/main.js",
   "author": {
@@ -27,7 +27,8 @@
   },
   "dependencies": {
     "electron-store": "^8.1.0",
-    "tidal-music-api": "^1.2.1"
+    "tidal-music-api": "^1.2.1",
+    "youtubei.js": "^16.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

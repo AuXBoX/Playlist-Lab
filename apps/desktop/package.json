@@ -1,0 +1,144 @@
+{
+  "name": "playlist-lab",
+  "version": "1.1.2",
+  "description": "Import, generate, and manage your Plex playlists",
+  "main": "dist/main/main.js",
+  "author": {
+    "name": "Audexa",
+    "email": "audexa@users.noreply.github.com"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.main.json && vite build",
+    "start": "electron .",
+    "electron:dev": "concurrently \"vite\" \"tsc -p tsconfig.main.json && electron .\"",
+    "package:win": "npm run build && electron-builder --win",
+    "package:win:portable": "npm run build && electron-builder --win portable",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:linux": "npm run build && electron-builder --linux",
+    "package:all": "npm run build && electron-builder --win --mac --linux",
+    "build:win-portable": "npm run build && electron-builder --win portable",
+    "build:win-installer": "npm run build && electron-builder --win nsis",
+    "build:win": "npm run build && electron-builder --win",
+    "build:mac-app": "npm run build && electron-builder --mac dir",
+    "build:mac-dmg": "npm run build && electron-builder --mac dmg",
+    "build:mac": "npm run build && electron-builder --mac",
+    "build:linux-app": "npm run build && electron-builder --linux dir",
+    "build:linux-deb": "npm run build && electron-builder --linux deb",
+    "build:linux": "npm run build && electron-builder --linux",
+    "build:all": "npm run build && electron-builder --win --mac --linux",
+    "build:portable": "npm run build:win-portable",
+    "build:installer": "npm run build:win-installer"
+  },
+  "dependencies": {
+    "electron-store": "^8.1.0",
+    "tidal-music-api": "^1.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "png-to-ico": "^3.0.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.audexa.playlist-lab",
+    "productName": "Playlist Lab",
+    "directories": {
+      "output": "../scripts/release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "src/renderer/logo.png",
+        "to": "logo.png"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.music"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "Audio"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "PlaylistLab-Portable-${version}.exe"
+    },
+    "dmg": {
+      "artifactName": "PlaylistLab-${version}-${arch}.dmg"
+    },
+    "deb": {
+      "artifactName": "PlaylistLab-${version}-${arch}.deb"
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "name": "Playlist Lab",
+  "short_name": "Playlist Lab",
+  "description": "Multi-user web application for managing Plex playlists",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a1018",
+  "theme_color": "#0a1018",
+  "categories": ["music", "entertainment", "productivity"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Import Playlist",
+      "short_name": "Import",
+      "description": "Import a playlist from Spotify or other sources",
+      "url": "/import",
+      "icons": []
+    },
+    {
+      "name": "Generate Mixes",
+      "short_name": "Generate",
+      "description": "Generate new playlist mixes",
+      "url": "/generate",
+      "icons": []
+    },
+    {
+      "name": "View Playlists",
+      "short_name": "Playlists",
+      "description": "View and manage your playlists",
+      "url": "/playlists",
+      "icons": []
+    }
+  ],
+  "prefer_related_applications": false
+}

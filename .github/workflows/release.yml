@@ -1,0 +1,310 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 2.0.0)'
+        required: true
+        default: '2.0.0'
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # Build server installers for all platforms
+  build-server-installers:
+    name: Build Server Installers
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            artifact: linux-packages
+          - os: macos-latest
+            platform: macos
+            artifact: macos-installers
+          - os: windows-latest
+            platform: windows
+            artifact: windows-installer
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build shared package
+        run: |
+          cd packages/shared
+          npm run build
+      
+      - name: Build server
+        run: |
+          cd apps/server
+          npm run build
+      
+      - name: Build web app
+        run: |
+          cd apps/web
+          npm run build
+      
+      # Linux-specific build
+      - name: Build Linux packages
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev rpm
+          bash scripts/installers/linux/build-linux.sh
+      
+      # macOS-specific build
+      - name: Build macOS installers
+        if: matrix.platform == 'macos'
+        run: bash scripts/installers/macos/build-macos.sh
+      
+      # Windows-specific build
+      - name: Setup Inno Setup (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          choco install innosetup -y
+          echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      
+      - name: Build Windows installer
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: bash scripts/installers/windows/build-windows.sh
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: scripts/release/**/*
+          retention-days: 30
+
+  # Build desktop app for all platforms
+  build-desktop-app:
+    name: Build Desktop App
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build desktop app
+        run: |
+          cd apps/desktop
+          npm install
+          npm run build
+          npm run package:${{ matrix.platform }}
+      
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: apps/desktop/release/**/*
+          retention-days: 30
+
+  # Build mobile apps using EAS Build
+  build-mobile-ios:
+    name: Build iOS App
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: Install dependencies
+        run: |
+          cd apps/mobile
+          npm install
+      
+      - name: Build iOS app
+        run: |
+          cd apps/mobile
+          eas build --platform ios --profile production --non-interactive --no-wait
+      
+      - name: Comment build URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: '📱 iOS build started! Check status at https://expo.dev'
+            })
+
+  build-mobile-android:
+    name: Build Android App
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: Install dependencies
+        run: |
+          cd apps/mobile
+          npm install
+      
+      - name: Build Android app
+        run: |
+          cd apps/mobile
+          eas build --platform android --profile production --non-interactive --no-wait
+      
+      - name: Comment build URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: '🤖 Android build started! Check status at https://expo.dev'
+            })
+
+  # Create GitHub Release
+  create-release:
+    name: Create GitHub Release
+    needs: [build-server-installers, build-desktop-app]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+      
+      - name: Display structure
+        run: ls -R release-artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.dmg
+            release-artifacts/**/*.pkg
+            release-artifacts/**/*.deb
+            release-artifacts/**/*.rpm
+            release-artifacts/**/*.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Comment on release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: `🎉 Release ${tag} created!\n\n` +
+                    `📦 Server installers: Windows, macOS, Linux\n` +
+                    `💻 Desktop app: Windows, macOS, Linux\n` +
+                    `📱 Mobile apps: Building on Expo (check https://expo.dev)\n\n` +
+                    `Download from: https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/${tag}`
+            })
+
+  # Build and push Docker image
+  build-docker:
+    name: Build Docker Image
+    needs: [build-server-installers]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/playlist-lab-server:latest
+            ${{ secrets.DOCKER_USERNAME }}/playlist-lab-server:${{ steps.version.outputs.VERSION }}
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/playlist-lab-server:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/playlist-lab-server:buildcache,mode=max

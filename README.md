@@ -1,125 +1,280 @@
 # Playlist Lab
 
-A desktop app for importing, generating, and managing playlists on your Plex Media Server.
+A comprehensive music playlist management system with Plex Media Server integration. Import playlists from multiple sources, generate smart mixes, and sync them to your Plex server.
 
-**Current Version:** v1.1.1
+## 🎵 Features
 
-## Features
+- **Multi-Source Import**: Import playlists from Spotify, Apple Music, YouTube, and more
+- **Smart Playlist Generation**: Create dynamic playlists based on genres, moods, and listening patterns
+- **Plex Integration**: Seamless sync with Plex Media Server
+- **Multi-User Support**: Manage playlists for multiple Plex users and share between them
+- **Scheduling**: Automatically update playlists on a schedule
+- **Missing Track Detection**: Identify and track songs not available in your library
+- **Cross-Platform**: Available as web app, desktop app, and mobile app
 
-### Import Playlists
-Import playlists from external music services and match tracks to your Plex library:
-- **Spotify** - Import from URL (no login required) or connect your account for personal playlists
-- **Deezer** - Search public playlists or connect your account for personal playlists
-- **Apple Music** - Import from playlist URL
-- **Tidal** - Import from URL or connect your account for personal playlists
-- **YouTube Music** - Import from URL or connect your account for personal playlists
-- **Amazon Music** - Import from public playlist URL
-- **Qobuz** - Import from playlist URL
-- **ListenBrainz** - Import public playlists and personalized recommendations (Daily/Weekly Jams) by username
-- **M3U/M3U8 Files** - Import local playlist files
-- **iTunes XML** - Import playlists from iTunes/Music app library exports
+## 📦 Applications
 
-### Charts & Discovery
-Discover trending music and create playlists from charts:
-- **ARIA Charts** (Australia) - Official Australian music charts including Top Singles, Hip-Hop/R&B, Dance, and decade charts
-- **Deezer Charts** - Global and country-specific top tracks
-- **Last.fm Charts** - Most scrobbled tracks by region
-- **Popular Playlists** - Curated playlists from all supported services (Deezer, Apple Music, Tidal, YouTube Music, Amazon Music, Qobuz)
-- **Decade Playlists** - 80s, 90s, 2000s, 2010s hits
-- **Genre Playlists** - Pop, Rock, Hip-Hop, R&B, Country, Dance
+This is a monorepo containing multiple applications:
 
-### Generate Personal Mixes
-Create personalized playlists based on your Plex listening history:
-- **Your Weekly Mix** - Top tracks from your most-played artists
-- **Daily Mix** - Recent plays + related songs + rediscoveries
-- **Time Capsule** - Rediscover tracks you haven't played recently (with artist diversity)
-- **New Music Mix** - Tracks from recently added albums
-- **Individual Generation** - Generate each mix type separately or all at once
-- **Customizable Settings** - Adjust track counts, time thresholds, and artist limits for each mix type
-- **Create Custom Mix** - Build your own playlist with full control:
-  - **Source Options**: All Tracks, Played, Unplayed, Recently Played, Top Artists (with history period selection)
-  - **Filters**: Genre (from your library), Min rating, Added within, Year range
-  - **Expansion**: Add sonically similar tracks, Add tracks from similar artists
-  - **Output**: Track count, Max per artist, Sort by (Random/Play Count/Rating/Date Added/Last Played/Title), Shuffle toggle
+### Server (Multi-User Web Server)
+- **Location**: `apps/server/`
+- **Type**: Express.js REST API with SQLite database
+- **Features**: Multi-user authentication, playlist management, Plex integration, scheduling
+- **Deployment**: Can be deployed anywhere (VPS, cloud, local network)
+- **Port**: 3001 (configurable)
 
-### Playlist Management
-- **Edit Playlists** - Add/remove tracks, manually match unmatched tracks
-- **Sort & Reorder** - Sort tracks by title, artist, status, or score; drag-and-drop to reorder
-- **Album & Format Display** - See which album matched tracks come from, plus codec and bitrate
-- **Export Missing** - Export unmatched tracks to CSV for reference
-- **Missing Tracks Database** - Tracks that can't be matched during import are stored with their original position. After adding the missing music to Plex, retry matching to insert them at the correct position.
-- **Schedule Imports** - Auto-refresh playlists weekly, fortnightly, or monthly
-- **Backup & Restore** - Export playlists to portable JSON format, restore from backup
-- **Sharing** - Share playlists with Plex managed users
-- **Rename on Import** - Customize playlist names before importing
+### Web App (Responsive PWA)
+- **Location**: `apps/web/`
+- **Type**:![alt text](image.png) (PWA)
+- **Features**: Full-featured interface, works on desktop and mobile
+- **Responsive**: Adapts to any screen size (desktop, tablet, mobile)
+- **Installable**: Add to home screen on mobile devices
+- **Access**: Connect to any Playlist Lab server
+- **Platforms**: Any device with a modern browser
 
-### Matching Settings
-- **Configurable Match Threshold** - Set minimum score for automatic matching (0-100%)
-- **Strict Mode** - Require exact artist matches
-- **Album Matching** - Include album name in matching criteria
-- **Rating Preferences** - Prefer higher-rated tracks, skip low-rated tracks unless perfect match
-- **Penalty Keywords** - Reduce scores for unwanted versions (live, karaoke, cover, etc.)
-- **Priority Keywords** - Boost scores for preferred versions (remastered, original, stereo, etc.)
-- **Editable Patterns** - Customize matching patterns for featured artists, versions, and various artists
-- **Auto-Complete** - Automatically create playlist if all tracks match 100%
-- **Playlist Prefixes** - Add source prefixes to playlist names (SPOT:, DEEZ:, APPL:, etc.)
+### Desktop App
+- **Location**: `apps/desktop/`
+- **Type**: Standalone Electron application
+- **Features**: Embedded server, single-user, portable
+- **Platforms**: Windows, macOS, Linux
 
-### Auto-Update
-- Automatic update notifications when new versions are available
-- One-click download and install from GitHub releases
+### Mobile App (Deprecated)
+- **Location**: `apps/mobile/`
+- **Status**: ⚠️ DEPRECATED - Use responsive web app instead
+- **Reason**: Web app now works perfectly on mobile devices
+- **See**: [apps/mobile/DEPRECATED.md](apps/mobile/DEPRECATED.md)
 
-## Installation
+## 🚀 Quick Start
 
-### From Release
-Download the latest release from [GitHub Releases](https://github.com/AuXBoX/Playlist-Lab/releases):
+### Server Installation
 
-**Windows:**
-- **Portable** - Single .exe, no installation required
-- **Installer** - NSIS setup wizard
+**Option 1: Windows Installer**
+```cmd
+# Download and run the installer
+PlaylistLabServer-Setup-2.0.0.exe
+```
 
-**macOS:**
-- **DMG** - Disk image installer
-- **ZIP** - Portable app bundle
-
-> ⚠️ **macOS Users:** The app is not code-signed, so macOS may show "Playlist Lab is damaged and can't be opened." To fix this:
-> 1. Open Terminal
-> 2. Run: `xattr -cr /Applications/Playlist\ Lab.app` (adjust path if needed)
-> 3. Or right-click the app → Open → Open (first time only)
-
-**Linux:**
-- **DEB** - Debian/Ubuntu package
-- **AppImage** - Portable, runs on most distros
-- **tar.gz** - Manual installation
-
-### From Source
+**Option 2: Docker (Recommended for Development)**
 ```bash
-git clone https://github.com/AuXBoX/Playlist-Lab.git
-cd Playlist-Lab
+# Quick start
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Access at http://localhost:3001
+```
+
+**Option 3: Manual Installation**
+```bash
+# Install dependencies
 npm install
+
+# Build shared package
+cd packages/shared && npm run build && cd ../..
+
+# Build server
+cd apps/server && npm run build && cd ../..
+
+# Build web app
+cd apps/web && npm run build && cd ../..
+
+# Start server
+cd apps/server && npm start
 ```
 
-## Usage
+### Desktop App
 
-### Development
+Download the appropriate installer for your platform:
+- Windows: `PlaylistLab-Setup-1.1.2.exe`
+- macOS: `PlaylistLab-1.1.2.dmg`
+- Linux: `PlaylistLab-1.1.2.deb`
+
+### Web App on Mobile
+
+The web app works perfectly on mobile devices:
+
+**iOS (iPhone/iPad)**
+1. Open Safari and navigate to your server URL
+2. Tap Share → "Add to Home Screen"
+3. App icon appears on home screen
+
+**Android**
+1. Open Chrome and navigate to your server URL
+2. Tap menu → "Install app"
+3. App icon appears in app drawer
+
+See [docs/RESPONSIVE_WEB_APP.md](docs/RESPONSIVE_WEB_APP.md) for details.
+
+## 🛠️ Development
+
+### Prerequisites
+- Node.js 18+
+- npm or yarn
+- Git
+
+### Setup
 ```bash
-npm run electron:dev
+# Clone repository
+git clone https://github.com/yourusername/playlist-lab.git
+cd playlist-lab
+
+# Install dependencies
+npm install
+
+# Build shared package
+cd packages/shared && npm run build && cd ../..
+
+# Start development servers
+npm run dev:server  # Server on port 3001
+npm run dev:web     # Web app on port 5173
+npm run dev:mobile  # Mobile app with Expo
 ```
 
-## How It Works
+### Git Operations
+Use the GitHub Manager for easy Git operations:
+```cmd
+scripts\github-manager.bat
+```
 
-1. Sign in with your Plex account
-2. Select your Plex server and music library
-3. Import playlists from external sources or generate personal mixes
-4. Tracks are matched against your Plex library using fuzzy matching
-5. Create playlists directly in Plex with matched tracks
+Features:
+- ✅ Automatic requirement checks
+- ✅ 28 Git operations with easy menu
+- ✅ Color-coded interface
+- ✅ Safety confirmations for dangerous operations
+- ✅ One-click release tagging (triggers CI/CD)
 
-## Tech Stack
+See [GitHub Manager Guide](docs/GITHUB_MANAGER_GUIDE.md) for details.
 
-- Electron
-- React + TypeScript
-- Vite
-- Plex API
+### Building
 
-## License
+**Build Everything**
+```bash
+# Windows
+scripts\build-all-installers.bat
 
-MIT
+# macOS/Linux
+bash scripts/build-all-installers.sh
+```
+
+**Build Individual Components**
+```bash
+# Server only
+cd apps/server && npm run build
+
+# Web app only
+cd apps/web && npm run build
+
+# Desktop app only
+cd apps/desktop && npm run build
+
+# Mobile app (requires EAS CLI)
+cd apps/mobile && eas build --platform ios
+```
+
+## 📖 Documentation
+
+**Complete Index**: [docs/INDEX.md](docs/INDEX.md)
+
+### User Documentation
+- [User Guide](docs/USER_GUIDE.md) - How to use Playlist Lab
+- [Windows Installer Guide](docs/WINDOWS_INSTALLER_GUIDE.md) - Windows installation details
+- [macOS Installer Guide](docs/MACOS_INSTALLER_GUIDE.md) - macOS installation details
+- [Linux Installer Guide](docs/LINUX_INSTALLER_GUIDE.md) - Linux installation details
+
+### Developer Documentation
+- [Developer Guide](docs/DEVELOPER_GUIDE.md) - Development setup and guidelines
+- [API Documentation](docs/API.md) - REST API reference
+- [Project Structure](docs/PROJECT_STRUCTURE.md) - Codebase organization
+- [Web vs Mobile Comparison](docs/WEB_MOBILE_COMPARISON.md) - Platform differences
+
+### Deployment & CI/CD
+- [Deployment Guide](docs/DEPLOYMENT_ANYWHERE.md) - Deploy to VPS, cloud, or local network
+- [Docker Setup](docs/DOCKER_SETUP.md) - Docker configuration and deployment
+- [CI/CD Setup](docs/CI_CD_SETUP.md) - Automated builds with GitHub Actions
+- [GitHub Actions Setup](docs/GITHUB_ACTIONS_SETUP.md) - Detailed CI/CD configuration
+
+### Tools & Utilities
+- [GitHub Manager Guide](docs/GITHUB_MANAGER_GUIDE.md) - Git operations made easy
+- [Build Scripts](scripts/README.md) - Build and installer scripts
+
+## 🏗️ Architecture
+
+```
+playlist-lab/
+├── apps/
+│   ├── desktop/          # Electron desktop app
+│   ├── mobile/           # React Native mobile app
+│   ├── server/           # Express.js API server
+│   └── web/              # React web app
+├── packages/
+│   └── shared/           # Shared TypeScript code
+├── scripts/              # Build and deployment scripts
+├── docs/                 # Documentation
+└── deployment/           # Deployment configurations
+```
+
+## 🔧 Technology Stack
+
+- **Backend**: Node.js, Express.js, SQLite, TypeScript
+- **Frontend**: React, TypeScript, Vite
+- **Mobile**: React Native, Expo
+- **Desktop**: Electron
+- **Testing**: Jest, fast-check (property-based testing)
+- **Build**: TypeScript, Vite, Electron Builder, EAS Build
+
+## 📝 Version History
+
+### Version 2.0.0 (Current - Server)
+- Multi-user web server with authentication
+- User management and permissions
+- Playlist sharing between users
+- RESTful API
+- Deployable anywhere
+- Web-based interface (no tray app needed)
+
+### Version 1.1.2 (Desktop App)
+- Standalone desktop application
+- Embedded server
+- Single-user mode
+- Cross-platform support
+
+## ⚠️ Important Notes
+
+### Server Installers
+The Windows/macOS/Linux server installers have been updated for the web-based server (v2.0.0). These installers no longer include a tray application - the server runs as a background service and is accessed via web browser at `http://localhost:3001`.
+
+**Installation Methods:**
+- **Windows**: Run the `.exe` installer - creates Start Menu shortcuts and optionally starts on boot
+- **macOS**: Install the `.dmg` or `.pkg` - creates an application bundle in Applications
+- **Linux**: Install the `.deb` (Debian/Ubuntu) or `.rpm` (Fedora/RHEL) - includes systemd service
+- **Docker**: Use `docker-compose up -d` (recommended for development)
+- **Manual**: Build and run the server directly (see Quick Start)
+- **VPS/Cloud**: Deploy using the deployment scripts in `deployment/`
+
+**Access**: After installation, open your browser to `http://localhost:3001`
+
+After installation, access the server at `http://localhost:3001` in your web browser.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read the [Developer Guide](docs/DEVELOPER_GUIDE.md) for guidelines.
+
+## 📄 License
+
+See LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- Plex Media Server for the excellent media platform
+- All the open-source libraries that make this possible
+
+## 📧 Support
+
+- Issues: [GitHub Issues](https://github.com/yourusername/playlist-lab/issues)
+- Documentation: [docs/](docs/)
+- Email: audexa@users.noreply.github.com
+
+---
+
+Made with ❤️ by Audexa

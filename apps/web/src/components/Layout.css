@@ -1,0 +1,23 @@
+.layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--background);
+}
+
+.layout-body {
+  display: flex;
+  flex: 1;
+}
+
+.layout-main {
+  flex: 1;
+  padding: 1.5rem;
+  background: linear-gradient(180deg, var(--background) 0%, var(--background-elevated) 100%);
+  min-height: calc(100vh - var(--header-height));
+}
+
+@media (max-width: 768px) {
+  .layout-body { flex-direction: column; }
+  .layout-main { padding: 1rem; }
+}

@@ -1,0 +1,53 @@
+========================================
+DO THIS NOW - SIMPLE STEPS
+========================================
+
+1. Run this command:
+   scripts\nuclear-restart.bat
+
+2. Wait 20 seconds
+
+3. CLOSE YOUR BROWSER COMPLETELY
+   - Close ALL windows
+   - Check Task Manager and kill browser if needed
+
+4. Open browser in INCOGNITO/PRIVATE mode:
+   - Chrome: Ctrl+Shift+N
+   - Edge: Ctrl+Shift+P
+   - Firefox: Ctrl+Shift+P
+
+5. Go to: http://localhost:5173/version.html
+   - This page will tell you if new code is loaded
+
+6. Press F12 and check Console
+   - Look for: "BUILD_TIMESTAMP: 2025-01-XX-FORCE-REFRESH"
+
+7. If you see that message, go to Import page and test
+
+========================================
+IF STILL NOT WORKING:
+========================================
+
+Try a DIFFERENT browser:
+- If using Chrome, try Edge
+- If using Edge, try Chrome
+- If using Firefox, try Chrome
+
+Your current browser is VERY stubborn about caching!
+
+========================================
+WHAT YOU SHOULD SEE:
+========================================
+
+Import modal should show:
+✓ Playlist name (not long ID)
+✓ Progress bar
+✓ "X / Y tracks" counter
+✓ Current track name
+
+Cancel button should:
+✓ Close modal immediately
+✓ Stop import
+✓ Show console message
+
+========================================

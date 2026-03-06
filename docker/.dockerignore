@@ -1,0 +1,84 @@
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Build outputs
+dist
+build
+release
+.next
+out
+
+# Development
+.git
+.github
+.vscode
+.kiro
+.idea
+*.swp
+*.swo
+*~
+
+# Testing
+coverage
+.nyc_output
+*.test.ts
+*.spec.ts
+__tests__
+tests
+*.test.js
+*.spec.js
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Logs
+*.log
+logs
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+tmp
+temp
+*.tmp
+
+# Desktop app specific
+apps/desktop/src/main
+apps/desktop/src/renderer
+apps/desktop/assets
+apps/desktop/release
+apps/desktop/dist
+apps/desktop/build
+
+# Mobile app specific
+apps/mobile/android
+apps/mobile/ios
+apps/mobile/.expo
+apps/mobile/assets
+
+# Scripts
+scripts
+
+# Deployment
+deployment
+
+# Docker
+docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
