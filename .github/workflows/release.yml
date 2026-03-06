@@ -70,12 +70,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev rpm
-          bash scripts/installers/linux/build-linux.sh
+          bash .github/scripts/installers/linux/build-linux.sh
       
       # macOS-specific build
       - name: Build macOS installers
         if: matrix.platform == 'macos'
-        run: bash scripts/installers/macos/build-macos.sh
+        run: bash .github/scripts/installers/macos/build-macos.sh
       
       # Windows-specific build
       - name: Setup Inno Setup (Windows)
@@ -87,13 +87,13 @@ jobs:
       - name: Build Windows installer
         if: matrix.platform == 'windows'
         shell: bash
-        run: bash scripts/installers/windows/build-windows.sh
+        run: bash .github/scripts/installers/windows/build-windows.sh
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: scripts/release/**/*
+          path: release/**/*
           retention-days: 30
 
   # Build desktop app for all platforms
