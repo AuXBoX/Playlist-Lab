@@ -48,9 +48,13 @@ mkdir -p "$DEB_ROOT/opt/$APP_NAME/packages/shared"
 cp -R "$PROJECT_ROOT/packages/shared/dist" "$DEB_ROOT/opt/$APP_NAME/packages/shared/"
 cp "$PROJECT_ROOT/packages/shared/package.json" "$DEB_ROOT/opt/$APP_NAME/packages/shared/"
 
-# Copy server node_modules
+# Copy server node_modules (exclude non-x64 prebuilds to avoid RPM strip errors)
 echo "Copying dependencies..."
-cp -R "$PROJECT_ROOT/apps/server/node_modules" "$DEB_ROOT/opt/$APP_NAME/server/" 2>/dev/null || true
+if [ -d "$PROJECT_ROOT/apps/server/node_modules" ]; then
+    rsync -a --exclude='*/prebuilds/linux-arm*' --exclude='*/prebuilds/darwin-*' --exclude='*/prebuilds/win32-*' \
+          "$PROJECT_ROOT/apps/server/node_modules/" "$DEB_ROOT/opt/$APP_NAME/server/node_modules/" 2>/dev/null || \
+    cp -R "$PROJECT_ROOT/apps/server/node_modules" "$DEB_ROOT/opt/$APP_NAME/server/" 2>/dev/null || true
+fi
 
 # Copy launcher script
 cp "$SCRIPT_DIR/server-launcher.sh" "$DEB_ROOT/opt/$APP_NAME/"
@@ -159,6 +163,9 @@ if command -v rpmbuild &> /dev/null; then
     mkdir -p "$RPM_ROOT"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
     cat > "$RPM_ROOT/SPECS/$APP_NAME.spec" << EOF
+%define __strip /bin/true
+%define _build_id_links none
+
 Name:           $APP_NAME
 Version:        $APP_VERSION
 Release:        1%{?dist}
