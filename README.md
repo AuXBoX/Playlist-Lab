@@ -1,5 +1,7 @@
 # Playlist Lab
 
+<!-- Version 2.0.0 - Cross-platform tray app with systray2 -->
+
 A comprehensive music playlist management system with Plex Media Server integration. Import playlists from multiple sources, generate smart mixes, and sync them to your Plex server.
 
 ## 🎵 Features
