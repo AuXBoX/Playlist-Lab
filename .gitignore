@@ -90,5 +90,8 @@ docs/
 # Scripts (keep in repo)
 scripts/
 
+# Exception: GitHub Actions scripts must be in repo
+!.github/scripts/
+
 # Kiro specs (keep in repo)
 .kiro/
