@@ -54,7 +54,9 @@ data/
 installer/nodejs/
 temp/
 scripts/temp/
-# Keep scripts/cache/ - contains Node.js runtime for installer builds
+# scripts/cache/ contains Node.js runtime for installer builds
+# Exclude large binaries (node.exe is 66MB, over GitHub's 50MB limit)
+scripts/cache/
 
 # Expo (mobile app)
 .expo/
@@ -83,10 +85,10 @@ Thumbs.db
 *.bak
 
 # Documentation (keep in repo but ignore generated docs)
-# docs/
+docs/
 
 # Scripts (keep in repo)
-# scripts/
+scripts/
 
 # Kiro specs (keep in repo)
-# .kiro/
+.kiro/
