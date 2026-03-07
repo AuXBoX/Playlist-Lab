@@ -1,6 +1,6 @@
 # Playlist Lab
 
-<!-- Version 2.0.0 - Cross-platform tray app with systray2 -->
+<!-- Version 1.1.2 - Cross-platform server with system tray support -->
 
 A comprehensive music playlist management system with Plex Media Server integration. Import playlists from multiple sources, generate smart mixes, and sync them to your Plex server.
 
@@ -27,7 +27,7 @@ This is a monorepo containing multiple applications:
 
 ### Web App (Responsive PWA)
 - **Location**: `apps/web/`
-- **Type**:![alt text](image.png) (PWA)
+- **Type**: React Progressive Web App (PWA)
 - **Features**: Full-featured interface, works on desktop and mobile
 - **Responsive**: Adapts to any screen size (desktop, tablet, mobile)
 - **Installable**: Add to home screen on mobile devices
@@ -53,7 +53,7 @@ This is a monorepo containing multiple applications:
 **Option 1: Windows Installer**
 ```cmd
 # Download and run the installer
-PlaylistLabServer-Setup-2.0.0.exe
+PlaylistLabServer-Setup-1.1.2.exe
 ```
 
 **Option 2: Docker (Recommended for Development)**
@@ -227,36 +227,39 @@ playlist-lab/
 
 ## 📝 Version History
 
-### Version 2.0.0 (Current - Server)
-- Multi-user web server with authentication
-- User management and permissions
-- Playlist sharing between users
-- RESTful API
-- Deployable anywhere
-- Web-based interface (no tray app needed)
+### Version 1.1.2 (Current)
+- Improved cross-platform installer support
+- System tray integration with systray2
+- Enhanced Windows/macOS/Linux installers
+- GitHub Actions CI/CD automation
+- Docker deployment support
+- Bug fixes and stability improvements
 
-### Version 1.1.2 (Desktop App)
-- Standalone desktop application
-- Embedded server
-- Single-user mode
-- Cross-platform support
+### Previous Versions
+- **1.1.x**: Desktop app improvements, multi-user support
+- **1.0.x**: Initial release with Plex integration
 
 ## ⚠️ Important Notes
 
 ### Server Installers
-The Windows/macOS/Linux server installers have been updated for the web-based server (v2.0.0). These installers no longer include a tray application - the server runs as a background service and is accessed via web browser at `http://localhost:3001`.
+The Windows/macOS/Linux server installers include a system tray application for easy server management. The server runs as a background service and is accessed via web browser at `http://localhost:3001`.
 
 **Installation Methods:**
-- **Windows**: Run the `.exe` installer - creates Start Menu shortcuts and optionally starts on boot
-- **macOS**: Install the `.dmg` or `.pkg` - creates an application bundle in Applications
-- **Linux**: Install the `.deb` (Debian/Ubuntu) or `.rpm` (Fedora/RHEL) - includes systemd service
-- **Docker**: Use `docker-compose up -d` (recommended for development)
+- **Windows**: Run the `.exe` installer - includes system tray app, creates Start Menu shortcuts, optionally starts on boot
+- **macOS**: Install the `.dmg` or `.pkg` - includes system tray app, creates an application bundle in Applications
+- **Linux**: Install the `.deb` (Debian/Ubuntu) or `.rpm` (Fedora/RHEL) - includes systemd service and tray app
+- **Docker**: Use `docker-compose up -d` (recommended for development and cloud deployments)
 - **Manual**: Build and run the server directly (see Quick Start)
 - **VPS/Cloud**: Deploy using the deployment scripts in `deployment/`
 
-**Access**: After installation, open your browser to `http://localhost:3001`
+**System Tray Features:**
+- Start/stop/restart server
+- Open web interface in browser
+- Change server port
+- View server status
+- Exit tray application
 
-After installation, access the server at `http://localhost:3001` in your web browser.
+**Access**: After installation, open your browser to `http://localhost:3001` or use the tray app to open the interface.
 
 ## 🤝 Contributing
 
