@@ -100,17 +100,26 @@ jobs:
         shell: bash
         run: bash .github/scripts/installers/windows/build-windows.sh
       
+      - name: List build output (debug)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          echo "=== Contents of release/windows ==="
+          ls -la release/windows/ || true
+          echo "=== Looking for .exe files ==="
+          find release/windows -name "*.exe" -type f || true
+      
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
-            release/**/*.exe
-            release/**/*.dmg
-            release/**/*.pkg
-            release/**/*.deb
-            release/**/*.rpm
-            release/**/*.AppImage
+            release/windows/*.exe
+            release/macos/*.dmg
+            release/macos/*.pkg
+            release/linux/*.deb
+            release/linux/*.rpm
+            release/linux/*.AppImage
           retention-days: 30
 
   # Build desktop app for all platforms
@@ -150,16 +159,24 @@ jobs:
           npm ci --legacy-peer-deps
           npm run ${{ matrix.script }}
       
+      - name: List desktop build output (debug)
+        shell: bash
+        run: |
+          echo "=== Contents of scripts/release ==="
+          ls -la scripts/release/ || true
+          echo "=== All files in scripts/release ==="
+          find scripts/release -type f || true
+      
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.platform }}
           path: |
-            scripts/release/*.exe
-            scripts/release/*.dmg
-            scripts/release/*.AppImage
-            scripts/release/*.deb
-            scripts/release/*.zip
+            scripts/release/PlaylistLab*.exe
+            scripts/release/PlaylistLab*.dmg
+            scripts/release/PlaylistLab*.AppImage
+            scripts/release/PlaylistLab*.deb
+            scripts/release/PlaylistLab*.zip
           retention-days: 30
 
   build-mobile-android:
@@ -189,15 +206,24 @@ jobs:
           cd apps/mobile
           npm install
       
-      - name: Build Android app
+      - name: Build Android APK
         run: |
           cd apps/mobile
-          eas build --platform android --profile production --non-interactive --no-wait
+          eas build --platform android --profile production --non-interactive --local --output=../../release-artifacts/mobile/PlaylistLab.apk
+        continue-on-error: true
+      
+      - name: Upload Android APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-android
+          path: release-artifacts/mobile/*.apk
+          retention-days: 30
 
   # Create GitHub Release
   create-release:
     name: Create GitHub Release
-    needs: [build-server-installers, build-desktop-app]
+    needs: [build-server-installers, build-desktop-app, build-mobile-android]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     
@@ -229,6 +255,7 @@ jobs:
             release-artifacts/**/*.rpm
             release-artifacts/**/*.AppImage
             release-artifacts/**/*.zip
+            release-artifacts/**/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
