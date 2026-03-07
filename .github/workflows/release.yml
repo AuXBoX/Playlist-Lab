@@ -11,6 +11,10 @@ on:
         required: true
         default: '2.0.0'
 
+permissions:
+  contents: write
+  packages: write
+
 env:
   NODE_VERSION: '20'
   PUPPETEER_SKIP_DOWNLOAD: 'true'
@@ -198,6 +202,7 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          fail_on_unmatched_files: false
           files: |
             release-artifacts/**/*.exe
             release-artifacts/**/*.dmg
@@ -250,6 +255,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: docker/Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/playlist-lab-server:latest
