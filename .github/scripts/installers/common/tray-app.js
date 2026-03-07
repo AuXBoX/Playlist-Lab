@@ -14,6 +14,9 @@ const http = require('http');
 const os = require('os');
 const readline = require('readline');
 
+// Auto-updater
+const AutoUpdater = require('./auto-updater');
+
 const platform = os.platform(); // 'win32' | 'darwin' | 'linux'
 const isWindows = platform === 'win32';
 const isMac = platform === 'darwin';
@@ -102,6 +105,7 @@ function startServer() {
   if (!launcher) { log('ERROR: No server launcher found'); return; }
 
   log(`Starting server on port ${config.port}...`);
+  notify('Server Starting', `Starting Playlist Lab server on port ${config.port}...`);
   fs.mkdirSync(dataDir, { recursive: true });
 
   const out = fs.openSync(path.join(dataDir, 'server.log'), 'a');
@@ -109,50 +113,84 @@ function startServer() {
 
   serverProcess = spawn(launcher.cmd, launcher.args, {
     cwd: installDir,
-    detached: true,
+    detached: false,
     stdio: ['ignore', out, err],
     env: { ...process.env, PORT: String(config.port), INSTALL_DIR: installDir },
-    windowsHide: true,
   });
 
-  // Mark that we started a server (even though launcher exits immediately)
-  const startTime = Date.now();
-  
   serverProcess.on('exit', (code) => {
-    log(`Server launcher exited (code ${code})`);
-    // If launcher exits quickly, that's expected - it spawns the real server
-    if (Date.now() - startTime < 2000) {
-      log('Launcher exited quickly - server should be running independently');
-    }
+    log(`Server exited (code ${code})`);
+    notify('Server Stopped', `Playlist Lab server has stopped (exit code ${code})`);
     serverProcess = null;
   });
   serverProcess.on('error', (e) => {
     log(`Server spawn error: ${e.message}`);
+    notify('Server Error', `Failed to start server: ${e.message}`);
     serverProcess = null;
   });
-
-  // Unref so tray can exit without killing server
-  if (serverProcess.unref) {
-    serverProcess.unref();
-  }
+  
+  // Check if server actually started after a few seconds
+  setTimeout(() => {
+    checkHealth(config.port, (running) => {
+      if (running) {
+        log('Server started successfully');
+        notify('Server Started', `Playlist Lab is now running on port ${config.port}`);
+      } else {
+        log('Server failed to start - health check failed');
+        notify('Server Failed', `Server did not start successfully. Check logs for details.`);
+      }
+    });
+  }, 3000);
 }
 
 function stopServer(cb) {
-  log('Stopping server...');
-  // Always kill by port since server runs independently
-  killByPort(config.port, () => {
-    serverProcess = null;
-    if (cb) cb();
-  });
+  if (serverProcess) {
+    log('Stopping server...');
+    notify('Server Stopping', 'Stopping Playlist Lab server...');
+    serverProcess.once('exit', () => { 
+      serverProcess = null;
+      log('Server stopped');
+      notify('Server Stopped', 'Playlist Lab server has stopped');
+      if (cb) cb();
+    });
+    serverProcess.kill('SIGTERM');
+    setTimeout(() => { if (serverProcess) serverProcess.kill('SIGKILL'); }, 5000);
+  } else {
+    // Try to kill by port as fallback
+    log('Stopping server by port...');
+    notify('Server Stopping', 'Stopping Playlist Lab server...');
+    killByPort(config.port, () => {
+      log('Server stopped');
+      notify('Server Stopped', 'Playlist Lab server has stopped');
+      if (cb) cb();
+    });
+  }
 }
 
 function killByPort(port, cb) {
-  let cmd;
   if (isWindows) {
-    cmd = `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${port}') do taskkill /F /PID %a`;
-    exec(cmd, () => { if (cb) cb(); });
+    // Use PowerShell for more reliable port-based process killing
+    const ps = `
+      $port = ${port};
+      $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue;
+      if ($connections) {
+        $pids = $connections | Select-Object -ExpandProperty OwningProcess -Unique;
+        foreach ($pid in $pids) {
+          Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue;
+        }
+        Write-Output "Killed processes on port $port";
+      } else {
+        Write-Output "No process found on port $port";
+      }
+    `;
+    exec(`powershell -Command "${ps.replace(/\n/g, ' ')}"`, (err, stdout) => {
+      log(stdout.trim());
+      if (cb) setTimeout(cb, 500); // Small delay to ensure process is killed
+    });
   } else {
-    exec(`lsof -ti tcp:${port} | xargs kill -9 2>/dev/null || true`, () => { if (cb) cb(); });
+    exec(`lsof -ti tcp:${port} | xargs kill -9 2>/dev/null || true`, () => {
+      if (cb) setTimeout(cb, 500);
+    });
   }
 }
 
@@ -286,13 +324,31 @@ function zlibDeflate(data) {
 }
 
 function getIconPath(color) {
+  // Try to use pre-generated icons with Playlist Lab logo
+  const iconsDir = path.join(installDir, 'icons');
+  const iconName = color === 'green' ? 'tray-running.png' : 'tray-stopped.png';
+  const iconPath = path.join(iconsDir, iconName);
+  
+  if (fs.existsSync(iconPath)) {
+    log(`Using icon: ${iconPath}`);
+    return iconPath;
+  }
+  
+  log(`Icon not found at ${iconPath}, generating fallback`);
+  
+  // Fallback: generate simple colored icon in temp directory
   const tmpDir = os.tmpdir();
   const file = path.join(tmpDir, `pl-icon-${color}.png`);
   if (!fs.existsSync(file)) {
     let r, g, b;
     if (color === 'green') { r = 34; g = 197; b = 94; }
     else { r = 239; g = 68; b = 68; } // red
-    fs.writeFileSync(file, buildSolidPng(r, g, b));
+    try {
+      fs.writeFileSync(file, buildSolidPng(r, g, b));
+      log(`Generated fallback icon: ${file}`);
+    } catch (err) {
+      log(`Failed to generate icon: ${err.message}`);
+    }
   }
   return file;
 }
@@ -323,12 +379,48 @@ function startTray(SysTray) {
   const iconGreen = getIconPath('green');
   const iconRed = getIconPath('red');
 
+  // Initialize auto-updater
+  let updateInfo = null;
+  let isDownloadingUpdate = false;
+  
+  const updater = new AutoUpdater({
+    currentVersion: '1.1.3',
+    installDir,
+    onUpdateAvailable: (info) => {
+      log(`Update available: ${info.version}`);
+      updateInfo = info;
+      notify('Update Available', `Playlist Lab ${info.version} is available. Click "Check for Updates" in the tray menu to install.`);
+      refreshTray();
+    },
+    onUpdateDownloaded: (installerPath) => {
+      log(`Update downloaded: ${installerPath}`);
+      isDownloadingUpdate = false;
+      notify('Update Ready', 'Update downloaded successfully. Click "Install Update" to install now.');
+      refreshTray();
+    },
+    onUpdateProgress: (progress, downloaded, total) => {
+      if (Math.floor(progress) % 10 === 0) { // Log every 10%
+        log(`Download progress: ${Math.floor(progress)}%`);
+      }
+    },
+    onUpdateError: (error) => {
+      log(`Update error: ${error.message}`);
+      isDownloadingUpdate = false;
+      notify('Update Error', `Failed to check for updates: ${error.message}`);
+      refreshTray();
+    }
+  });
+
+  // Start automatic update checks (every 24 hours)
+  updater.startAutoCheck();
+
   // Build menu items array with proper separator objects
   function buildItems(isRunning) {
     const status = isRunning
       ? `Running on port ${config.port}`
       : `Stopped (port ${config.port})`;
-    return [
+    
+    const items = [
       { title: 'Open Playlist Lab',           tooltip: 'Open in browser',       checked: false, enabled: true },
       { title: `Status: ${status}`,            tooltip: 'Server status',         checked: false, enabled: false },
       { title: '<SEPARATOR>' },
@@ -338,8 +430,24 @@ function startTray(SysTray) {
       { title: '<SEPARATOR>' },
       { title: `Change Port (${config.port})`, tooltip: 'Change server port',    checked: false, enabled: true },
       { title: '<SEPARATOR>' },
-      { title: 'Exit',                         tooltip: 'Exit tray app',         checked: false, enabled: true },
     ];
+
+    // Add update menu items
+    if (updateInfo && !isDownloadingUpdate) {
+      items.push({ title: `Update Available (${updateInfo.version})`, tooltip: 'New version available', checked: false, enabled: false });
+      items.push({ title: 'Install Update',                           tooltip: 'Download and install update', checked: false, enabled: true });
+      items.push({ title: '<SEPARATOR>' });
+    } else if (isDownloadingUpdate) {
+      items.push({ title: 'Downloading Update...',                    tooltip: 'Update download in progress', checked: false, enabled: false });
+      items.push({ title: '<SEPARATOR>' });
+    } else {
+      items.push({ title: 'Check for Updates',                        tooltip: 'Check for new versions', checked: false, enabled: true });
+      items.push({ title: '<SEPARATOR>' });
+    }
+
+    items.push({ title: 'Exit',                         tooltip: 'Exit tray app',         checked: false, enabled: true });
+    
+    return items;
   }
 
   const tray = new SysTray({
@@ -368,10 +476,94 @@ function startTray(SysTray) {
       stopServer(() => { setTimeout(() => { startServer(); setTimeout(() => refreshTray(), 3000); }, 1000); });
     } else if (title.startsWith('Change Port')) {
       promptChangePort(() => refreshTray());
+    } else if (title === 'Check for Updates') {
+      handleCheckForUpdates();
+    } else if (title === 'Install Update') {
+      handleInstallUpdate();
     } else if (title === 'Exit') {
+      updater.stopAutoCheck();
       stopServer(() => { tray.kill(); process.exit(0); });
     }
   });
+
+  // Handle check for updates
+  function handleCheckForUpdates() {
+    log('Manual update check requested');
+    notify('Checking for Updates', 'Checking GitHub for new versions...');
+    updater.checkForUpdates().then((info) => {
+      if (!info) {
+        notify('No Updates', 'You are running the latest version.');
+      }
+    });
+  }
+
+  // Handle install update
+  async function handleInstallUpdate() {
+    if (!updateInfo) {
+      notify('Update Error', 'No update information available.');
+      return;
+    }
+
+    if (!updateInfo.downloadUrl) {
+      notify('Update Error', 'No installer available for this release.');
+      log('Opening release page in browser...');
+      if (isWindows) exec(`start "" "${updateInfo.htmlUrl}"`);
+      else if (isMac) exec(`open "${updateInfo.htmlUrl}"`);
+      else exec(`xdg-open "${updateInfo.htmlUrl}"`);
+      return;
+    }
+
+    try {
+      isDownloadingUpdate = true;
+      refreshTray();
+      
+      notify('Downloading Update', `Downloading Playlist Lab ${updateInfo.version}...`);
+      log(`Starting download: ${updateInfo.downloadUrl}`);
+      
+      const installerPath = await updater.downloadUpdate(updateInfo);
+      
+      // Ask user to confirm installation
+      if (isWindows) {
+        const ps = `Add-Type -AssemblyName System.Windows.Forms; $result = [System.Windows.Forms.MessageBox]::Show('Update downloaded successfully. Install now? The application will close and the installer will run.', 'Install Update', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question); Write-Output $result`;
+        exec(`powershell -Command "${ps}"`, async (err, stdout) => {
+          if (stdout.trim() === 'Yes') {
+            log('User confirmed installation');
+            notify('Installing Update', 'Starting installer...');
+            
+            // Stop server before installing
+            stopServer(async () => {
+              try {
+                await updater.installUpdate(installerPath);
+                // Installer will close this app
+                setTimeout(() => process.exit(0), 3000);
+              } catch (error) {
+                log(`Installation error: ${error.message}`);
+                notify('Installation Error', `Failed to start installer: ${error.message}`);
+                isDownloadingUpdate = false;
+                refreshTray();
+              }
+            });
+          } else {
+            log('User cancelled installation');
+            notify('Update Cancelled', 'Update installer saved. You can install it later from the tray menu.');
+            isDownloadingUpdate = false;
+            refreshTray();
+          }
+        });
+      } else {
+        // For non-Windows, just notify that download is complete
+        notify('Update Downloaded', `Installer saved. Please run it manually to update.`);
+        isDownloadingUpdate = false;
+        refreshTray();
+      }
+    } catch (error) {
+      log(`Update download error: ${error.message}`);
+      notify('Download Error', `Failed to download update: ${error.message}`);
+      isDownloadingUpdate = false;
+      updateInfo = null;
+      refreshTray();
+    }
+  }
 
   function refreshTray() {
     checkHealth(config.port, (running) => {
@@ -394,8 +586,7 @@ function startTray(SysTray) {
 
   // Poll every 10s
   setInterval(() => refreshTray(), 10000);
-  // Initial refresh after server has time to start (8 seconds to be safe)
-  setTimeout(() => refreshTray(), 8000);
+  setTimeout(() => refreshTray(), 2000);
 
   log('Tray started');
 }
@@ -437,10 +628,9 @@ function runHeadless() {
 
 log(`Playlist Lab Tray starting on ${platform}, port ${config.port}`);
 
-// Check if server is already running before starting
+// Start server if not already running
 checkHealth(config.port, (running) => {
   if (!running) {
-    log('Server not running, starting it now...');
     startServer();
   } else {
     log(`Server already running on port ${config.port}`);
