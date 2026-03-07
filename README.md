@@ -1,4 +1,4 @@
-# Playlist Lab
+p# Playlist Lab
 
 <!-- Version 1.1.2 - Cross-platform server with system tray support -->
 
@@ -150,21 +150,6 @@ scripts\build-all-installers.bat
 
 # macOS/Linux
 bash scripts/build-all-installers.sh
-```
-
-**Build Individual Components**
-```bash
-# Server only
-cd apps/server && npm run build
-
-# Web app only
-cd apps/web && npm run build
-
-# Desktop app only
-cd apps/desktop && npm run build
-
-# Mobile app (requires EAS CLI)
-cd apps/mobile && eas build --platform ios
 ```
 
 ## Technology Stack
