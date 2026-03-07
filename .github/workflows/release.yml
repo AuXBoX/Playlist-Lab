@@ -126,6 +126,7 @@ jobs:
   build-desktop-app:
     name: Build Desktop App
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
@@ -150,7 +151,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       
-      - name: Install dependencies
+      - name: Install root dependencies
         run: npm ci --legacy-peer-deps
       
       - name: Build desktop app
@@ -158,25 +159,24 @@ jobs:
           cd apps/desktop
           npm ci --legacy-peer-deps
           npm run ${{ matrix.script }}
+        continue-on-error: false
       
       - name: List desktop build output (debug)
         shell: bash
         run: |
-          echo "=== Contents of scripts/release ==="
-          ls -la scripts/release/ || true
-          echo "=== All files in scripts/release ==="
-          find scripts/release -type f || true
+          echo "=== Contents of apps/desktop/dist-electron ==="
+          ls -la apps/desktop/dist-electron/ 2>/dev/null || echo "Directory not found"
+          echo ""
+          echo "=== All files in apps/desktop/dist-electron ==="
+          find apps/desktop/dist-electron -type f 2>/dev/null || echo "No files found"
       
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: desktop-${{ matrix.platform }}
-          path: |
-            scripts/release/PlaylistLab*.exe
-            scripts/release/PlaylistLab*.dmg
-            scripts/release/PlaylistLab*.AppImage
-            scripts/release/PlaylistLab*.deb
-            scripts/release/PlaylistLab*.zip
+          path: apps/desktop/dist-electron/*
+          if-no-files-found: error
           retention-days: 30
 
   build-mobile-android:

@@ -54,7 +54,7 @@
     "appId": "com.audexa.playlist-lab",
     "productName": "Playlist Lab",
     "directories": {
-      "output": "../scripts/release"
+      "output": "dist-electron"
     },
     "files": [
       "dist/**/*",
