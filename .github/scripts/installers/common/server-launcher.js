@@ -37,27 +37,34 @@ console.log(`Starting Playlist Lab Server on port ${port}...`);
 console.log(`Node: ${nodePath}`);
 console.log(`Server: ${serverMain}`);
 
+// Create log directory
+const dataDir = process.platform === 'win32'
+  ? path.join(process.env.APPDATA || require('os').homedir(), 'PlaylistLabServer')
+  : path.join(require('os').homedir(), '.local', 'share', 'PlaylistLabServer');
+
+require('fs').mkdirSync(dataDir, { recursive: true });
+
 const server = spawn(nodePath, [serverMain], {
   cwd: serverDir,
-  stdio: 'inherit',
+  stdio: 'ignore', // Don't show console output
+  detached: true,  // Run independently
   env: {
     ...process.env,
     PORT: port,
     NODE_ENV: 'production',
     INSTALL_DIR: installDir,
   },
+  windowsHide: true, // Hide console window on Windows
 });
+
+// Unref so this launcher can exit
+server.unref();
 
 server.on('error', (err) => {
   console.error(`Failed to start server: ${err.message}`);
   process.exit(1);
 });
 
-server.on('exit', (code) => {
-  console.log(`Server exited with code ${code}`);
-  process.exit(code || 0);
-});
-
-// Forward signals
-process.on('SIGINT', () => server.kill('SIGINT'));
-process.on('SIGTERM', () => server.kill('SIGTERM'));
+// Exit immediately - server is now running independently
+console.log('Server started successfully');
+process.exit(0);

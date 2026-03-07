@@ -41,7 +41,7 @@ const startupFolder = path.join(
 );
 
 const shortcutPath = path.join(startupFolder, 'PlaylistLabServer.lnk');
-const trayAppPath = path.join(installDir, 'tray-app.js');
+const vbsLauncherPath = path.join(installDir, 'start-tray.vbs');
 const nodePath = path.join(installDir, 'nodejs', 'node.exe');
 
 /**
@@ -52,8 +52,8 @@ function createShortcut(targetPath, args, callback) {
 Set oWS = WScript.CreateObject("WScript.Shell")
 sLinkFile = "${shortcutPath.replace(/\\/g, '\\\\')}"
 Set oLink = oWS.CreateShortcut(sLinkFile)
-oLink.TargetPath = "${nodePath.replace(/\\/g, '\\\\')}"
-oLink.Arguments = "${trayAppPath.replace(/\\/g, '\\\\')}"
+oLink.TargetPath = "wscript.exe"
+oLink.Arguments = """${vbsLauncherPath.replace(/\\/g, '\\\\')}"""
 oLink.WorkingDirectory = "${installDir.replace(/\\/g, '\\\\')}"
 oLink.Description = "Playlist Lab Server"
 oLink.WindowStyle = 7
@@ -100,7 +100,8 @@ function removeShortcut(callback) {
 function startTrayApp() {
   console.log('Starting Playlist Lab Server...');
   
-  const trayProcess = spawn(nodePath, [trayAppPath], {
+  // Use wscript to launch the VBS file (no console window)
+  const trayProcess = spawn('wscript.exe', [vbsLauncherPath], {
     detached: true,
     stdio: 'ignore',
     cwd: installDir,
@@ -116,7 +117,7 @@ function startTrayApp() {
  */
 function installService(callback) {
   console.log('Service mode not yet implemented. Using autostart mode instead.');
-  createShortcut(trayAppPath, '', callback);
+  createShortcut(vbsLauncherPath, '', callback);
 }
 
 /**
@@ -133,7 +134,7 @@ console.log(`Configuring Playlist Lab Server (mode: ${mode})...`);
 switch (mode) {
   case 'autostart':
     removeShortcut(() => {
-      createShortcut(trayAppPath, '', (error) => {
+      createShortcut(vbsLauncherPath, '', (error) => {
         if (error) {
           console.error('Failed to configure autostart');
           process.exit(1);

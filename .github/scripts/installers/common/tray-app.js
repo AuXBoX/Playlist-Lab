@@ -115,31 +115,35 @@ function startServer() {
     windowsHide: true,
   });
 
-  // Unref so tray can exit without killing server
-  if (serverProcess.unref) {
-    serverProcess.unref();
-  }
-
+  // Mark that we started a server (even though launcher exits immediately)
+  const startTime = Date.now();
+  
   serverProcess.on('exit', (code) => {
-    log(`Server exited (code ${code})`);
+    log(`Server launcher exited (code ${code})`);
+    // If launcher exits quickly, that's expected - it spawns the real server
+    if (Date.now() - startTime < 2000) {
+      log('Launcher exited quickly - server should be running independently');
+    }
     serverProcess = null;
   });
   serverProcess.on('error', (e) => {
     log(`Server spawn error: ${e.message}`);
     serverProcess = null;
   });
+
+  // Unref so tray can exit without killing server
+  if (serverProcess.unref) {
+    serverProcess.unref();
+  }
 }
 
 function stopServer(cb) {
-  if (serverProcess) {
-    log('Stopping server...');
-    serverProcess.once('exit', () => { serverProcess = null; if (cb) cb(); });
-    serverProcess.kill('SIGTERM');
-    setTimeout(() => { if (serverProcess) serverProcess.kill('SIGKILL'); }, 5000);
-  } else {
-    // Try to kill by port as fallback
-    killByPort(config.port, cb);
-  }
+  log('Stopping server...');
+  // Always kill by port since server runs independently
+  killByPort(config.port, () => {
+    serverProcess = null;
+    if (cb) cb();
+  });
 }
 
 function killByPort(port, cb) {
@@ -390,7 +394,8 @@ function startTray(SysTray) {
 
   // Poll every 10s
   setInterval(() => refreshTray(), 10000);
-  setTimeout(() => refreshTray(), 2000);
+  // Initial refresh after server has time to start (8 seconds to be safe)
+  setTimeout(() => refreshTray(), 8000);
 
   log('Tray started');
 }
@@ -432,9 +437,10 @@ function runHeadless() {
 
 log(`Playlist Lab Tray starting on ${platform}, port ${config.port}`);
 
-// Start server if not already running
+// Check if server is already running before starting
 checkHealth(config.port, (running) => {
   if (!running) {
+    log('Server not running, starting it now...');
     startServer();
   } else {
     log(`Server already running on port ${config.port}`);

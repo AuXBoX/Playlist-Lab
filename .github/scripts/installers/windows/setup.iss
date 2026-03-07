@@ -51,7 +51,7 @@ Source: "{#MyAppSourceDir}\packages\shared\package.json"; DestDir: "{app}\packag
 Source: "{#SourcePath}\..\common\tray-app.js"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourcePath}\..\common\package.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourcePath}\..\common\server-launcher.js"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourcePath}\..\common\server-launcher.js"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\..\common\start-tray.vbs"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Startup manager
 Source: "{#SourcePath}\startup-manager.js"; DestDir: "{app}"; Flags: ignoreversion
@@ -67,7 +67,7 @@ Name: "startupmode\manual"; Description: "Manual start only"; GroupDescription: 
 Name: "launchnow"; Description: "Launch Playlist Lab Server now"; GroupDescription: "Additional Options:"
 
 [Icons]
-Name: "{group}\Playlist Lab Server"; Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\tray-app.js"""; WorkingDir: "{app}"; IconFilename: "{app}\server\dist\favicon.ico"
+Name: "{group}\Playlist Lab Server"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\start-tray.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\server\dist\favicon.ico"
 Name: "{group}\Open Playlist Lab"; Filename: "http://localhost:3001"
 Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Playlist Lab"; Filename: "http://localhost:3001"
@@ -78,7 +78,7 @@ Filename: "{app}\nodejs\npm.cmd"; Parameters: "install --production --no-optiona
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode autostart"; WorkingDir: "{app}"; StatusMsg: "Configuring startup..."; Flags: runhidden waituntilterminated; Tasks: startupmode\autostart
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode service"; WorkingDir: "{app}"; StatusMsg: "Configuring service..."; Flags: runhidden waituntilterminated; Tasks: startupmode\service
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode manual"; WorkingDir: "{app}"; StatusMsg: "Configuring manual start..."; Flags: runhidden waituntilterminated; Tasks: startupmode\manual
-Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\tray-app.js"""; WorkingDir: "{app}"; StatusMsg: "Starting Playlist Lab Server..."; Flags: runhidden nowait; Tasks: launchnow
+Filename: "{sys}\wscript.exe"; Parameters: """{app}\start-tray.vbs"""; WorkingDir: "{app}"; StatusMsg: "Starting Playlist Lab Server..."; Flags: nowait; Tasks: launchnow
 Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; Flags: shellexec postinstall skipifsilent nowait; Tasks: launchnow
 
 [UninstallRun]
