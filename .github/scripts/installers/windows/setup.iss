@@ -62,6 +62,7 @@ Name: "startupmode"; Description: "Choose how to start Playlist Lab Server:"; Gr
 Name: "startupmode\autostart"; Description: "Start automatically on login (recommended)"; GroupDescription: "Startup Configuration:"; Flags: exclusive
 Name: "startupmode\service"; Description: "Run as Windows service (always running)"; GroupDescription: "Startup Configuration:"; Flags: exclusive unchecked
 Name: "startupmode\manual"; Description: "Manual start only"; GroupDescription: "Startup Configuration:"; Flags: exclusive unchecked
+Name: "launchnow"; Description: "Launch Playlist Lab Server now"; GroupDescription: "Additional Options:"
 
 [Icons]
 Name: "{group}\Open Playlist Lab"; Filename: "http://localhost:3001"
@@ -71,10 +72,11 @@ Name: "{autodesktop}\Playlist Lab"; Filename: "http://localhost:3001"
 [Run]
 Filename: "{app}\nodejs\npm.cmd"; Parameters: "install --production --no-optional"; WorkingDir: "{app}\server"; StatusMsg: "Installing server dependencies..."; Flags: runhidden waituntilterminated
 Filename: "{app}\nodejs\npm.cmd"; Parameters: "install --production --no-optional"; WorkingDir: "{app}"; StatusMsg: "Installing tray app dependencies..."; Flags: runhidden waituntilterminated
-Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode autostart --start-now"; WorkingDir: "{app}"; StatusMsg: "Configuring startup and starting server..."; Flags: runhidden waituntilterminated; Tasks: startupmode\autostart
-Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode service --start-now"; WorkingDir: "{app}"; StatusMsg: "Configuring service and starting server..."; Flags: runhidden waituntilterminated; Tasks: startupmode\service
-Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode manual --start-now"; WorkingDir: "{app}"; StatusMsg: "Starting server..."; Flags: runhidden waituntilterminated; Tasks: startupmode\manual
-Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; Flags: shellexec postinstall skipifsilent nowait
+Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode autostart"; WorkingDir: "{app}"; StatusMsg: "Configuring startup..."; Flags: runhidden waituntilterminated; Tasks: startupmode\autostart
+Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode service"; WorkingDir: "{app}"; StatusMsg: "Configuring service..."; Flags: runhidden waituntilterminated; Tasks: startupmode\service
+Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode manual"; WorkingDir: "{app}"; StatusMsg: "Configuring manual start..."; Flags: runhidden waituntilterminated; Tasks: startupmode\manual
+Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\tray-app.js"""; WorkingDir: "{app}"; StatusMsg: "Starting Playlist Lab Server..."; Flags: runhidden nowait; Tasks: launchnow
+Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; Flags: shellexec postinstall skipifsilent nowait; Tasks: launchnow
 
 [UninstallRun]
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode remove"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated

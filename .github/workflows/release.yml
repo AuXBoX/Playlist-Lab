@@ -11,6 +11,11 @@ on:
         required: true
         default: '2.0.0'
 
+# Prevent multiple workflow runs for the same tag
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   packages: write
