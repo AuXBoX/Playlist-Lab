@@ -1380,7 +1380,7 @@ export const ImportPage: FC = () => {
               <li>Fill in the form:
                 <ul style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
                   <li>App name: <code style={{ backgroundColor: 'var(--surface)', padding: '0.125rem 0.25rem', borderRadius: '2px' }}>Playlist Lab</code></li>
-                  <li>Redirect URI: <code style={{ backgroundColor: 'var(--surface)', padding: '0.125rem 0.25rem', borderRadius: '2px', fontWeight: 'bold', color: 'var(--primary-color)' }}>http://127.0.0.1:3000/api/spotify/callback</code></li>
+                  <li>Redirect URI: <code style={{ backgroundColor: 'var(--surface)', padding: '0.125rem 0.25rem', borderRadius: '2px', fontWeight: 'bold', color: 'var(--primary-color)' }}>http://127.0.0.1:3001/api/spotify/callback</code></li>
                 </ul>
               </li>
               <li>Click <strong>"Save"</strong></li>
@@ -1397,7 +1397,7 @@ export const ImportPage: FC = () => {
               fontSize: '0.75rem',
               color: 'var(--text-secondary)',
             }}>
-              ⚠️ <strong>Important:</strong> The Redirect URI must be exactly <code style={{ backgroundColor: 'var(--surface)', padding: '0.125rem 0.25rem', borderRadius: '2px' }}>http://127.0.0.1:3000/api/spotify/callback</code> (not https, not localhost)
+              ⚠️ <strong>Important:</strong> The Redirect URI must be exactly <code style={{ backgroundColor: 'var(--surface)', padding: '0.125rem 0.25rem', borderRadius: '2px' }}>http://127.0.0.1:3001/api/spotify/callback</code> (not https, not localhost)
             </div>
           </div>
 
