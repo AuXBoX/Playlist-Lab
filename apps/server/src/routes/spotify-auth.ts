@@ -7,7 +7,7 @@ const router = Router();
 
 // Spotify OAuth configuration
 // Users provide their own Spotify app credentials through the UI
-const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:3000/api/spotify/callback';
+const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:3001/api/spotify/callback';
 
 // Encryption secret for Spotify tokens
 const ENCRYPTION_SECRET = process.env.SESSION_SECRET || 'default-secret-change-in-production';

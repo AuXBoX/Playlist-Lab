@@ -32,7 +32,9 @@ export const ProtectedRoute: FC<ProtectedRouteProps> = ({ children }) => {
 
   // Only redirect to settings if there is no server configured at all (first-time setup)
   // Don't redirect just because libraryId is missing — user may have a server without a library selected
-  const needsSetup = !server;
+  // Also don't redirect if we're still loading - wait for the data to confirm no server exists
+  // Check for server.url to ensure we have a valid server object (not just null/undefined)
+  const needsSetup = !isAppLoading && (!server || !server.url);
   const isOnSettingsPage = location.pathname === '/settings';
   
   if (needsSetup && !isOnSettingsPage) {

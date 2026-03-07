@@ -14,7 +14,7 @@ import { encrypt, decrypt } from '../utils/encryption';
 import { logger } from '../utils/logger';
 
 const ENCRYPTION_SECRET = process.env.SESSION_SECRET || 'default-secret-change-in-production';
-const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:3000/api/spotify/callback';
+const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:3001/api/spotify/callback';
 
 /** Compute a simple string-similarity confidence score (0–100) */
 function similarity(a: string, b: string): number {
