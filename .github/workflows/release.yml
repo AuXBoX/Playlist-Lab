@@ -104,7 +104,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: release/**/*
+          path: |
+            release/**/*.exe
+            release/**/*.dmg
+            release/**/*.pkg
+            release/**/*.deb
+            release/**/*.rpm
+            release/**/*.AppImage
           retention-days: 30
 
   # Build desktop app for all platforms
@@ -116,10 +122,13 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux
+            script: build:linux
           - os: macos-latest
             platform: mac
+            script: build:mac
           - os: windows-latest
             platform: win
+            script: build:win
     runs-on: ${{ matrix.os }}
     
     steps:
@@ -138,15 +147,19 @@ jobs:
       - name: Build desktop app
         run: |
           cd apps/desktop
-          npm install
-          npm run build
-          npm run package:${{ matrix.platform }}
+          npm ci --legacy-peer-deps
+          npm run ${{ matrix.script }}
       
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.platform }}
-          path: apps/desktop/release/**/*
+          path: |
+            scripts/release/*.exe
+            scripts/release/*.dmg
+            scripts/release/*.AppImage
+            scripts/release/*.deb
+            scripts/release/*.zip
           retention-days: 30
 
   build-mobile-android:
@@ -215,6 +228,7 @@ jobs:
             release-artifacts/**/*.deb
             release-artifacts/**/*.rpm
             release-artifacts/**/*.AppImage
+            release-artifacts/**/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
