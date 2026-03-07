@@ -22,6 +22,7 @@ else
 fi
 
 echo "Running Inno Setup..."
-"$INNO_SETUP" "$SCRIPT_DIR/setup.iss" "/O$BUILD_DIR"
+# Pass output directory as a separate quoted parameter
+"$INNO_SETUP" "$SCRIPT_DIR/setup.iss" /O"$BUILD_DIR"
 
 echo "Windows installer created in: $BUILD_DIR"
