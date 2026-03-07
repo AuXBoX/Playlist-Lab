@@ -1,6 +1,10 @@
 ; Inno Setup Script for Playlist Lab Server
 ; Web-based multi-user server (v2.0.0)
 
+#ifndef MyAppSourceDir
+  #define MyAppSourceDir "..\..\..\.."
+#endif
+
 #define MyAppName "Playlist Lab Server"
 #define MyAppVersion "2.0.0"
 #define MyAppPublisher "Playlist Lab"
@@ -28,24 +32,24 @@ ArchitecturesInstallIn64BitMode=x64
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-; Server files (paths relative to project root, passed via /D parameter)
-Source: "{#SourcePath}\..\..\..\apps\server\dist\*"; DestDir: "{app}\server\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SourcePath}\..\..\..\apps\server\package.json"; DestDir: "{app}\server"; Flags: ignoreversion
-Source: "{#SourcePath}\..\..\..\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+; Server files
+Source: "{#MyAppSourceDir}\apps\server\dist\*"; DestDir: "{app}\server\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\apps\server\package.json"; DestDir: "{app}\server"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 ; Web app files
-Source: "{#SourcePath}\..\..\..\apps\web\dist\*"; DestDir: "{app}\web\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\apps\web\dist\*"; DestDir: "{app}\web\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Shared package
-Source: "{#SourcePath}\..\..\..\packages\shared\dist\*"; DestDir: "{app}\packages\shared\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SourcePath}\..\..\..\packages\shared\package.json"; DestDir: "{app}\packages\shared"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\packages\shared\dist\*"; DestDir: "{app}\packages\shared\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\packages\shared\package.json"; DestDir: "{app}\packages\shared"; Flags: ignoreversion
 
 ; Tray app
 Source: "{#SourcePath}\..\common\tray-app.js"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourcePath}\..\common\package.json"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Configuration
-Source: "{#SourcePath}\..\..\..\apps\server\.env.example"; DestDir: "{app}\server"; DestName: ".env"; Flags: onlyifdoesntexist
+Source: "{#MyAppSourceDir}\apps\server\.env.example"; DestDir: "{app}\server"; DestName: ".env"; Flags: onlyifdoesntexist
 
 [Icons]
 Name: "{group}\Open Playlist Lab"; Filename: "http://localhost:3001"

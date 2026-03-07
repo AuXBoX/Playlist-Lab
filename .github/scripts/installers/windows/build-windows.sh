@@ -25,6 +25,7 @@ echo "Running Inno Setup..."
 # Convert paths to Windows format for Inno Setup
 SETUP_ISS=$(cygpath -w "$SCRIPT_DIR/setup.iss" 2>/dev/null || echo "$SCRIPT_DIR/setup.iss")
 WIN_BUILD_DIR=$(cygpath -w "$BUILD_DIR" 2>/dev/null || echo "$BUILD_DIR")
-"$INNO_SETUP" "$SETUP_ISS" /O"$WIN_BUILD_DIR"
+WIN_PROJECT_ROOT=$(cygpath -w "$PROJECT_ROOT" 2>/dev/null || echo "$PROJECT_ROOT")
+"$INNO_SETUP" "$SETUP_ISS" /O"$WIN_BUILD_DIR" /DMyAppSourceDir="$WIN_PROJECT_ROOT"
 
 echo "Windows installer created in: $BUILD_DIR"
