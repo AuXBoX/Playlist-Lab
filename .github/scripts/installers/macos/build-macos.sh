@@ -86,8 +86,27 @@ DMG_TEMP="$TEMP_DIR/dmg"
 mkdir -p "$DMG_TEMP"
 cp -R "$APP_BUNDLE" "$DMG_TEMP/"
 ln -s /Applications "$DMG_TEMP/Applications"
-hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_TEMP" -ov -format UDZO "$BUILD_DIR/$DMG_NAME"
-echo "✓ DMG created: $BUILD_DIR/$DMG_NAME"
+
+# Unmount any existing volumes with the same name
+hdiutil detach "/Volumes/$APP_NAME" 2>/dev/null || true
+
+# Remove any existing DMG file
+rm -f "$BUILD_DIR/$DMG_NAME"
+
+# Create DMG with retry logic
+for i in {1..3}; do
+    if hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_TEMP" -ov -format UDZO "$BUILD_DIR/$DMG_NAME" 2>/dev/null; then
+        echo "✓ DMG created: $BUILD_DIR/$DMG_NAME"
+        break
+    else
+        if [ $i -eq 3 ]; then
+            echo "Failed to create DMG after 3 attempts"
+            exit 1
+        fi
+        echo "Retrying DMG creation (attempt $((i+1))/3)..."
+        sleep 2
+    fi
+done
 
 # Create PKG
 PKG_ROOT="$TEMP_DIR/pkg-root"
