@@ -22,7 +22,9 @@ else
 fi
 
 echo "Running Inno Setup..."
-# Pass output directory as a separate quoted parameter
-"$INNO_SETUP" "$SCRIPT_DIR/setup.iss" /O"$BUILD_DIR"
+# Convert paths to Windows format for Inno Setup
+SETUP_ISS=$(cygpath -w "$SCRIPT_DIR/setup.iss" 2>/dev/null || echo "$SCRIPT_DIR/setup.iss")
+WIN_BUILD_DIR=$(cygpath -w "$BUILD_DIR" 2>/dev/null || echo "$BUILD_DIR")
+"$INNO_SETUP" "$SETUP_ISS" /O"$WIN_BUILD_DIR"
 
 echo "Windows installer created in: $BUILD_DIR"
