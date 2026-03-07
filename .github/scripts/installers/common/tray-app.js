@@ -109,10 +109,16 @@ function startServer() {
 
   serverProcess = spawn(launcher.cmd, launcher.args, {
     cwd: installDir,
-    detached: false,
+    detached: true,
     stdio: ['ignore', out, err],
     env: { ...process.env, PORT: String(config.port), INSTALL_DIR: installDir },
+    windowsHide: true,
   });
+
+  // Unref so tray can exit without killing server
+  if (serverProcess.unref) {
+    serverProcess.unref();
+  }
 
   serverProcess.on('exit', (code) => {
     log(`Server exited (code ${code})`);
