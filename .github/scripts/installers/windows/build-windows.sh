@@ -6,7 +6,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/release/windows"
-APP_VERSION="1.1.2"
+APP_VERSION="1.1.3"
 NODE_VERSION="20.11.0"
 
 mkdir -p "$BUILD_DIR"

@@ -51,7 +51,7 @@ This is a monorepo containing multiple applications:
 **Option 1: Windows Installer**
 ```cmd
 # Download and run the installer
-PlaylistLabServer-Setup-1.1.2.exe
+PlaylistLabServer-Setup-1.1.3.exe
 ```
 
 **Option 2: Docker (Recommended for Development)**
@@ -86,9 +86,9 @@ cd apps/server && npm start
 ### Desktop App
 
 Download the appropriate installer for your platform:
-- Windows: `PlaylistLab-Setup-1.1.2.exe`
-- macOS: `PlaylistLab-1.1.2.dmg`
-- Linux: `PlaylistLab-1.1.2.deb`
+- Windows: `PlaylistLab-Setup-1.1.3.exe`
+- macOS: `PlaylistLab-1.1.3.dmg`
+- Linux: `PlaylistLab-1.1.3.deb`
 
 ### Web App on Mobile
 

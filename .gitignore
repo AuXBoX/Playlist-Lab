@@ -69,6 +69,9 @@ scripts/cache/
 *.orig.*
 web-build/
 
+# Mobile app (deprecated - using responsive web app instead)
+apps/mobile/
+
 # IDE
 .vscode/
 .idea/

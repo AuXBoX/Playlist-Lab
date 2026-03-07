@@ -6,7 +6,7 @@ set -e
 echo "Building Playlist Lab Server for macOS..."
 
 APP_NAME="Playlist Lab Server"
-APP_VERSION="1.1.2"
+APP_VERSION="1.1.3"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/release/macos"

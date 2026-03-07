@@ -179,51 +179,10 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  build-mobile-android:
-    name: Build Android App
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
-        with:
-          expo-version: latest
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-      
-      - name: Install dependencies
-        run: |
-          cd apps/mobile
-          npm install
-      
-      - name: Build Android APK
-        run: |
-          cd apps/mobile
-          eas build --platform android --profile production --non-interactive --local --output=../../release-artifacts/mobile/PlaylistLab.apk
-        continue-on-error: true
-      
-      - name: Upload Android APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mobile-android
-          path: release-artifacts/mobile/*.apk
-          retention-days: 30
-
   # Create GitHub Release
   create-release:
     name: Create GitHub Release
-    needs: [build-server-installers, build-desktop-app, build-mobile-android]
+    needs: [build-server-installers, build-desktop-app]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     
@@ -260,7 +219,6 @@ jobs:
             release-artifacts/**/*.rpm
             release-artifacts/**/*.AppImage
             release-artifacts/**/*.zip
-            release-artifacts/**/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -1,0 +1,70 @@
+# Node modules
+node_modules
+**/node_modules
+npm-debug.log
+yarn-error.log
+
+# Build outputs
+dist
+build
+release
+.next
+out
+
+# Development files
+.git
+.gitignore
+.github
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Mobile app (deprecated)
+apps/mobile
+
+# Desktop app
+apps/desktop
+
+# Web app (not needed for server Docker image)
+apps/web
+
+# Test files
+**/*.test.ts
+**/*.test.js
+**/*.spec.ts
+**/*.spec.js
+tests
+coverage
+.nyc_output
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Scripts
+scripts
+
+# Deployment
+deployment
+
+# Docker files
+docker
+Dockerfile
+docker-compose.yml
+.dockerignore
