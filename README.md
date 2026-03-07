@@ -1,7 +1,5 @@
 ## Playlist Lab
 
-<!-- Version 1.1.2 - Cross-platform server with system tray support -->
-
 A comprehensive music playlist management system with Plex Media Server integration. Import playlists from multiple sources, generate smart mixes, and sync them to your Plex server.
 
 ## Features
@@ -106,10 +104,6 @@ The web app works perfectly on mobile devices:
 2. Tap menu → "Install app"
 3. App icon appears in app drawer
 
-See [docs/RESPONSIVE_WEB_APP.md](docs/RESPONSIVE_WEB_APP.md) for details.
-
-## Development
-
 ### Prerequisites
 - Node.js 18+
 - npm or yarn
@@ -131,25 +125,6 @@ cd packages/shared && npm run build && cd ../..
 npm run dev:server  # Server on port 3001
 npm run dev:web     # Web app on port 5173
 npm run dev:mobile  # Mobile app with Expo
-```
-
-### Git Operations
-Use the GitHub Manager for easy Git operations:
-```cmd
-scripts\github-manager.bat
-```
-
-See [GitHub Manager Guide](docs/GITHUB_MANAGER_GUIDE.md) for details.
-
-### Building
-
-**Build Everything**
-```bash
-# Windows
-scripts\build-all-installers.bat
-
-# macOS/Linux
-bash scripts/build-all-installers.sh
 ```
 
 ## Technology Stack
@@ -192,5 +167,5 @@ See LICENSE file for details.
 
 ## 📧 Support
 
-- Issues: [GitHub Issues](https://github.com/yourusername/playlist-lab/issues)
+- Issues: [GitHub Issues](https://github.com/AuXBoX/playlist-lab/issues)
 
