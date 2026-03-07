@@ -4,7 +4,7 @@
 
 A comprehensive music playlist management system with Plex Media Server integration. Import playlists from multiple sources, generate smart mixes, and sync them to your Plex server.
 
-## 🎵 Features
+## Features
 
 - **Multi-Source Import**: Import playlists from Spotify, Apple Music, YouTube, and more
 - **Smart Playlist Generation**: Create dynamic playlists based on genres, moods, and listening patterns
@@ -14,7 +14,7 @@ A comprehensive music playlist management system with Plex Media Server integrat
 - **Missing Track Detection**: Identify and track songs not available in your library
 - **Cross-Platform**: Available as web app, desktop app, and mobile app
 
-## 📦 Applications
+## Applications
 
 This is a monorepo containing multiple applications:
 
@@ -42,11 +42,11 @@ This is a monorepo containing multiple applications:
 
 ### Mobile App (Deprecated)
 - **Location**: `apps/mobile/`
-- **Status**: ⚠️ DEPRECATED - Use responsive web app instead
+- **Status**: DEPRECATED - Use responsive web app instead
 - **Reason**: Web app now works perfectly on mobile devices
 - **See**: [apps/mobile/DEPRECATED.md](apps/mobile/DEPRECATED.md)
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Server Installation
 
@@ -108,7 +108,7 @@ The web app works perfectly on mobile devices:
 
 See [docs/RESPONSIVE_WEB_APP.md](docs/RESPONSIVE_WEB_APP.md) for details.
 
-## 🛠️ Development
+## Development
 
 ### Prerequisites
 - Node.js 18+
@@ -139,13 +139,6 @@ Use the GitHub Manager for easy Git operations:
 scripts\github-manager.bat
 ```
 
-Features:
-- ✅ Automatic requirement checks
-- ✅ 28 Git operations with easy menu
-- ✅ Color-coded interface
-- ✅ Safety confirmations for dangerous operations
-- ✅ One-click release tagging (triggers CI/CD)
-
 See [GitHub Manager Guide](docs/GITHUB_MANAGER_GUIDE.md) for details.
 
 ### Building
@@ -174,49 +167,7 @@ cd apps/desktop && npm run build
 cd apps/mobile && eas build --platform ios
 ```
 
-## 📖 Documentation
-
-**Complete Index**: [docs/INDEX.md](docs/INDEX.md)
-
-### User Documentation
-- [User Guide](docs/USER_GUIDE.md) - How to use Playlist Lab
-- [Windows Installer Guide](docs/WINDOWS_INSTALLER_GUIDE.md) - Windows installation details
-- [macOS Installer Guide](docs/MACOS_INSTALLER_GUIDE.md) - macOS installation details
-- [Linux Installer Guide](docs/LINUX_INSTALLER_GUIDE.md) - Linux installation details
-
-### Developer Documentation
-- [Developer Guide](docs/DEVELOPER_GUIDE.md) - Development setup and guidelines
-- [API Documentation](docs/API.md) - REST API reference
-- [Project Structure](docs/PROJECT_STRUCTURE.md) - Codebase organization
-- [Web vs Mobile Comparison](docs/WEB_MOBILE_COMPARISON.md) - Platform differences
-
-### Deployment & CI/CD
-- [Deployment Guide](docs/DEPLOYMENT_ANYWHERE.md) - Deploy to VPS, cloud, or local network
-- [Docker Setup](docs/DOCKER_SETUP.md) - Docker configuration and deployment
-- [CI/CD Setup](docs/CI_CD_SETUP.md) - Automated builds with GitHub Actions
-- [GitHub Actions Setup](docs/GITHUB_ACTIONS_SETUP.md) - Detailed CI/CD configuration
-
-### Tools & Utilities
-- [GitHub Manager Guide](docs/GITHUB_MANAGER_GUIDE.md) - Git operations made easy
-- [Build Scripts](scripts/README.md) - Build and installer scripts
-
-## 🏗️ Architecture
-
-```
-playlist-lab/
-├── apps/
-│   ├── desktop/          # Electron desktop app
-│   ├── mobile/           # React Native mobile app
-│   ├── server/           # Express.js API server
-│   └── web/              # React web app
-├── packages/
-│   └── shared/           # Shared TypeScript code
-├── scripts/              # Build and deployment scripts
-├── docs/                 # Documentation
-└── deployment/           # Deployment configurations
-```
-
-## 🔧 Technology Stack
+## Technology Stack
 
 - **Backend**: Node.js, Express.js, SQLite, TypeScript
 - **Frontend**: React, TypeScript, Vite
@@ -224,22 +175,6 @@ playlist-lab/
 - **Desktop**: Electron
 - **Testing**: Jest, fast-check (property-based testing)
 - **Build**: TypeScript, Vite, Electron Builder, EAS Build
-
-## 📝 Version History
-
-### Version 1.1.2 (Current)
-- Improved cross-platform installer support
-- System tray integration with systray2
-- Enhanced Windows/macOS/Linux installers
-- GitHub Actions CI/CD automation
-- Docker deployment support
-- Bug fixes and stability improvements
-
-### Previous Versions
-- **1.1.x**: Desktop app improvements, multi-user support
-- **1.0.x**: Initial release with Plex integration
-
-## ⚠️ Important Notes
 
 ### Server Installers
 The Windows/macOS/Linux server installers include a system tray application for easy server management. The server runs as a background service and is accessed via web browser at `http://localhost:3001`.
@@ -261,15 +196,11 @@ The Windows/macOS/Linux server installers include a system tray application for 
 
 **Access**: After installation, open your browser to `http://localhost:3001` or use the tray app to open the interface.
 
-## 🤝 Contributing
-
-Contributions are welcome! Please read the [Developer Guide](docs/DEVELOPER_GUIDE.md) for guidelines.
-
-## 📄 License
+## License
 
 See LICENSE file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Plex Media Server for the excellent media platform
 - All the open-source libraries that make this possible
@@ -277,9 +208,4 @@ See LICENSE file for details.
 ## 📧 Support
 
 - Issues: [GitHub Issues](https://github.com/yourusername/playlist-lab/issues)
-- Documentation: [docs/](docs/)
-- Email: audexa@users.noreply.github.com
 
----
-
-Made with ❤️ by Audexa
