@@ -239,6 +239,11 @@ jobs:
       - name: Display structure
         run: ls -R release-artifacts
       
+      - name: Remove intermediate files
+        run: |
+          find release-artifacts -name "elevate.exe" -type f -delete || true
+          echo "Cleaned up intermediate build files"
+      
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:

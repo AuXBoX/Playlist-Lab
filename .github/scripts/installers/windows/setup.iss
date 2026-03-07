@@ -50,6 +50,8 @@ Source: "{#MyAppSourceDir}\packages\shared\package.json"; DestDir: "{app}\packag
 ; Tray app
 Source: "{#SourcePath}\..\common\tray-app.js"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourcePath}\..\common\package.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\..\common\server-launcher.js"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\..\common\server-launcher.js"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Startup manager
 Source: "{#SourcePath}\startup-manager.js"; DestDir: "{app}"; Flags: ignoreversion
@@ -75,8 +77,8 @@ Filename: "{app}\nodejs\npm.cmd"; Parameters: "install --production --no-optiona
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode autostart"; WorkingDir: "{app}"; StatusMsg: "Configuring startup..."; Flags: runhidden waituntilterminated; Tasks: startupmode\autostart
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode service"; WorkingDir: "{app}"; StatusMsg: "Configuring service..."; Flags: runhidden waituntilterminated; Tasks: startupmode\service
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode manual"; WorkingDir: "{app}"; StatusMsg: "Configuring manual start..."; Flags: runhidden waituntilterminated; Tasks: startupmode\manual
-Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\tray-app.js"""; WorkingDir: "{app}"; StatusMsg: "Starting Playlist Lab Server..."; Flags: runhidden nowait; Tasks: launchnow
-Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; Flags: shellexec postinstall skipifsilent nowait; Tasks: launchnow
+Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\tray-app.js"""; WorkingDir: "{app}"; StatusMsg: "Starting Playlist Lab Server..."; Flags: nowait; Tasks: launchnow
+Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; Flags: shellexec postinstall skipifsilent nowait waituntilidle; Tasks: launchnow; BeforeInstall: Sleep(3000)
 
 [UninstallRun]
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode remove"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
