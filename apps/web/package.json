@@ -1,6 +1,6 @@
 {
   "name": "@playlist-lab/web",
-  "version": "2.0.0",
+  "version": "1.1.2",
   "description": "Playlist Lab Web Client",
   "type": "module",
   "scripts": {

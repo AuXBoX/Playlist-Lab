@@ -1,6 +1,6 @@
 {
   "name": "@playlist-lab/mobile",
-  "version": "2.0.0",
+  "version": "1.1.2",
   "description": "Playlist Lab Mobile App (iOS & Android)",
   "main": "expo/AppEntry.js",
   "scripts": {
