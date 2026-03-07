@@ -1,4 +1,4 @@
-p# Playlist Lab
+## Playlist Lab
 
 <!-- Version 1.1.2 - Cross-platform server with system tray support -->
 
