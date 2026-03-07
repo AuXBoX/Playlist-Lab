@@ -49,7 +49,7 @@ Source: "{#SourcePath}\..\common\tray-app.js"; DestDir: "{app}"; Flags: ignoreve
 Source: "{#SourcePath}\..\common\package.json"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Startup manager
-Source: "{#MyAppSourceDir}\scripts\installers\windows\startup-manager.js"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\startup-manager.js"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Configuration
 Source: "{#MyAppSourceDir}\apps\server\.env.example"; DestDir: "{app}\server"; DestName: ".env"; Flags: onlyifdoesntexist
