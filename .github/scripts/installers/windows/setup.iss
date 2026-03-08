@@ -49,15 +49,24 @@ Source: "{#MyAppSourceDir}\packages\shared\package.json"; DestDir: "{app}\packag
 
 ; Tray app
 Source: "{#SourcePath}\..\common\tray-app.js"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\..\common\auto-updater.js"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourcePath}\..\common\package.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourcePath}\..\common\server-launcher.js"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourcePath}\..\common\start-tray.vbs"; DestDir: "{app}"; Flags: ignoreversion
 
+; Tray icons
+Source: "{#SourcePath}\..\common\icons\*.png"; DestDir: "{app}\icons"; Flags: ignoreversion
+
 ; Startup manager
 Source: "{#SourcePath}\startup-manager.js"; DestDir: "{app}"; Flags: ignoreversion
 
-; Configuration
-Source: "{#MyAppSourceDir}\apps\server\.env.example"; DestDir: "{app}\server"; DestName: ".env"; Flags: onlyifdoesntexist
+; Configuration (use persistent location in user's AppData)
+Source: "{#MyAppSourceDir}\apps\server\.env.example"; DestDir: "{userappdata}\Playlist Lab"; DestName: ".env"; Flags: onlyifdoesntexist uninsneveruninstall
+
+[Dirs]
+; Create persistent data directory in user's AppData (never deleted on uninstall)
+Name: "{userappdata}\Playlist Lab\data"; Flags: uninsneveruninstall
+Name: "{userappdata}\Playlist Lab\logs"; Flags: uninsneveruninstall
 
 [Tasks]
 Name: "startupmode"; Description: "Choose how to start Playlist Lab Server:"; GroupDescription: "Startup Configuration:"; Flags: exclusive

@@ -12,10 +12,11 @@ fi
 
 export NODE_ENV=production
 export PORT=$PORT
-export DATA_DIR="$HOME/.local/share/PlaylistLabServer"
-export DB_PATH="$DATA_DIR/playlist-lab.db"
+export DATA_DIR="$HOME/.local/share/Playlist Lab"
+export DB_PATH="$DATA_DIR/data/playlist-lab.db"
 export WEB_APP_PATH="$SCRIPT_DIR/web/dist"
 
+mkdir -p "$DATA_DIR/data"
 mkdir -p "$DATA_DIR/logs"
 
 cd "$SCRIPT_DIR/server"

@@ -25,10 +25,10 @@ const installDir = process.env.INSTALL_DIR || path.resolve(__dirname);
 const configPath = path.join(installDir, 'tray-config.json');
 
 const dataDir = isWindows
-  ? path.join(process.env.APPDATA || os.homedir(), 'PlaylistLabServer')
+  ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Playlist Lab')
   : isMac
-    ? path.join(os.homedir(), 'Library', 'Application Support', 'PlaylistLabServer')
-    : path.join(os.homedir(), '.local', 'share', 'PlaylistLabServer');
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'Playlist Lab')
+    : path.join(os.homedir(), '.local', 'share', 'Playlist Lab');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 

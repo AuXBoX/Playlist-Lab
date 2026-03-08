@@ -37,12 +37,22 @@ console.log(`Starting Playlist Lab Server on port ${port}...`);
 console.log(`Node: ${nodePath}`);
 console.log(`Server: ${serverMain}`);
 
-// Create log directory
+// Create persistent data directory in user's AppData
 const dataDir = process.platform === 'win32'
-  ? path.join(process.env.APPDATA || require('os').homedir(), 'PlaylistLabServer')
-  : path.join(require('os').homedir(), '.local', 'share', 'PlaylistLabServer');
+  ? path.join(process.env.APPDATA || path.join(require('os').homedir(), 'AppData', 'Roaming'), 'Playlist Lab')
+  : process.platform === 'darwin'
+    ? path.join(require('os').homedir(), 'Library', 'Application Support', 'Playlist Lab')
+    : path.join(require('os').homedir(), '.local', 'share', 'Playlist Lab');
 
-require('fs').mkdirSync(dataDir, { recursive: true });
+const logsDir = path.join(dataDir, 'logs');
+const dbPath = path.join(dataDir, 'data', 'playlist-lab.db');
+
+// Ensure directories exist
+require('fs').mkdirSync(path.join(dataDir, 'data'), { recursive: true });
+require('fs').mkdirSync(logsDir, { recursive: true });
+
+console.log(`Data directory: ${dataDir}`);
+console.log(`Database: ${dbPath}`);
 
 const server = spawn(nodePath, [serverMain], {
   cwd: serverDir,
@@ -53,6 +63,8 @@ const server = spawn(nodePath, [serverMain], {
     PORT: port,
     NODE_ENV: 'production',
     INSTALL_DIR: installDir,
+    DATABASE_PATH: dbPath,
+    LOG_DIR: logsDir,
   },
   windowsHide: true, // Hide console window on Windows
 });

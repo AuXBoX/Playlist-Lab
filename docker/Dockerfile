@@ -3,22 +3,32 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy source code first (needed for TypeScript project references)
-COPY packages/shared ./packages/shared
-COPY apps/server ./apps/server
+# Copy tsconfig files needed for build
+COPY tsconfig.base.json ./tsconfig.base.json
+
+# Copy package.json files first for better caching
+COPY packages/shared/package*.json ./packages/shared/
+COPY apps/server/package*.json ./apps/server/
 
 # Install dependencies for shared package
 WORKDIR /app/packages/shared
 RUN npm ci --legacy-peer-deps
 
-# Build shared package
-RUN npm run build
-
 # Install dependencies for server
 WORKDIR /app/apps/server
 RUN npm ci --legacy-peer-deps
 
+# Copy source code
+WORKDIR /app
+COPY packages/shared ./packages/shared
+COPY apps/server ./apps/server
+
+# Build shared package
+WORKDIR /app/packages/shared
+RUN npm run build
+
 # Build server
+WORKDIR /app/apps/server
 RUN npm run build
 
 # Production stage
