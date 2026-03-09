@@ -10,7 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 # Read version from package.json
-APP_VERSION=$(node -p "require('$PROJECT_ROOT/apps/server/package.json').version")
+# Use Node.js to read the file with proper path handling
+APP_VERSION=$(node -e "const fs = require('fs'); const path = require('path'); const pkg = JSON.parse(fs.readFileSync(path.join('$PROJECT_ROOT', 'apps', 'server', 'package.json'), 'utf8')); console.log(pkg.version);")
 
 BUILD_DIR="$PROJECT_ROOT/release/macos"
 TEMP_DIR="/tmp/macos-build"

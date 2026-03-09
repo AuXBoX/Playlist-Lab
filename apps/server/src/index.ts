@@ -40,8 +40,9 @@ import './adapters'; // Register all source/target adapters
 // Load environment variables
 dotenv.config();
 
-// Read version from package.json (using CommonJS __dirname)
-const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+// Read version from package.json
+const packageJsonPath = path.join(__dirname, '..', 'package.json');
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 const APP_VERSION = packageJson.version;
 
 const app = express();

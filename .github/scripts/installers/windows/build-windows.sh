@@ -8,7 +8,21 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/release/windows"
 
 # Read version from package.json
-APP_VERSION=$(node -p "require('$PROJECT_ROOT/apps/server/package.json').version")
+# Use Node.js to read the file with proper path handling
+APP_VERSION=$(node -e "const fs = require('fs'); const path = require('path'); const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'apps', 'server', 'package.json'), 'utf8')); console.log(pkg.version);" 2>&1)
+
+# Fallback: try reading from relative path if above fails
+if [ -z "$APP_VERSION" ] || [ "$APP_VERSION" = "undefined" ]; then
+    APP_VERSION=$(node -e "const fs = require('fs'); const pkg = JSON.parse(fs.readFileSync('./apps/server/package.json', 'utf8')); console.log(pkg.version);" 2>&1)
+fi
+
+# Final fallback: use default version
+if [ -z "$APP_VERSION" ] || [ "$APP_VERSION" = "undefined" ]; then
+    echo "Warning: Could not read version from package.json, using default"
+    APP_VERSION="1.1.5"
+fi
+
+echo "Building version: $APP_VERSION"
 
 NODE_VERSION="20.11.0"
 
