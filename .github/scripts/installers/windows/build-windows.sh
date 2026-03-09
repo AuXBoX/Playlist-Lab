@@ -71,8 +71,8 @@ echo "Build dir: $WIN_BUILD_DIR"
 echo "Project root: $WIN_PROJECT_ROOT"
 echo "Version: $APP_VERSION"
 
-# Call Inno Setup with properly formatted parameters
-# Inno Setup expects: /O"path" /Dname=value (no spaces after /O or /D)
-"$INNO_SETUP" "$SETUP_ISS" "/O$WIN_BUILD_DIR" "/DMyAppSourceDir=$WIN_PROJECT_ROOT" "/DMyAppVersion=$APP_VERSION"
+# Call Inno Setup with direct parameters (no response file)
+# The key is to NOT quote the /O and /D parameters themselves
+"$INNO_SETUP" "$SETUP_ISS" /O"$WIN_BUILD_DIR" /DMyAppSourceDir="$WIN_PROJECT_ROOT" /DMyAppVersion="$APP_VERSION"
 
 echo "Windows installer created in: $BUILD_DIR"
