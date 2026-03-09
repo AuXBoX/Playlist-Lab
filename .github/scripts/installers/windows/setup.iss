@@ -1,12 +1,12 @@
 ; Inno Setup Script for Playlist Lab Server
-; Web-based multi-user server (v1.1.3)
+; Web-based multi-user server (v1.1.4)
 
 #ifndef MyAppSourceDir
   #define MyAppSourceDir "..\..\..\.."
 #endif
 
 #define MyAppName "Playlist Lab Server"
-#define MyAppVersion "1.1.3"
+#define MyAppVersion "1.1.4"
 #define MyAppPublisher "Playlist Lab"
 #define MyAppURL "https://github.com/AuXBoX/Playlist-Lab"
 

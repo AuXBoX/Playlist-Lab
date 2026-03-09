@@ -1,6 +1,6 @@
 {
   "name": "@playlist-lab/shared",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "Shared types and utilities for Playlist Lab",
   "type": "module",
   "main": "dist/index.js",

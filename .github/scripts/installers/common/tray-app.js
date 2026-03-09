@@ -384,7 +384,7 @@ function startTray(SysTray) {
   let isDownloadingUpdate = false;
   
   const updater = new AutoUpdater({
-    currentVersion: '1.1.3',
+    currentVersion: '1.1.4',
     installDir,
     onUpdateAvailable: (info) => {
       log(`Update available: ${info.version}`);

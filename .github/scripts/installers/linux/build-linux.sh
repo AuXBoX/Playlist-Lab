@@ -8,7 +8,7 @@ echo "Building Playlist Lab Server for Linux..."
 
 # Configuration
 APP_NAME="playlist-lab-server"
-APP_VERSION="1.1.3"
+APP_VERSION="1.1.4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/release/linux"
