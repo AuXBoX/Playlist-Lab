@@ -350,17 +350,27 @@ function getIconPath(color) {
   // Fallback: generate simple colored icon in temp directory
   const tmpDir = os.tmpdir();
   const file = path.join(tmpDir, `pl-icon-${color}.png`);
-  if (!fs.existsSync(file)) {
-    let r, g, b;
-    if (color === 'green') { r = 34; g = 197; b = 94; }
-    else { r = 239; g = 68; b = 68; } // red
-    try {
-      fs.writeFileSync(file, buildSolidPng(r, g, b));
-      log(`Generated fallback icon: ${file}`);
-    } catch (err) {
-      log(`Failed to generate icon: ${err.message}`);
+  
+  // Always regenerate to ensure it exists and is valid
+  let r, g, b;
+  if (color === 'green') { r = 34; g = 197; b = 94; }
+  else { r = 239; g = 68; b = 68; } // red
+  try {
+    const pngData = buildSolidPng(r, g, b);
+    fs.writeFileSync(file, pngData);
+    log(`Generated fallback icon: ${file} (${pngData.length} bytes)`);
+    
+    // Verify the file was written
+    if (fs.existsSync(file)) {
+      const stats = fs.statSync(file);
+      log(`Icon file verified: ${stats.size} bytes`);
+    } else {
+      log(`ERROR: Icon file not found after write: ${file}`);
     }
+  } catch (err) {
+    log(`Failed to generate icon: ${err.message}`);
   }
+  
   return file;
 }
 
@@ -387,8 +397,10 @@ function tryLoadSystray() {
 }
 
 function startTray(SysTray) {
+  log('Generating tray icons...');
   const iconGreen = getIconPath('green');
   const iconRed = getIconPath('red');
+  log(`Icon paths: green=${iconGreen}, red=${iconRed}`);
 
   // Initialize auto-updater
   let updateInfo = null;
@@ -581,6 +593,9 @@ function startTray(SysTray) {
       const tooltip = running
         ? `Playlist Lab - Running on port ${config.port}`
         : `Playlist Lab - Stopped`;
+      
+      log(`Tray refresh: server ${running ? 'running' : 'stopped'}, icon: ${running ? iconGreen : iconRed}`);
+      
       try {
         tray.sendAction({
           type: 'update-menu',
@@ -591,13 +606,16 @@ function startTray(SysTray) {
             items: buildItems(running),
           },
         });
-      } catch (_) {}
+      } catch (err) {
+        log(`Failed to update tray: ${err.message}`);
+      }
     });
   }
 
   // Poll every 10s
   setInterval(() => refreshTray(), 10000);
-  setTimeout(() => refreshTray(), 2000);
+  // Initial refresh after 500ms (faster than before)
+  setTimeout(() => refreshTray(), 500);
 
   log('Tray started');
 }

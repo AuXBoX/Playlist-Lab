@@ -28,6 +28,18 @@ export const SchedulesPage: FC = () => {
   }, [showCreateForm, formData.scheduleType]);
 
   const loadPlaylists = async () => {
+    setIsLoadingPlaylists(true);
+    try {
+      const response = await apiClient.getPlaylists();
+      setPlaylists(response.playlists || []);
+    } catch (err) {
+      console.error('Failed to load playlists:', err);
+    } finally {
+      setIsLoadingPlaylists(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setIsSaving(true);
@@ -44,11 +56,13 @@ export const SchedulesPage: FC = () => {
         });
         await apiClient.updateSchedule(editingSchedule.id, {
           ...formData,
+          playlistId: formData.playlistId ? parseInt(formData.playlistId) : undefined,
           config: { ...(formData.config as any), run_time: formData.runTime || undefined },
         });
       } else {
         await apiClient.createSchedule({
           ...formData,
+          playlistId: formData.playlistId ? parseInt(formData.playlistId) : undefined,
           config: { ...(formData.config as any), run_time: formData.runTime || undefined },
         } as any);
       }
@@ -64,18 +78,6 @@ export const SchedulesPage: FC = () => {
     }
   };
 
-  const loadPlaylists = async () => {
-    setIsLoadingPlaylists(true);
-    try {
-      const response = await apiClient.getPlaylists();
-      setPlaylists(response.playlists || []);
-    } catch (err) {
-      console.error('Failed to load playlists:', err);
-    } finally {
-      setIsLoadingPlaylists(false);
-    }
-  };
-
   const handleEdit = (schedule: Schedule) => {
     console.log('Editing schedule:', schedule);
     console.log('Schedule startDate:', schedule.startDate);
@@ -85,6 +87,7 @@ export const SchedulesPage: FC = () => {
       frequency: schedule.frequency,
       startDate: schedule.startDate,
       runTime: schedule.config?.run_time || '',
+      playlistId: schedule.playlistId ? String(schedule.playlistId) : '',
       config: schedule.config || {},
     });
     console.log('FormData after setting:', {
