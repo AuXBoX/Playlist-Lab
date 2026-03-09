@@ -9,7 +9,6 @@ import session from 'express-session';
 import path from 'path';
 import https from 'https';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import { logger } from './utils/logger';
 import { sessionStore } from './middleware/session-store';
 import { errorHandler } from './middleware/error-handler';
@@ -18,13 +17,6 @@ import { DatabaseService, getDatabase } from './database';
 import { JobScheduler } from './services/jobs';
 import { runDailyScraperJob } from './services/scraper-job';
 import { runScheduleCheckerJob } from './services/schedule-checker-job';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Read version from package.json
-const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf-8'));
-const APP_VERSION = packageJson.version;
 import { runCacheCleanupJob } from './services/cache-cleanup-job';
 import authRoutes from './routes/auth';
 import serversRoutes from './routes/servers';
@@ -48,11 +40,8 @@ import './adapters'; // Register all source/target adapters
 // Load environment variables
 dotenv.config();
 
-// Read version from package.json
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const packageJsonPath = path.join(__dirname, '..', 'package.json');
-const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+// Read version from package.json (using CommonJS __dirname)
+const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
 const APP_VERSION = packageJson.version;
 
 const app = express();
