@@ -382,7 +382,7 @@ describe('Scrapers Service', () => {
   });
 
   describe('parseM3UFile', () => {
-    it('should parse M3U file with EXTINF tags', () => {
+    it('should parse M3U file with EXTINF tags (standard format)', () => {
       const content = `#EXTM3U
 #EXTINF:180,Artist 1 - Track 1
 /path/to/track1.mp3
@@ -401,6 +401,32 @@ describe('Scrapers Service', () => {
       expect(result.tracks[1]).toEqual({
         title: 'Track 2',
         artist: 'Artist 2',
+      });
+    });
+
+    it('should parse M3U file with Apple Music format (Title - Artist)', () => {
+      const content = `#EXTM3U
+#EXTINF:232,Happy (From "Despicable Me 2") - Pharrell Williams
+/path/to/track1.m4a
+#EXTINF:215,Cool Kids (Radio Edit) - Echosmith
+/path/to/track2.m4a
+#EXTINF:180,Shake It Off - Taylor Swift
+/path/to/track3.m4a`;
+
+      const result = parseM3UFile(content, 'apple-playlist.m3u');
+
+      expect(result.tracks).toHaveLength(3);
+      expect(result.tracks[0]).toEqual({
+        title: 'Happy (From "Despicable Me 2")',
+        artist: 'Pharrell Williams',
+      });
+      expect(result.tracks[1]).toEqual({
+        title: 'Cool Kids (Radio Edit)',
+        artist: 'Echosmith',
+      });
+      expect(result.tracks[2]).toEqual({
+        title: 'Shake It Off',
+        artist: 'Taylor Swift',
       });
     });
 
@@ -456,16 +482,32 @@ Artist 2 - Track 2.mp3`;
       expect(result.tracks[0].title).toBe('Track 1');
     });
 
-    it('should handle file paths with multiple separators', () => {
+    it('should handle file paths with multiple separators using lastIndexOf', () => {
       const content = `#EXTM3U
-#EXTINF:180,Artist - With - Dashes - Track - Title
+#EXTINF:180,Artist - With - Dashes - Track - Title - With - More
 /path/to/track.mp3`;
 
       const result = parseM3UFile(content, 'test.m3u');
 
       expect(result.tracks[0]).toEqual({
-        title: 'With - Dashes - Track - Title',
-        artist: 'Artist',
+        title: 'Track - Title - With - More',
+        artist: 'Artist - With - Dashes',
+      });
+    });
+
+    it('should detect mixed format and default to standard when ambiguous', () => {
+      const content = `#EXTM3U
+#EXTINF:180,Some Artist - Some Track
+/path/to/track1.mp3
+#EXTINF:200,Another Artist - Another Track
+/path/to/track2.mp3`;
+
+      const result = parseM3UFile(content, 'test.m3u');
+
+      // Should use standard format (Artist - Title) when detection is ambiguous
+      expect(result.tracks[0]).toEqual({
+        title: 'Some Track',
+        artist: 'Some Artist',
       });
     });
   });

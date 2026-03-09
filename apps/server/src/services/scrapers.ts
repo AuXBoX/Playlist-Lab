@@ -930,6 +930,34 @@ export function parseM3UFile(content: string, fileName: string): ExternalPlaylis
   let currentTitle = '';
   let currentArtist = '';
   
+  // Detect format by analyzing first few EXTINF lines
+  // Apple Music/iTunes uses "Title - Artist", most others use "Artist - Title"
+  let useAppleFormat = false;
+  const sampleLines = lines.slice(0, 20).filter(l => l.trim().startsWith('#EXTINF:'));
+  if (sampleLines.length >= 3) {
+    // Heuristic: if the part after " - " looks like a single artist name (no special chars like parentheses),
+    // it's likely Apple format (Title - Artist)
+    let appleFormatCount = 0;
+    for (const sample of sampleLines.slice(0, Math.min(5, sampleLines.length))) {
+      const match = sample.match(/#EXTINF:[^,]*,(.+)/);
+      if (match) {
+        const info = match[1].trim();
+        const dashIndex = info.lastIndexOf(' - ');
+        if (dashIndex > 0) {
+          const beforeDash = info.substring(0, dashIndex).trim();
+          const afterDash = info.substring(dashIndex + 3).trim();
+          // If after dash has no parentheses/brackets and is relatively short, likely artist name
+          // Also check if before dash has parentheses (common in song titles)
+          if (!/[(\[{]/.test(afterDash) && afterDash.length < 50 && /[(\[{]/.test(beforeDash)) {
+            appleFormatCount++;
+          }
+        }
+      }
+    }
+    useAppleFormat = appleFormatCount >= Math.ceil(sampleLines.slice(0, Math.min(5, sampleLines.length)).length / 2);
+    debugLog(`[parseM3UFile] Detected format: ${useAppleFormat ? 'Apple (Title - Artist)' : 'Standard (Artist - Title)'}`);
+  }
+  
   for (const line of lines) {
     const trimmed = line.trim();
     
@@ -938,17 +966,27 @@ export function parseM3UFile(content: string, fileName: string): ExternalPlaylis
       continue;
     }
     
-    // Parse EXTINF line: #EXTINF:duration,Artist - Title
+    // Parse EXTINF line: #EXTINF:duration,Artist - Title or #EXTINF:duration,Title - Artist
     if (trimmed.startsWith('#EXTINF')) {
       const match = trimmed.match(/#EXTINF:[^,]*,(.+)/);
       if (match) {
         const info = match[1].trim();
         
-        // Try to split by " - " to get artist and title
-        const parts = info.split(' - ');
-        if (parts.length >= 2) {
-          currentArtist = parts[0].trim();
-          currentTitle = parts.slice(1).join(' - ').trim();
+        // Use lastIndexOf to handle titles with multiple dashes
+        const dashIndex = info.lastIndexOf(' - ');
+        if (dashIndex > 0) {
+          const part1 = info.substring(0, dashIndex).trim();
+          const part2 = info.substring(dashIndex + 3).trim();
+          
+          if (useAppleFormat) {
+            // Apple format: Title - Artist
+            currentTitle = part1;
+            currentArtist = part2;
+          } else {
+            // Standard format: Artist - Title
+            currentArtist = part1;
+            currentTitle = part2;
+          }
         } else {
           // If no " - " separator, use the whole string as title
           currentTitle = info;
@@ -970,13 +1008,25 @@ export function parseM3UFile(content: string, fileName: string): ExternalPlaylis
         const filename = trimmed.split(/[/\\]/).pop() || '';
         const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
         
-        // Try to parse "Artist - Title" format
-        const parts = nameWithoutExt.split(' - ');
-        if (parts.length >= 2) {
-          tracks.push({
-            title: parts.slice(1).join(' - ').trim(),
-            artist: parts[0].trim(),
-          });
+        // Use lastIndexOf to handle filenames with multiple dashes
+        const dashIndex = nameWithoutExt.lastIndexOf(' - ');
+        if (dashIndex > 0) {
+          const part1 = nameWithoutExt.substring(0, dashIndex).trim();
+          const part2 = nameWithoutExt.substring(dashIndex + 3).trim();
+          
+          if (useAppleFormat) {
+            // Apple format: Title - Artist
+            tracks.push({
+              title: part1,
+              artist: part2,
+            });
+          } else {
+            // Standard format: Artist - Title
+            tracks.push({
+              title: part2,
+              artist: part1,
+            });
+          }
         } else {
           tracks.push({
             title: nameWithoutExt,

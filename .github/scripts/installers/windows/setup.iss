@@ -76,10 +76,12 @@ Name: "startupmode\manual"; Description: "Manual start only"; GroupDescription: 
 Name: "launchnow"; Description: "Launch Playlist Lab Server now"; GroupDescription: "Additional Options:"
 
 [Icons]
-Name: "{group}\Playlist Lab Server"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\start-tray.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\server\dist\favicon.ico"
-Name: "{group}\Open Playlist Lab"; Filename: "http://localhost:3001"
+Name: "{group}\Playlist Lab Server"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\start-tray.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\icons\tray-icon.png"; Comment: "Launch Playlist Lab with system tray"
+Name: "{group}\Start Server Only"; Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\server-launcher.js"""; WorkingDir: "{app}"; IconFilename: "{app}\icons\tray-icon.png"; Comment: "Start the Playlist Lab server without tray app"
+Name: "{group}\Open Playlist Lab"; Filename: "http://localhost:3001"; IconFilename: "{app}\icons\tray-icon.png"; Comment: "Open Playlist Lab in your browser"
+Name: "{group}\Server Logs"; Filename: "{userappdata}\Playlist Lab\logs"; Comment: "View server log files"
 Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Playlist Lab"; Filename: "http://localhost:3001"
+Name: "{autodesktop}\Playlist Lab"; Filename: "http://localhost:3001"; IconFilename: "{app}\icons\tray-icon.png"
 
 [Run]
 Filename: "{app}\nodejs\npm.cmd"; Parameters: "install --production --no-optional"; WorkingDir: "{app}\server"; StatusMsg: "Installing server dependencies..."; Flags: runhidden waituntilterminated

@@ -2530,22 +2530,60 @@ ipcMain.handle('import-m3u-file', async () => {
   let currentTitle = '';
   let currentArtist = '';
   
+  // Detect format by analyzing first few EXTINF lines
+  // Apple Music/iTunes uses "Title - Artist", most others use "Artist - Title"
+  let useAppleFormat = false;
+  const sampleLines = lines.slice(0, 20).filter(l => l.trim().startsWith('#EXTINF:'));
+  if (sampleLines.length >= 3) {
+    // Heuristic: if the part after " - " looks like a single artist name (no special chars like parentheses),
+    // it's likely Apple format (Title - Artist)
+    let appleFormatCount = 0;
+    for (const sample of sampleLines.slice(0, Math.min(5, sampleLines.length))) {
+      const match = sample.match(/#EXTINF:[^,]*,(.+)/);
+      if (match) {
+        const info = match[1].trim();
+        const dashIndex = info.lastIndexOf(' - ');
+        if (dashIndex > 0) {
+          const beforeDash = info.substring(0, dashIndex).trim();
+          const afterDash = info.substring(dashIndex + 3).trim();
+          // If after dash has no parentheses/brackets and is relatively short, likely artist name
+          // Also check if before dash has parentheses (common in song titles)
+          if (!/[(\[{]/.test(afterDash) && afterDash.length < 50 && /[(\[{]/.test(beforeDash)) {
+            appleFormatCount++;
+          }
+        }
+      }
+    }
+    useAppleFormat = appleFormatCount >= Math.ceil(sampleLines.slice(0, Math.min(5, sampleLines.length)).length / 2);
+    console.log(`[M3U] Detected format: ${useAppleFormat ? 'Apple (Title - Artist)' : 'Standard (Artist - Title)'}`);
+  }
+  
   for (const line of lines) {
     const trimmed = line.trim();
     
     // Skip empty lines and M3U header
     if (!trimmed || trimmed === '#EXTM3U') continue;
     
-    // Parse #EXTINF line: #EXTINF:duration,Artist - Title or #EXTINF:duration,Title
+    // Parse #EXTINF line: #EXTINF:duration,Artist - Title or #EXTINF:duration,Title - Artist
     if (trimmed.startsWith('#EXTINF:')) {
       const infoMatch = trimmed.match(/#EXTINF:[^,]*,(.+)/);
       if (infoMatch) {
         const info = infoMatch[1].trim();
-        // Try to split by " - " for Artist - Title format
-        const dashIndex = info.indexOf(' - ');
+        // Use lastIndexOf to handle titles with multiple dashes
+        const dashIndex = info.lastIndexOf(' - ');
         if (dashIndex > 0) {
-          currentArtist = info.substring(0, dashIndex).trim();
-          currentTitle = info.substring(dashIndex + 3).trim();
+          const part1 = info.substring(0, dashIndex).trim();
+          const part2 = info.substring(dashIndex + 3).trim();
+          
+          if (useAppleFormat) {
+            // Apple format: Title - Artist
+            currentTitle = part1;
+            currentArtist = part2;
+          } else {
+            // Standard format: Artist - Title
+            currentArtist = part1;
+            currentTitle = part2;
+          }
         } else {
           currentTitle = info;
           currentArtist = '';
@@ -2559,13 +2597,17 @@ ipcMain.handle('import-m3u-file', async () => {
         currentTitle = '';
         currentArtist = '';
       } else {
-        // Try to extract from filename: "Artist - Title.ext"
+        // Try to extract from filename: "Artist - Title.ext" or "Title - Artist.ext"
         const baseName = path.basename(trimmed, path.extname(trimmed));
-        const dashIndex = baseName.indexOf(' - ');
+        const dashIndex = baseName.lastIndexOf(' - ');
         if (dashIndex > 0) {
-          const artist = baseName.substring(0, dashIndex).trim();
-          const title = baseName.substring(dashIndex + 3).trim();
-          if (title) tracks.push({ title, artist });
+          const part1 = baseName.substring(0, dashIndex).trim();
+          const part2 = baseName.substring(dashIndex + 3).trim();
+          if (useAppleFormat) {
+            tracks.push({ title: part1, artist: part2 });
+          } else {
+            tracks.push({ title: part2, artist: part1 });
+          }
         } else if (baseName) {
           tracks.push({ title: baseName, artist: 'Unknown' });
         }
