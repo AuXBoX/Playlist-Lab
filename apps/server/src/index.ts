@@ -291,7 +291,7 @@ app.get('/health', (_req: Request, res: Response) => {
     status: 'ok', 
     timestamp: Date.now(),
     environment: NODE_ENV,
-    version: process.env.npm_package_version || '2.0.0',
+    version: '1.1.4',
     uptime: Math.floor(uptime),
     uptimeFormatted: formatUptime(uptime),
     memory: {
@@ -311,7 +311,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
     status: 'ok', 
     timestamp: Date.now(),
     environment: NODE_ENV,
-    version: process.env.npm_package_version || '2.0.0',
+    version: '1.1.4',
     uptime: Math.floor(uptime),
     uptimeFormatted: formatUptime(uptime),
     memory: {
@@ -321,6 +321,11 @@ app.get('/api/health', (_req: Request, res: Response) => {
     },
     port: PORT,
   });
+});
+
+// Simple version endpoint
+app.get('/api/version', (_req: Request, res: Response) => {
+  res.json({ version: '1.1.4' });
 });
 
 // Helper function to format uptime

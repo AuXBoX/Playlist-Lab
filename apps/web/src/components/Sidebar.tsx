@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import './Sidebar.css';
@@ -7,9 +7,18 @@ import './Sidebar.css';
 export const Sidebar: FC = () => {
   const { user } = useAuth();
   const location = useLocation();
+  const [version, setVersion] = useState<string>('');
   const [isManageOpen, setIsManageOpen] = useState(
     location.pathname.startsWith('/playlists/') || location.pathname === '/playlists'
   );
+
+  // Fetch version on mount
+  useEffect(() => {
+    fetch('/api/version', { credentials: 'include' })
+      .then(res => res.json())
+      .then(data => setVersion(data.version))
+      .catch(() => setVersion(''));
+  }, []);
 
   const navItems = [
     { path: '/', label: 'Dashboard' },
@@ -90,6 +99,12 @@ export const Sidebar: FC = () => {
           </div>
         )}
       </nav>
+      
+      {version && (
+        <div className="sidebar-version">
+          v{version}
+        </div>
+      )}
     </aside>
   );
 };

@@ -84,7 +84,7 @@ export const SharePlaylistsPage: FC = () => {
     setIsLoadingShared(true);
     setError(null);
     try {
-      const response = await fetch('/api/playlists/shared', {
+      const response = await fetch('/api/playlists/shared-with-me', {
         credentials: 'include',
       });
       

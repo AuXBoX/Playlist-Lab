@@ -46,6 +46,7 @@ export const ImportPage: FC = () => {
   const [scheduleStartDate, setScheduleStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [schedulePlaylistName, setSchedulePlaylistName] = useState<string>('');
   const [scheduleOverwriteExisting, setScheduleOverwriteExisting] = useState<boolean>(false);
+  const [scheduleOverwriteCover, setScheduleOverwriteCover] = useState<boolean>(false);
   const [scheduleRunTime, setScheduleRunTime] = useState<string>('09:00');
   const [spotifyConnected, setSpotifyConnected] = useState(false);
   const [spotifyHasCredentials, setSpotifyHasCredentials] = useState(false);
@@ -1096,6 +1097,7 @@ export const ImportPage: FC = () => {
     setSchedulePlaylist(playlist);
     setSchedulePlaylistName(playlist.name); // Set default playlist name
     setScheduleOverwriteExisting(false); // Reset overwrite option
+    setScheduleOverwriteCover(false); // Reset cover art option
     setScheduleRunTime('09:00'); // Reset run time
   };
 
@@ -1146,6 +1148,7 @@ export const ImportPage: FC = () => {
             autoImport: true,
             playlistName: schedulePlaylistName || schedulePlaylist.name,
             overwriteExisting: scheduleOverwriteExisting,
+            overwriteCover: scheduleOverwriteCover,
           },
         }),
       });
@@ -2876,6 +2879,31 @@ export const ImportPage: FC = () => {
             </div>
 
             <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0.75rem',
+                border: '1px solid var(--border)',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                backgroundColor: 'var(--surface)',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={scheduleOverwriteCover}
+                  onChange={(e) => setScheduleOverwriteCover(e.target.checked)}
+                  style={{ marginRight: '0.75rem' }}
+                />
+                <div>
+                  <div style={{ fontWeight: 500 }}>Overwrite cover art</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                    Replace the playlist cover art with the imported playlist's artwork
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
                 Update Frequency
               </label>
@@ -2934,29 +2962,6 @@ export const ImportPage: FC = () => {
               />
               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                 First update will occur on this date
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-                Run Time
-              </label>
-              <input
-                type="time"
-                value={scheduleRunTime}
-                onChange={(e) => setScheduleRunTime(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid var(--border)',
-                  borderRadius: '4px',
-                  backgroundColor: 'var(--surface)',
-                  color: 'var(--text-primary)',
-                  fontSize: '1rem',
-                }}
-              />
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                Time of day to run the schedule
               </div>
             </div>
 

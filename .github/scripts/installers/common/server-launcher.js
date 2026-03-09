@@ -54,29 +54,63 @@ require('fs').mkdirSync(logsDir, { recursive: true });
 console.log(`Data directory: ${dataDir}`);
 console.log(`Database: ${dbPath}`);
 
-const server = spawn(nodePath, [serverMain], {
-  cwd: serverDir,
-  stdio: 'ignore', // Don't show console output
-  detached: true,  // Run independently
-  env: {
-    ...process.env,
-    PORT: port,
-    NODE_ENV: 'production',
-    INSTALL_DIR: installDir,
-    DATABASE_PATH: dbPath,
-    LOG_DIR: logsDir,
-  },
-  windowsHide: true, // Hide console window on Windows
-});
+// Check if we're being called from the tray app
+const fromTray = process.env.FROM_TRAY === 'true';
 
-// Unref so this launcher can exit
-server.unref();
+if (fromTray) {
+  // When called from tray, run in foreground so tray can monitor it
+  const server = spawn(nodePath, [serverMain], {
+    cwd: serverDir,
+    stdio: 'inherit', // Show output in tray's logs
+    detached: false,  // Keep attached to tray
+    env: {
+      ...process.env,
+      PORT: port,
+      NODE_ENV: 'production',
+      INSTALL_DIR: installDir,
+      DATABASE_PATH: dbPath,
+      LOG_DIR: logsDir,
+    },
+  });
 
-server.on('error', (err) => {
-  console.error(`Failed to start server: ${err.message}`);
-  process.exit(1);
-});
+  server.on('error', (err) => {
+    console.error(`Failed to start server: ${err.message}`);
+    process.exit(1);
+  });
 
-// Exit immediately - server is now running independently
-console.log('Server started successfully');
-process.exit(0);
+  server.on('exit', (code) => {
+    console.log(`Server exited with code ${code}`);
+    process.exit(code);
+  });
+
+  // Keep running - don't exit
+  console.log('Server started successfully (monitored by tray)');
+} else {
+  // When called standalone, run detached
+  const server = spawn(nodePath, [serverMain], {
+    cwd: serverDir,
+    stdio: 'ignore', // Don't show console output
+    detached: true,  // Run independently
+    env: {
+      ...process.env,
+      PORT: port,
+      NODE_ENV: 'production',
+      INSTALL_DIR: installDir,
+      DATABASE_PATH: dbPath,
+      LOG_DIR: logsDir,
+    },
+    windowsHide: true, // Hide console window on Windows
+  });
+
+  // Unref so this launcher can exit
+  server.unref();
+
+  server.on('error', (err) => {
+    console.error(`Failed to start server: ${err.message}`);
+    process.exit(1);
+  });
+
+  // Exit immediately - server is now running independently
+  console.log('Server started successfully');
+  process.exit(0);
+}

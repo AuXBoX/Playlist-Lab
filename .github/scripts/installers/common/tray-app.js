@@ -88,10 +88,14 @@ function getNodePath() {
 }
 
 function getServerLauncher() {
-  // Try JS launcher first, then shell script
-  const jsLauncher = path.join(installDir, 'server-launcher.js');
-  if (fs.existsSync(jsLauncher)) return { cmd: getNodePath(), args: [jsLauncher] };
+  // Start server directly, not through launcher script
+  // The launcher is designed to start and exit, which confuses the tray app
+  const serverMain = path.join(installDir, 'server', 'dist', 'index.js');
+  if (fs.existsSync(serverMain)) {
+    return { cmd: getNodePath(), args: [serverMain] };
+  }
 
+  // Fallback to shell script for non-Windows platforms
   const shLauncher = path.join(installDir, 'server-launcher.sh');
   if (fs.existsSync(shLauncher)) return { cmd: 'bash', args: [shLauncher] };
 
@@ -112,10 +116,17 @@ function startServer() {
   const err = fs.openSync(path.join(dataDir, 'server-error.log'), 'a');
 
   serverProcess = spawn(launcher.cmd, launcher.args, {
-    cwd: installDir,
+    cwd: path.join(installDir, 'server'),
     detached: false,
     stdio: ['ignore', out, err],
-    env: { ...process.env, PORT: String(config.port), INSTALL_DIR: installDir },
+    env: { 
+      ...process.env, 
+      PORT: String(config.port), 
+      INSTALL_DIR: installDir,
+      NODE_ENV: 'production',
+      DATABASE_PATH: path.join(dataDir, 'data', 'playlist-lab.db'),
+      LOG_DIR: path.join(dataDir, 'logs'),
+    },
   });
 
   serverProcess.on('exit', (code) => {

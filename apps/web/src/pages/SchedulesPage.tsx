@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../contexts/AppContext';
 import type { Schedule } from '@playlist-lab/shared';
 
@@ -7,18 +7,27 @@ export const SchedulesPage: FC = () => {
   const { schedules, apiClient, refreshSchedules, isLoading } = useApp();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
+  const [playlists, setPlaylists] = useState<any[]>([]);
+  const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(false);
   const [formData, setFormData] = useState({
     scheduleType: 'playlist_refresh' as 'playlist_refresh' | 'mix_generation',
     frequency: 'weekly' as 'daily' | 'weekly' | 'fortnightly' | 'monthly',
     startDate: new Date().toISOString().split('T')[0],
     runTime: '',
+    playlistId: '',
     config: {} as any,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  useEffect(() => {
+    if (showCreateForm && formData.scheduleType === 'playlist_refresh' && !editingSchedule) {
+      loadPlaylists();
+    }
+  }, [showCreateForm, formData.scheduleType]);
+
+  const loadPlaylists = async () => {
     e.preventDefault();
     setError(null);
     setIsSaving(true);
@@ -52,6 +61,18 @@ export const SchedulesPage: FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to save schedule');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const loadPlaylists = async () => {
+    setIsLoadingPlaylists(true);
+    try {
+      const response = await apiClient.getPlaylists();
+      setPlaylists(response.playlists || []);
+    } catch (err) {
+      console.error('Failed to load playlists:', err);
+    } finally {
+      setIsLoadingPlaylists(false);
     }
   };
 
@@ -98,6 +119,7 @@ export const SchedulesPage: FC = () => {
       frequency: 'weekly',
       startDate: new Date().toISOString().split('T')[0],
       runTime: '',
+      playlistId: '',
       config: {} as any,
     });
   };
@@ -199,7 +221,13 @@ export const SchedulesPage: FC = () => {
                   </label>
                   <select
                     value={formData.scheduleType}
-                    onChange={(e) => setFormData({ ...formData, scheduleType: e.target.value as any })}
+                    onChange={(e) => {
+                      const newType = e.target.value as any;
+                      setFormData({ ...formData, scheduleType: newType, config: {} });
+                      if (newType === 'playlist_refresh') {
+                        loadPlaylists();
+                      }
+                    }}
                     style={{
                       width: '100%',
                       padding: '0.75rem',
@@ -212,6 +240,43 @@ export const SchedulesPage: FC = () => {
                     <option value="playlist_refresh">Playlist Refresh</option>
                     <option value="mix_generation">Mix Generation</option>
                   </select>
+                </div>
+              )}
+
+              {!editingSchedule && formData.scheduleType === 'playlist_refresh' && (
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+                    Playlist
+                  </label>
+                  {isLoadingPlaylists ? (
+                    <div style={{ padding: '0.75rem', color: 'var(--text-secondary)' }}>
+                      Loading playlists...
+                    </div>
+                  ) : (
+                    <select
+                      value={formData.playlistId || ''}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        playlistId: e.target.value
+                      })}
+                      required
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        backgroundColor: 'var(--surface)',
+                        color: 'var(--text-primary)',
+                      }}
+                    >
+                      <option value="">Select a playlist</option>
+                      {playlists.map(playlist => (
+                        <option key={playlist.id} value={playlist.id}>
+                          {playlist.name} ({playlist.trackCount} tracks)
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 

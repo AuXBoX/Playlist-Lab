@@ -86,20 +86,12 @@ router.get('/login', requireAuth, (req: Request, res: Response) => {
  * GET /api/spotify/callback
  */
 router.get('/callback', async (req: Request, res: Response) => {
-  const closePopup = (status: 'connected' | 'error', detail: string) => {
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Connecting…</title></head><body>
-<script>
-  try {
-    if (window.opener) {
-      window.opener.postMessage({ type: 'cross_import_oauth', status: '${status}', service: 'spotify', detail: decodeURIComponent('${encodeURIComponent(detail)}') }, '*');
-    }
-  } catch(e) {}
-  window.close();
-<\/script>
-<p style="font-family:sans-serif;text-align:center;margin-top:40px;color:#ccc;">${status === 'connected' ? 'Connected! You can close this window.' : 'Error: ' + detail}</p>
-</body></html>`;
-    res.setHeader('Content-Type', 'text/html');
-    res.send(html);
+  const redirectToImport = (status: 'connected' | 'error', detail: string) => {
+    // Redirect back to Import page with status
+    const redirectUrl = status === 'connected' 
+      ? '/import?spotify_connected=true'
+      : `/import?spotify_error=${encodeURIComponent(detail)}`;
+    res.redirect(redirectUrl);
   };
 
   try {
@@ -107,25 +99,25 @@ router.get('/callback', async (req: Request, res: Response) => {
     
     if (error) {
       logger.error('Spotify OAuth error', { error });
-      return closePopup('error', String(error));
+      return redirectToImport('error', String(error));
     }
     
     if (!code || typeof code !== 'string') {
-      return closePopup('error', 'no_code');
+      return redirectToImport('error', 'no_code');
     }
     
     // Get user ID from state parameter
     const userId = state ? parseInt(state as string) : null;
     
     if (!userId) {
-      return closePopup('error', 'invalid_state');
+      return redirectToImport('error', 'invalid_state');
     }
     
     // Get credentials from database
     const dbService = req.dbService || (req.app as any).get('dbService');
     if (!dbService) {
       logger.error('Database service not available');
-      return closePopup('error', 'server_error');
+      return redirectToImport('error', 'server_error');
     }
     
     const db = (dbService as any).db;
@@ -136,7 +128,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     
     if (!user?.spotify_client_id || !user?.spotify_client_secret) {
       logger.error('Spotify credentials not found for user', { userId });
-      return closePopup('error', 'credentials_not_found');
+      return redirectToImport('error', 'credentials_not_found');
     }
     
     // Decrypt credentials
@@ -148,7 +140,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       clientSecret = decrypt(user.spotify_client_secret, ENCRYPTION_SECRET);
     } catch (decryptError) {
       logger.error('Failed to decrypt Spotify credentials', { error: decryptError, userId });
-      return closePopup('error', 'decrypt_failed');
+      return redirectToImport('error', 'decrypt_failed');
     }
     
     // Exchange authorization code for tokens
@@ -168,7 +160,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     if (!tokenResponse.ok) {
       const errorData = await tokenResponse.json();
       logger.error('Failed to exchange code for tokens', { error: errorData });
-      return closePopup('error', 'token_exchange_failed');
+      return redirectToImport('error', 'token_exchange_failed');
     }
     
     const tokens = await tokenResponse.json() as SpotifyTokenResponse;
@@ -191,10 +183,10 @@ router.get('/callback', async (req: Request, res: Response) => {
     ).run(encryptedAccessToken, encryptedRefreshToken, expiresAt, userId);
     
     logger.info('Spotify tokens saved (encrypted)', { userId });
-    return closePopup('connected', 'spotify');
+    return redirectToImport('connected', 'spotify');
   } catch (err) {
     logger.error('Spotify callback error', { error: err });
-    return closePopup('error', 'callback_failed');
+    return redirectToImport('error', 'callback_failed');
   }
 });
 
