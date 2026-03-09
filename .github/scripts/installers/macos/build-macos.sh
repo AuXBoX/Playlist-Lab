@@ -6,9 +6,12 @@ set -e
 echo "Building Playlist Lab Server for macOS..."
 
 APP_NAME="Playlist Lab Server"
-APP_VERSION="1.1.4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+
+# Read version from package.json
+APP_VERSION=$(node -p "require('$PROJECT_ROOT/apps/server/package.json').version")
+
 BUILD_DIR="$PROJECT_ROOT/release/macos"
 TEMP_DIR="/tmp/macos-build"
 DMG_NAME="PlaylistLabServer-${APP_VERSION}.dmg"

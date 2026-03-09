@@ -402,12 +402,27 @@ function startTray(SysTray) {
   const iconRed = getIconPath('red');
   log(`Icon paths: green=${iconGreen}, red=${iconRed}`);
 
+  // Read version from package.json
+  let currentVersion = '1.1.5'; // fallback
+  try {
+    const packageJsonPath = path.join(installDir, 'server', 'package.json');
+    if (fs.existsSync(packageJsonPath)) {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+      currentVersion = packageJson.version;
+      log(`Version from package.json: ${currentVersion}`);
+    } else {
+      log(`package.json not found at ${packageJsonPath}, using fallback version`);
+    }
+  } catch (err) {
+    log(`Failed to read version from package.json: ${err.message}`);
+  }
+
   // Initialize auto-updater
   let updateInfo = null;
   let isDownloadingUpdate = false;
   
   const updater = new AutoUpdater({
-    currentVersion: '1.1.4',
+    currentVersion,
     installDir,
     onUpdateAvailable: (info) => {
       log(`Update available: ${info.version}`);

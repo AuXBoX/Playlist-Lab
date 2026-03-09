@@ -6,7 +6,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/release/windows"
-APP_VERSION="1.1.4"
+
+# Read version from package.json
+APP_VERSION=$(node -p "require('$PROJECT_ROOT/apps/server/package.json').version")
+
 NODE_VERSION="20.11.0"
 
 mkdir -p "$BUILD_DIR"
@@ -46,6 +49,6 @@ echo "Running Inno Setup..."
 SETUP_ISS=$(cygpath -w "$SCRIPT_DIR/setup.iss" 2>/dev/null || echo "$SCRIPT_DIR/setup.iss")
 WIN_BUILD_DIR=$(cygpath -w "$BUILD_DIR" 2>/dev/null || echo "$BUILD_DIR")
 WIN_PROJECT_ROOT=$(cygpath -w "$PROJECT_ROOT" 2>/dev/null || echo "$PROJECT_ROOT")
-"$INNO_SETUP" "$SETUP_ISS" /O"$WIN_BUILD_DIR" /DMyAppSourceDir="$WIN_PROJECT_ROOT"
+"$INNO_SETUP" "$SETUP_ISS" /O"$WIN_BUILD_DIR" /DMyAppSourceDir="$WIN_PROJECT_ROOT" /DMyAppVersion="$APP_VERSION"
 
 echo "Windows installer created in: $BUILD_DIR"

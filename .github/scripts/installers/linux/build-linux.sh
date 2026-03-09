@@ -8,9 +8,12 @@ echo "Building Playlist Lab Server for Linux..."
 
 # Configuration
 APP_NAME="playlist-lab-server"
-APP_VERSION="1.1.4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+
+# Read version from package.json
+APP_VERSION=$(node -p "require('$PROJECT_ROOT/apps/server/package.json').version")
+
 BUILD_DIR="$PROJECT_ROOT/release/linux"
 TEMP_DIR="/tmp/linux-build"
 
