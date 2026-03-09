@@ -38,12 +38,6 @@ This is a monorepo containing multiple applications:
 - **Features**: Embedded server, single-user, portable
 - **Platforms**: Windows, macOS, Linux
 
-### Mobile App (Deprecated)
-- **Location**: `apps/mobile/`
-- **Status**: DEPRECATED - Use responsive web app instead
-- **Reason**: Web app now works perfectly on mobile devices
-- **See**: [apps/mobile/DEPRECATED.md](apps/mobile/DEPRECATED.md)
-
 ## Quick Start
 
 ### Server Installation
@@ -124,7 +118,6 @@ cd packages/shared && npm run build && cd ../..
 # Start development servers
 npm run dev:server  # Server on port 3001
 npm run dev:web     # Web app on port 5173
-npm run dev:mobile  # Mobile app with Expo
 ```
 
 ## Technology Stack

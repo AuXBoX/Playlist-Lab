@@ -65,19 +65,14 @@ WIN_BUILD_DIR=$(cygpath -w "$BUILD_DIR" 2>/dev/null || echo "$BUILD_DIR")
 WIN_PROJECT_ROOT=$(cygpath -w "$PROJECT_ROOT" 2>/dev/null || echo "$PROJECT_ROOT")
 
 # Debug: print paths
+echo "Inno Setup: $INNO_SETUP"
 echo "Setup script: $SETUP_ISS"
 echo "Build dir: $WIN_BUILD_DIR"
 echo "Project root: $WIN_PROJECT_ROOT"
 echo "Version: $APP_VERSION"
 
-# Call Inno Setup with properly quoted parameters
-# Use array to handle spaces in paths correctly
-INNO_ARGS=(
-    "$SETUP_ISS"
-    "/O$WIN_BUILD_DIR"
-    "/DMyAppSourceDir=$WIN_PROJECT_ROOT"
-    "/DMyAppVersion=$APP_VERSION"
-)
-"$INNO_SETUP" "${INNO_ARGS[@]}"
+# Call Inno Setup with properly formatted parameters
+# Inno Setup expects: /O"path" /Dname=value (no spaces after /O or /D)
+"$INNO_SETUP" "$SETUP_ISS" "/O$WIN_BUILD_DIR" "/DMyAppSourceDir=$WIN_PROJECT_ROOT" "/DMyAppVersion=$APP_VERSION"
 
 echo "Windows installer created in: $BUILD_DIR"
