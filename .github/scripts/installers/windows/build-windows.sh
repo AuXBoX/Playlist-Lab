@@ -47,10 +47,10 @@ else
     echo "Node.js already present in $NODEJS_DIR"
 fi
 
-# Find Inno Setup
+# Find Inno Setup and convert to Windows path
 INNO_SETUP=""
 if [ -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ]; then
-    INNO_SETUP="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+    INNO_SETUP="C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe"
 elif command -v iscc &> /dev/null; then
     INNO_SETUP="iscc"
 else
@@ -72,7 +72,6 @@ echo "Project root: $WIN_PROJECT_ROOT"
 echo "Version: $APP_VERSION"
 
 # Use PowerShell to call Inno Setup with proper argument escaping
-# Pass each argument separately without extra quotes to avoid "multiple script filename" error
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& '$INNO_SETUP' '$SETUP_ISS' '/O$WIN_BUILD_DIR' '/DMyAppSourceDir=$WIN_PROJECT_ROOT' '/DMyAppVersion=$APP_VERSION'"
 
 echo "Windows installer created in: $BUILD_DIR"
