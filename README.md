@@ -1,5 +1,8 @@
 ## Playlist Lab
 
+Feel free to donate 
+[Tip Jar](https://www.paypal.com/donate/?business=6H5L2S8SAQWBW&no_recurring=0&currency_code=AUD)
+
 A comprehensive music playlist management system with Plex Media Server integration. Import playlists from multiple sources, generate smart mixes, and sync them to your Plex server.
 
 ## Features
