@@ -71,8 +71,8 @@ echo "Build dir: $WIN_BUILD_DIR"
 echo "Project root: $WIN_PROJECT_ROOT"
 echo "Version: $APP_VERSION"
 
-# Call Inno Setup with direct parameters (no response file)
-# The key is to NOT quote the /O and /D parameters themselves
-"$INNO_SETUP" "$SETUP_ISS" /O"$WIN_BUILD_DIR" /DMyAppSourceDir="$WIN_PROJECT_ROOT" /DMyAppVersion="$APP_VERSION"
+# Use PowerShell to call Inno Setup with proper argument escaping
+# Pass each argument separately without extra quotes to avoid "multiple script filename" error
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& '$INNO_SETUP' '$SETUP_ISS' '/O$WIN_BUILD_DIR' '/DMyAppSourceDir=$WIN_PROJECT_ROOT' '/DMyAppVersion=$APP_VERSION'"
 
 echo "Windows installer created in: $BUILD_DIR"
