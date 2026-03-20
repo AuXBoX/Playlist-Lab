@@ -804,7 +804,7 @@ router.post('/deep-cuts', async (req: Request, res: Response, next: NextFunction
   try {
     const userId = req.session.userId!;
     const db = req.dbService!;
-    const { trackCount = 50, maxPlayCount = 5, excludePopular = true } = req.body;
+    const { trackCount = 50, maxPlayCount = 5, excludePopularThreshold } = req.body;
 
     const { userServer } = await getUserServerAndSettings(userId, db);
     const user = await db.getUserById(userId);
@@ -818,7 +818,7 @@ router.post('/deep-cuts', async (req: Request, res: Response, next: NextFunction
       userServer.server_url,
       user.plex_token,
       userServer.library_id!,
-      { trackCount, maxPlayCount, excludePopular }
+      { trackCount, maxPlayCount, excludePopularThreshold }
     );
 
     if (result.trackCount === 0) {
@@ -882,7 +882,7 @@ router.post('/artist-discovery', async (req: Request, res: Response, next: NextF
       userServer.server_url,
       user.plex_token,
       userServer.library_id!,
-      { seedArtistKey, trackCount, tracksPerArtist }
+      { seedArtistKeys: [seedArtistKey], tracksPerArtist, maxSimilarArtists: trackCount }
     );
 
     if (result.trackCount === 0) {
@@ -1138,7 +1138,7 @@ router.post('/artist-journey', async (req: Request, res: Response, next: NextFun
       userServer.server_url,
       user.plex_token,
       userServer.library_id!,
-      { artistKey, trackCount, tracksPerAlbum }
+      { artistKey, tracksPerAlbum }
     );
 
     if (result.trackCount === 0) {
@@ -1258,7 +1258,7 @@ router.post('/forgotten-favorites', async (req: Request, res: Response, next: Ne
       userServer.server_url,
       user.plex_token,
       userServer.library_id!,
-      { trackCount, minPlayCount, notPlayedDays }
+      { trackCount, minPlayCount, notPlayedInDays: notPlayedDays }
     );
 
     if (result.trackCount === 0) {
@@ -1322,7 +1322,7 @@ router.post('/genre-blend', async (req: Request, res: Response, next: NextFuncti
       userServer.server_url,
       user.plex_token,
       userServer.library_id!,
-      { genres, trackCount, minGenres }
+      { genres, trackCount, requireAllGenres: minGenres > 1 }
     );
 
     if (result.trackCount === 0) {

@@ -726,6 +726,33 @@ export class PlexClient {
   }
 
   /**
+   * Get playlist details (metadata)
+   */
+  async getPlaylistDetails(playlistId: string): Promise<any> {
+    try {
+      const response = await this.client.get<PlexMediaContainer>(
+        `/playlists/${playlistId}`
+      );
+
+      return response.data.MediaContainer?.Metadata?.[0] || null;
+    } catch (error: any) {
+      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        throw new Error('Plex server is unreachable');
+      }
+      if (error.response?.status === 401) {
+        throw new Error('Invalid Plex token');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Playlist not found');
+      }
+      if (error.isAxiosError) {
+        throw new Error(`Failed to get playlist details: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Add tracks to a playlist
    * trackUris should be in format: server://libraryId/item/ratingKey
    */

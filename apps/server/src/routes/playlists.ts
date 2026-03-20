@@ -742,16 +742,14 @@ router.post('/copy-to-managed-user', requireAuth, async (req: Request, res: Resp
 
     // Get playlist details from source user
     const sourcePlexService = new PlexService(userServer.server_url, sourceToken);
-    const playlistResponse = await sourcePlexService.client.get(`/playlists/${playlistId}`);
-    const playlist = playlistResponse.data.MediaContainer?.Metadata?.[0];
+    const playlist = await sourcePlexService.getPlaylistDetails(playlistId);
     
     if (!playlist) {
       return next(createNotFoundError('Playlist not found'));
     }
 
     // Get playlist items
-    const itemsResponse = await sourcePlexService.client.get(`/playlists/${playlistId}/items`);
-    const items = itemsResponse.data.MediaContainer?.Metadata || [];
+    const items = await sourcePlexService.getPlaylistTracks(playlistId);
 
     logger.info('Retrieved playlist details', { 
       title: playlist.title, 
