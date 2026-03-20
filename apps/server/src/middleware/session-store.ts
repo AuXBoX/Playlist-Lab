@@ -29,7 +29,6 @@ export class SQLiteStore extends Store {
       const row = stmt.get(sid) as { sess: string; expired: number } | undefined;
 
       if (!row) {
-        console.log(`[Session Store] Session not found for sid: ${sid.substring(0, 10)}...`);
         return callback(null, null);
       }
 
@@ -37,13 +36,11 @@ export class SQLiteStore extends Store {
       const now = Math.floor(Date.now() / 1000);
       if (row.expired < now) {
         // Session expired, delete it
-        console.log(`[Session Store] Session expired for sid: ${sid.substring(0, 10)}...`);
         this.destroy(sid, () => {});
         return callback(null, null);
       }
 
       const session = JSON.parse(row.sess);
-      console.log(`[Session Store] Session loaded successfully for sid: ${sid.substring(0, 10)}..., userId: ${session.userId || 'none'}`);
       callback(null, session);
     } catch (error) {
       console.error('[Session Store] Error loading session:', error);
@@ -80,7 +77,6 @@ export class SQLiteStore extends Store {
         return;
       }
 
-      console.log(`[Session Store] Session saved successfully for sid: ${sid.substring(0, 10)}...`);
       if (callback) callback();
     } catch (error) {
       console.error('[Session Store] Error saving session:', error);

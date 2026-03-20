@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../contexts/AppContext';
 import type { MatchedTrack } from '@playlist-lab/shared';
 
-type ImportSource = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'ai' | 'aria';
+type ImportSource = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'ai' | 'aria' | 'billboard';
 
 interface ImportResult {
   matched: MatchedTrack[];
@@ -101,6 +101,15 @@ export const ImportPage: FC = () => {
   const getMostRecentMonday = () => {
     const d = new Date();
     const day = d.getDay();
+    
+    // If it's Friday (5), Saturday (6), or Sunday (0), show next Monday
+    if (day === 5 || day === 6 || day === 0) {
+      const daysUntilMonday = day === 0 ? 1 : 8 - day;
+      d.setDate(d.getDate() + daysUntilMonday);
+      return toLocalDateStr(d);
+    }
+    
+    // Otherwise show most recent Monday
     const diff = day === 0 ? 6 : day - 1;
     d.setDate(d.getDate() - diff);
     return toLocalDateStr(d);
@@ -109,8 +118,17 @@ export const ImportPage: FC = () => {
     const mondays: string[] = [];
     const d = new Date();
     const day = d.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    d.setDate(d.getDate() - diff);
+    
+    // If it's Friday, Saturday, or Sunday, start with next Monday
+    if (day === 5 || day === 6 || day === 0) {
+      const daysUntilMonday = day === 0 ? 1 : 8 - day;
+      d.setDate(d.getDate() + daysUntilMonday);
+    } else {
+      // Otherwise start with most recent Monday
+      const diff = day === 0 ? 6 : day - 1;
+      d.setDate(d.getDate() - diff);
+    }
+    
     for (let i = 0; i < count; i++) {
       mondays.push(toLocalDateStr(d));
       d.setDate(d.getDate() - 7);
@@ -126,6 +144,47 @@ export const ImportPage: FC = () => {
   const [ariaDanceDate, setAriaDanceDate] = useState(() => getMostRecentMonday());
   const [ariaClubDate, setAriaClubDate] = useState(() => getMostRecentMonday());
   const [ariaTop100Year, setAriaTop100Year] = useState(() => new Date().getFullYear().toString());
+
+  // Billboard charts are dated for Saturdays (but released on Tuesdays)
+  const getMostRecentSaturday = () => {
+    const d = new Date();
+    const day = d.getDay();
+    
+    // Get most recent Saturday (including today if today is Saturday)
+    if (day === 6) {
+      // Today is Saturday, use today
+      return toLocalDateStr(d);
+    } else {
+      // Go back to last Saturday
+      const daysBack = day === 0 ? 1 : day + 1;
+      d.setDate(d.getDate() - daysBack);
+      return toLocalDateStr(d);
+    }
+  };
+  const getPastSaturdays = (count: number) => {
+    const saturdays: string[] = [];
+    const d = new Date();
+    const day = d.getDay();
+    
+    // Start with most recent Saturday (including today if today is Saturday)
+    if (day === 6) {
+      // Today is Saturday, use today
+    } else {
+      // Go back to last Saturday
+      const daysBack = day === 0 ? 1 : day + 1;
+      d.setDate(d.getDate() - daysBack);
+    }
+    
+    for (let i = 0; i < count; i++) {
+      saturdays.push(toLocalDateStr(d));
+      d.setDate(d.getDate() - 7);
+    }
+    return saturdays;
+  };
+  const recentSaturdays = getPastSaturdays(52);
+
+  // Billboard date state
+  const [billboardDate, setBillboardDate] = useState(() => getMostRecentSaturday());
 
   // Country options for charts/popular playlists
   const countries = [
@@ -244,6 +303,7 @@ export const ImportPage: FC = () => {
 
   const sources = [
     ...(selectedCountry === 'AU' ? [{ id: 'aria' as const, name: 'ARIA Charts', placeholder: 'https://www.aria.com.au/charts/...' }] : []),
+    { id: 'billboard' as const, name: 'Billboard', placeholder: 'https://www.billboard.com/charts/...' },
     { id: 'deezer' as const, name: 'Deezer', placeholder: 'Playlist ID or URL' },
     { id: 'youtube' as const, name: 'YouTube Music', placeholder: 'https://music.youtube.com/playlist?list=...' },
     { id: 'spotify' as const, name: 'Spotify', placeholder: 'https://open.spotify.com/playlist/...' },
@@ -702,6 +762,10 @@ export const ImportPage: FC = () => {
             break;
           case 'aria':
             endpoint = '/api/import/aria';
+            body.url = urlToImport;
+            break;
+          case 'billboard':
+            endpoint = '/api/import/billboard';
             body.url = urlToImport;
             break;
           case 'listenbrainz':
@@ -1657,7 +1721,7 @@ export const ImportPage: FC = () => {
                   Choose between 10 and 100 tracks for your playlist
                 </div>
               </div>
-            ) : (
+            ) : !['aria', 'billboard'].includes(activeSource) ? (
               <div>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
                   {['deezer', 'youtube'].includes(activeSource) ? `${currentSource?.name} URL or Search` : `${currentSource?.name} URL`}
@@ -1707,16 +1771,19 @@ export const ImportPage: FC = () => {
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
 
-            <button
-              className="btn btn-primary"
-              onClick={() => handleImport()}
-              disabled={isImporting || (!url && !username && !file && !aiPrompt) || (activeSource === 'ai' && !hasGeminiApiKey && !geminiApiKey)}
-              style={{ marginTop: '1rem', width: '100%' }}
-            >
-              {isImporting ? 'Importing...' : activeSource === 'ai' ? 'Generate Playlist' : 'Import Playlist'}
-            </button>
+            {/* Optional Custom Playlist Name */}
+            {!['aria', 'billboard'].includes(activeSource) && (
+              <button
+                className="btn btn-primary"
+                onClick={() => handleImport()}
+                disabled={isImporting || (!url && !username && !file && !aiPrompt) || (activeSource === 'ai' && !hasGeminiApiKey && !geminiApiKey)}
+                style={{ marginTop: '1rem', width: '100%' }}
+              >
+                {isImporting ? 'Importing...' : activeSource === 'ai' ? 'Generate Playlist' : 'Import Playlist'}
+              </button>
+            )}
           </div>
 
           {/* Popular/User Playlists */}
@@ -1936,6 +2003,79 @@ export const ImportPage: FC = () => {
                     <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: `ARIA Top 100 Singles ${ariaTop100Year}`, url: `https://www.aria.com.au/charts/${ariaTop100Year}/singles-chart` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
                   </div>
                 </div>
+              </div>
+            </>
+                    ) : activeSource === 'billboard' ? (
+            <>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', fontWeight: 500 }}>Billboard Charts</h3>
+              
+              {/* Info note about data source */}
+              <div style={{ 
+                padding: '0.75rem', 
+                marginBottom: '1rem', 
+                backgroundColor: 'var(--bg-secondary)', 
+                borderRadius: '8px',
+                fontSize: '0.875rem',
+                color: 'var(--text-secondary)'
+              }}>
+                <strong>Note:</strong> Billboard Hot 100 data is sourced from a public GitHub repository that's updated weekly. 
+                Charts are dated for Saturdays (though released on Tuesdays). Historical charts back to 1958 are available.
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
+                
+                {/* Billboard Hot 100 with Date Picker */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Billboard Hot 100</div>
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>
+                        Chart week (Saturday):
+                      </label>
+                      <select 
+                        value={billboardDate} 
+                        onChange={(e) => setBillboardDate(e.target.value)}
+                        style={{ 
+                          width: '100%', 
+                          padding: '0.5rem', 
+                          borderRadius: '4px', 
+                          border: '1px solid var(--border-color)',
+                          backgroundColor: 'var(--bg-primary)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.875rem'
+                        }}
+                      >
+                        {recentSaturdays.map(date => (
+                          <option key={date} value={date}>
+                            {formatDateDMY(date)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport(`https://www.billboard.com/charts/hot-100/${billboardDate}/`)} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: `Billboard Hot 100 - ${formatDateDMY(billboardDate)}`, 
+                        url: `https://www.billboard.com/charts/hot-100/${billboardDate}/` 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
               </div>
             </>
           ) : (currentPopular.length > 0 || (activeSource === 'spotify' && isLoadingSpotifyPlaylists) || isLoadingDynamicPlaylists) && (
@@ -3059,3 +3199,5 @@ export const ImportPage: FC = () => {
     </div>
   );
 };
+
+

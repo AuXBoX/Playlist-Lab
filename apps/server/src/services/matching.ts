@@ -206,9 +206,10 @@ async function findBestMatch(
     // If still no results, fall back to hub search (searches all fields, handles artist mismatches)
     if (allResults.length === 0) {
       try {
-        // Use cleaned artist (first artist only) for hub search
-        const hubQuery = `${cleanedArtist} ${track.title}`;
-        logger.info(`[Matching] Trying hub search fallback: query="${hubQuery}" (cleaned from "${track.artist}")`);
+        // Use cleaned artist and cleaned title for hub search
+        const cleanedTitle = cleanTrackTitle(track.title);
+        const hubQuery = `${cleanedArtist} ${cleanedTitle}`;
+        logger.info(`[Matching] Trying hub search fallback: query="${hubQuery}" (cleaned from "${track.artist} - ${track.title}")`);
         // Don't pass artist/title params to force hub search
         const results = await plexClient.searchTrack(hubQuery, libraryId, undefined, undefined);
         logger.info(`[Matching] Hub search returned ${results.length} results`);
@@ -292,7 +293,10 @@ async function findBestMatch(
         continue;
       }
       
-      const plexArtist = albumArtistMatches ? albumArtist : (trackArtist || albumArtist);
+      // For Various Artists compilations, prefer track artist over album artist
+      const plexArtist = isVariousArtists && trackArtist 
+        ? trackArtist 
+        : (albumArtistMatches ? albumArtist : (trackArtist || albumArtist));
       let score = calculateMatchScore(track.title, track.artist, plexTitle, plexArtist);
       
       logger.info(`[Matching] Initial score: ${score}`);
@@ -377,6 +381,40 @@ async function findBestMatch(
 
 function getCoreTitle(title: string): string {
   let core = title;
+  
+  // Remove remaster/deluxe/edition patterns BEFORE stripping parentheses/brackets
+  const remasterPatterns = [
+    /\s*-\s*remaster(?:ed)?\s*\d{4}/gi,
+    /\s*-\s*\d{4}\s*remaster(?:ed)?/gi,
+    /\s*-\s*remaster(?:ed)?/gi,
+    /\s*\(remaster(?:ed)?\s*\d{4}\)/gi,
+    /\s*\(remaster(?:ed)?\)/gi,
+    /\s*\[remaster(?:ed)?\s*\d{4}\]/gi,
+    /\s*\[remaster(?:ed)?\]/gi,
+    /\s*-\s*deluxe\s*edition/gi,
+    /\s*\(deluxe\s*edition\)/gi,
+    /\s*\[deluxe\s*edition\]/gi,
+    /\s*-\s*deluxe/gi,
+    /\s*\(deluxe\)/gi,
+    /\s*\[deluxe\]/gi,
+    /\s*-\s*\d{4}\s*edition/gi,
+    /\s*\(\d{4}\s*edition\)/gi,
+    /\s*\[\d{4}\s*edition\]/gi,
+    /\s*-\s*anniversary\s*edition/gi,
+    /\s*\(anniversary\s*edition\)/gi,
+    /\s*\[anniversary\s*edition\]/gi,
+    /\s*-\s*expanded\s*edition/gi,
+    /\s*\(expanded\s*edition\)/gi,
+    /\s*\[expanded\s*edition\]/gi,
+    /\s*-\s*special\s*edition/gi,
+    /\s*\(special\s*edition\)/gi,
+    /\s*\[special\s*edition\]/gi
+  ];
+  
+  for (const pattern of remasterPatterns) {
+    core = core.replace(pattern, '');
+  }
+  
   if (currentMatchingSettings.stripParentheses) core = core.replace(/\([^)]*\)/g, '');
   if (currentMatchingSettings.stripBrackets) core = core.replace(/\[[^\]]*\]/g, '');
   return core.replace(/\s+/g, ' ').trim();
@@ -384,6 +422,41 @@ function getCoreTitle(title: string): string {
 
 function cleanTrackTitle(title: string): string {
   let cleaned = title;
+  
+  // Remove remaster/deluxe/edition patterns BEFORE stripping parentheses/brackets
+  // This handles cases like "Song Title - Remastered" or "Song Title (Deluxe Edition)"
+  const remasterPatterns = [
+    /\s*-\s*remaster(?:ed)?\s*\d{4}/gi,
+    /\s*-\s*\d{4}\s*remaster(?:ed)?/gi,
+    /\s*-\s*remaster(?:ed)?/gi,
+    /\s*\(remaster(?:ed)?\s*\d{4}\)/gi,
+    /\s*\(remaster(?:ed)?\)/gi,
+    /\s*\[remaster(?:ed)?\s*\d{4}\]/gi,
+    /\s*\[remaster(?:ed)?\]/gi,
+    /\s*-\s*deluxe\s*edition/gi,
+    /\s*\(deluxe\s*edition\)/gi,
+    /\s*\[deluxe\s*edition\]/gi,
+    /\s*-\s*deluxe/gi,
+    /\s*\(deluxe\)/gi,
+    /\s*\[deluxe\]/gi,
+    /\s*-\s*\d{4}\s*edition/gi,
+    /\s*\(\d{4}\s*edition\)/gi,
+    /\s*\[\d{4}\s*edition\]/gi,
+    /\s*-\s*anniversary\s*edition/gi,
+    /\s*\(anniversary\s*edition\)/gi,
+    /\s*\[anniversary\s*edition\]/gi,
+    /\s*-\s*expanded\s*edition/gi,
+    /\s*\(expanded\s*edition\)/gi,
+    /\s*\[expanded\s*edition\]/gi,
+    /\s*-\s*special\s*edition/gi,
+    /\s*\(special\s*edition\)/gi,
+    /\s*\[special\s*edition\]/gi
+  ];
+  
+  for (const pattern of remasterPatterns) {
+    cleaned = cleaned.replace(pattern, '');
+  }
+  
   if (currentMatchingSettings.stripParentheses) cleaned = cleaned.replace(/\([^)]*\)/g, '');
   if (currentMatchingSettings.stripBrackets) cleaned = cleaned.replace(/\[[^\]]*\]/g, '');
   return cleaned.replace(/\s+/g, ' ').trim() || title;

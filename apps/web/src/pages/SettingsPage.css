@@ -170,8 +170,41 @@
 
 .settings-scan { display: flex; flex-direction: column; gap: 1rem; }
 .settings-scan-folder { display: flex; flex-direction: column; gap: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border); }
-.settings-folder-list { display: flex; flex-direction: column; gap: 2px; }
+.settings-folder-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 0.75rem; }
 .settings-folder-path { font-size: 0.75rem; font-family: 'JetBrains Mono', 'Courier New', monospace; color: var(--text-secondary); padding: 0.2rem 0; }
+
+.settings-folder-button {
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  color: var(--text-secondary);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.settings-folder-button:hover {
+  background: var(--surface-hover);
+  border-color: var(--primary-color);
+  color: var(--text-primary);
+}
+
+.settings-input-group {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.settings-input-group .settings-input {
+  flex: 1;
+}
+
+.settings-input-group .btn {
+  flex-shrink: 0;
+}
 
 .settings-mix-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.5rem; }
 
@@ -217,6 +250,11 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.settings-service-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .settings-service-name {

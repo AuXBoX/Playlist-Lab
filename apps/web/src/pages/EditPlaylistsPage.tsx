@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../contexts/AppContext';
 import './EditPlaylistsPage.css';
 
@@ -48,6 +48,10 @@ export function EditPlaylistsPage() {
   const [replaceSearchQuery, setReplaceSearchQuery] = useState('');
   const [replaceSearchResults, setReplaceSearchResults] = useState<Track[]>([]);
   const [searchingReplace, setSearchingReplace] = useState(false);
+  
+  // Scroll position preservation
+  const scrollPositionRef = useRef<number>(0);
+  const shouldRestoreScroll = useRef<boolean>(false);
 
   useEffect(() => {
     loadPlaylists();
@@ -58,6 +62,20 @@ export function EditPlaylistsPage() {
       audioElement.src = '';
     };
   }, []);
+
+  // Restore scroll position after tracks update
+  useEffect(() => {
+    if (shouldRestoreScroll.current && tracks.length > 0) {
+      const scrollContainer = document.querySelector('.tracks-panel');
+      if (scrollContainer) {
+        // Use requestAnimationFrame to ensure DOM is fully updated
+        requestAnimationFrame(() => {
+          scrollContainer.scrollTop = scrollPositionRef.current;
+          shouldRestoreScroll.current = false;
+        });
+      }
+    }
+  }, [tracks]);
 
   const loadPlaylists = async () => {
     try {
@@ -105,12 +123,12 @@ export function EditPlaylistsPage() {
     loadTracks(playlist.id);
   };
 
-  const handleRemoveTrack = async (trackId: string) => {
+  const handleRemoveTrack = async (playlistItemId: number) => {
     if (!selectedPlaylist) return;
     
     try {
-      await apiClient.removeTrackFromPlaylist(selectedPlaylist.id, trackId);
-      setTracks(tracks.filter(t => t.ratingKey !== trackId));
+      await apiClient.removeTrackFromPlaylist(selectedPlaylist.id, playlistItemId.toString());
+      setTracks(tracks.filter(t => t.playlistItemID !== playlistItemId));
     } catch (err: any) {
       console.error('Failed to remove track:', err);
       alert(err.message || 'Failed to remove track');
@@ -421,6 +439,13 @@ export function EditPlaylistsPage() {
   };
 
   const handleOpenReplaceModal = (track: Track) => {
+    // Save scroll position when opening modal
+    const scrollContainer = document.querySelector('.tracks-panel');
+    if (scrollContainer) {
+      scrollPositionRef.current = scrollContainer.scrollTop;
+      shouldRestoreScroll.current = true;
+    }
+    
     setTrackToReplace(track);
     setReplaceSearchQuery(`${track.artist} ${track.title}`);
     setReplaceSearchResults([]);
@@ -432,6 +457,17 @@ export function EditPlaylistsPage() {
     setTrackToReplace(null);
     setReplaceSearchQuery('');
     setReplaceSearchResults([]);
+    
+    // If closing without replacing, restore scroll immediately
+    if (shouldRestoreScroll.current) {
+      const scrollContainer = document.querySelector('.tracks-panel');
+      if (scrollContainer) {
+        requestAnimationFrame(() => {
+          scrollContainer.scrollTop = scrollPositionRef.current;
+          shouldRestoreScroll.current = false;
+        });
+      }
+    }
   };
 
   const handleSearchReplace = async () => {
@@ -455,11 +491,11 @@ export function EditPlaylistsPage() {
         id: item.ratingKey,
         ratingKey: item.ratingKey,
         title: item.title,
-        artist: item.grandparentTitle || 'Unknown Artist',
-        album: item.parentTitle || 'Unknown Album',
+        artist: item.artist || 'Unknown Artist',
+        album: item.album || 'Unknown Album',
         duration: item.duration || 0,
-        codec: item.Media?.[0]?.audioCodec || 'N/A',
-        bitrate: item.Media?.[0]?.bitrate || 0,
+        codec: item.codec || 'N/A',
+        bitrate: item.bitrate || 0,
       })));
     } catch (err) {
       console.error('Search failed:', err);
@@ -473,29 +509,91 @@ export function EditPlaylistsPage() {
     if (!selectedPlaylist || !trackToReplace) return;
 
     try {
-      // Remove old track
-      await apiClient.removeTrackFromPlaylist(selectedPlaylist.id, trackToReplace.ratingKey);
+      // Check if trying to replace with the same track
+      if (newTrack.ratingKey === trackToReplace.ratingKey) {
+        // Same track - just close modal and refresh to show updated metadata
+        handleCloseReplaceModal();
+        await loadTracks(selectedPlaylist.id);
+        return;
+      }
 
-      // Add new track
+      // Save scroll position before any operations
+      const scrollContainer = document.querySelector('.tracks-panel');
+      if (scrollContainer) {
+        scrollPositionRef.current = scrollContainer.scrollTop;
+        shouldRestoreScroll.current = true;
+      }
+
+      // Step 1: Find the position of the track to replace
+      const oldTrackIndex = tracks.findIndex(t => t.playlistItemID === trackToReplace.playlistItemID);
+      if (oldTrackIndex === -1) {
+        throw new Error('Track not found in playlist');
+      }
+
+      // Remember the old track's ratingKey to find it after the move
+      const oldTrackRatingKey = trackToReplace.ratingKey;
+
+      // Determine the track that should come before the new track (same position as old track)
+      const afterIndex = oldTrackIndex - 1;
+      const afterTrackId = afterIndex < 0 ? '0' : tracks[afterIndex].playlistItemID?.toString() || '0';
+
+      // Step 2: Add new track (it will be added to the end)
       const trackUri = `server://${server?.clientId}/com.plexapp.plugins.library/library/metadata/${newTrack.ratingKey}`;
       
-      const response = await fetch(`/api/playlists/${selectedPlaylist.id}/tracks`, {
+      const addResponse = await fetch(`/api/playlists/${selectedPlaylist.id}/tracks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trackUris: [trackUri] }),
       });
 
-      if (!response.ok) {
+      if (!addResponse.ok) {
         throw new Error('Failed to add replacement track');
       }
 
-      // Refresh tracks
+      // Step 3: Refresh tracks to get the new track's playlistItemID
+      await loadTracks(selectedPlaylist.id);
+
+      // Step 4: Find the newly added track (it should be at the end)
+      const updatedTracks = await apiClient.getPlaylistTracks(selectedPlaylist.id);
+      const newTrackItem = updatedTracks.tracks[updatedTracks.tracks.length - 1];
+      
+      if (!newTrackItem.playlistItemID) {
+        throw new Error('New track does not have a playlist item ID');
+      }
+
+      // Step 5: Move the new track to the correct position (where the old track was)
+      const moveResponse = await fetch(`/api/playlists/${selectedPlaylist.id}/tracks/${newTrackItem.playlistItemID}/move`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ afterId: afterTrackId }),
+      });
+
+      if (!moveResponse.ok) {
+        throw new Error('Failed to move replacement track to correct position');
+      }
+
+      // Step 6: Refresh to get updated positions after the move
+      const tracksAfterMove = await apiClient.getPlaylistTracks(selectedPlaylist.id);
+      
+      // Step 7: Find the old track by its ratingKey (playlistItemID has changed after move)
+      const oldTrackAfterMove = tracksAfterMove.tracks.find(t => t.ratingKey === oldTrackRatingKey);
+      
+      if (!oldTrackAfterMove || !oldTrackAfterMove.playlistItemID) {
+        throw new Error('Could not find old track after move');
+      }
+      
+      // Step 8: Remove old track using its updated playlistItemID
+      await apiClient.removeTrackFromPlaylist(selectedPlaylist.id, oldTrackAfterMove.playlistItemID.toString());
+
+      // Step 9: Final refresh to show updated list (scroll will be restored by useEffect)
       await loadTracks(selectedPlaylist.id);
       handleCloseReplaceModal();
-      alert('Track replaced successfully');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to replace track:', err);
-      alert('Failed to replace track');
+      alert(`Failed to replace track: ${err.message || 'Unknown error'}`);
+      shouldRestoreScroll.current = false;
+      // Refresh tracks to show current state even if replacement failed
+      await loadTracks(selectedPlaylist.id);
     }
   };
 
@@ -701,8 +799,9 @@ export function EditPlaylistsPage() {
                           <td className="col-actions">
                             <button
                               className="btn-icon"
-                              onClick={() => handleRemoveTrack(track.ratingKey)}
+                              onClick={() => track.playlistItemID && handleRemoveTrack(track.playlistItemID)}
                               title="Remove track"
+                              disabled={!track.playlistItemID}
                             >
                               ×
                             </button>

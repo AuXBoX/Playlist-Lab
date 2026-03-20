@@ -375,25 +375,203 @@ export class APIClient {
   async generateCustomMix(settings: {
     name: string;
     trackCount: number;
+    
+    // Time filters
     playedInLastDays?: number;
     notPlayedInLastDays?: number;
     addedInLastDays?: number;
+    
+    // Release date filters
     releasedAfterYear?: number;
     releasedBeforeYear?: number;
+    
+    // Rating & popularity
+    minRating?: number;
+    maxRating?: number;
+    minPlayCount?: number;
+    maxPlayCount?: number;
+    popularTracksOnly?: boolean; // Only include tracks from Plex's "Popular Tracks" section
+    
+    // Track characteristics
+    minDuration?: number; // in seconds
+    maxDuration?: number; // in seconds
+    minTrackNumber?: number;
+    maxTrackNumber?: number;
+    discNumber?: number;
+    
+    // Quality filters
+    minBitrate?: number; // in kbps
+    audioCodec?: string[]; // e.g., ['flac', 'mp3']
+    minSampleRate?: number; // in Hz
+    losslessOnly?: boolean;
+    
+    // Metadata filters
     genres?: string[];
     excludeGenres?: string[];
-    minRating?: number;
-    sortBy: 'random' | 'playCount' | 'lastPlayed' | 'dateAdded' | 'releaseDate' | 'rating';
+    moods?: string[];
+    excludeMoods?: string[];
+    styles?: string[];
+    excludeStyles?: string[];
+    collections?: string[];
+    labels?: string[]; // record labels
+    
+    // Artist/Album filters
+    artistNames?: string[];
+    albumTitles?: string[];
+    
+    // Sorting
+    sortBy: 'random' | 'playCount' | 'lastPlayed' | 'dateAdded' | 'releaseDate' | 'rating' | 'duration' | 'title';
     sortDirection: 'asc' | 'desc';
-  }): Promise<Playlist> {
-    return this.request('/api/mixes/custom', {
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/custom-advanced', {
       method: 'POST',
-      body: JSON.stringify({ settings }),
+      body: JSON.stringify(settings),
     });
+  }
+
+  async generateSonicMix(settings: {
+    name: string;
+    seedTrackKey: string;
+    trackCount: number;
+    maxDistance?: number; // 0-1, lower = more similar
+    tempoRange?: { min: number; max: number };
+    energyRange?: { min: number; max: number };
+    danceabilityRange?: { min: number; max: number };
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/sonic', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async getLibraryGenres(): Promise<{ genres: string[] }> {
+    return this.request('/api/mixes/metadata/genres');
+  }
+
+  async getLibraryMoods(): Promise<{ moods: string[] }> {
+    return this.request('/api/mixes/metadata/moods');
+  }
+
+  async getLibraryStyles(): Promise<{ styles: string[] }> {
+    return this.request('/api/mixes/metadata/styles');
+  }
+
+  async getLibraryCollections(): Promise<{ collections: string[] }> {
+    return this.request('/api/mixes/metadata/collections');
   }
 
   async generateAllMixes(): Promise<Playlist[]> {
     return this.request('/api/mixes/all', { method: 'POST' });
+  }
+
+  // New mix generation methods
+  async generateDeepCutsMix(settings?: {
+    playlistName?: string;
+    trackCount?: number;
+    maxPlayCount?: number;
+    excludePopular?: boolean;
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/deep-cuts', {
+      method: 'POST',
+      body: JSON.stringify(settings || {}),
+    });
+  }
+
+  async generateArtistDiscoveryMix(settings: {
+    seedArtistKey: string;
+    playlistName?: string;
+    trackCount?: number;
+    tracksPerArtist?: number;
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/artist-discovery', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async generateMoodMix(settings: {
+    moods: string[];
+    playlistName?: string;
+    trackCount?: number;
+    useSonicAnalysis?: boolean;
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/mood', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async generateEraMix(settings: {
+    startYear: number;
+    endYear: number;
+    playlistName?: string;
+    trackCount?: number;
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/era', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async generateGenreEvolutionMix(settings: {
+    genre: string;
+    playlistName?: string;
+    trackCount?: number;
+    tracksPerDecade?: number;
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/genre-evolution', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async generateArtistJourneyMix(settings: {
+    artistKey: string;
+    playlistName?: string;
+    trackCount?: number;
+    tracksPerAlbum?: number;
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/artist-journey', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async generateWorkoutMix(settings?: {
+    playlistName?: string;
+    trackCount?: number;
+    warmupTracks?: number;
+    peakTracks?: number;
+    cooldownTracks?: number;
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/workout', {
+      method: 'POST',
+      body: JSON.stringify(settings || {}),
+    });
+  }
+
+  async generateForgottenFavoritesMix(settings?: {
+    playlistName?: string;
+    trackCount?: number;
+    minPlayCount?: number;
+    notPlayedDays?: number;
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/forgotten-favorites', {
+      method: 'POST',
+      body: JSON.stringify(settings || {}),
+    });
+  }
+
+  async generateGenreBlendMix(settings: {
+    genres: string[];
+    playlistName?: string;
+    trackCount?: number;
+    minGenres?: number;
+  }): Promise<{ success: boolean; playlist: { id: string; name: string; trackCount: number } }> {
+    return this.request('/api/mixes/genre-blend', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
   }
 
   // Schedule methods
@@ -573,6 +751,57 @@ export class APIClient {
     return this.request('/api/migrate/desktop', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  // Mix Template methods
+  async getMixTemplates(): Promise<{ templates: any[] }> {
+    return this.request('/api/mix-templates');
+  }
+
+  async getMixTemplate(id: number): Promise<any> {
+    return this.request(`/api/mix-templates/${id}`);
+  }
+
+  async createMixTemplate(data: {
+    name: string;
+    description?: string;
+    mixType: string;
+    configuration: any;
+  }): Promise<{ id: number; message: string }> {
+    return this.request('/api/mix-templates', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateMixTemplate(id: number, data: {
+    name?: string;
+    description?: string;
+    configuration?: any;
+  }): Promise<{ message: string }> {
+    return this.request(`/api/mix-templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteMixTemplate(id: number): Promise<{ message: string }> {
+    return this.request(`/api/mix-templates/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async generateMixFromTemplate(id: number, playlistName?: string): Promise<{
+    success: boolean;
+    playlistId: string;
+    trackCount: number;
+    warnings: string[];
+    message: string;
+  }> {
+    return this.request(`/api/mix-templates/${id}/generate`, {
+      method: 'POST',
+      body: JSON.stringify({ playlistName }),
     });
   }
 }

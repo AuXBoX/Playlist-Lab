@@ -224,3 +224,24 @@ CREATE TABLE IF NOT EXISTS oauth_connections (
 );
 
 CREATE INDEX IF NOT EXISTS idx_oauth_connections_user_service ON oauth_connections(user_id, service);
+
+-- Mix templates table
+-- Stores saved mix configurations for quick regeneration
+CREATE TABLE IF NOT EXISTS mix_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  mix_type TEXT NOT NULL,        -- 'artist', 'album', 'genre', 'mood', 'decade', 'custom'
+  configuration TEXT NOT NULL,   -- JSON blob with all mix parameters
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_used_at INTEGER,
+  use_count INTEGER DEFAULT 0,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_mix_templates_user_id ON mix_templates(user_id);
+CREATE INDEX IF NOT EXISTS idx_mix_templates_mix_type ON mix_templates(mix_type);
+-- Composite index for sorting by last_used_at and updated_at (performance optimization)
+CREATE INDEX IF NOT EXISTS idx_mix_templates_user_usage ON mix_templates(user_id, last_used_at DESC, updated_at DESC);

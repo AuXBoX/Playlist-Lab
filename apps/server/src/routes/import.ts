@@ -5,6 +5,23 @@ import { logger } from '../utils/logger';
 import { importPlaylist, ImportOptions } from '../services/import';
 import { EventEmitter } from 'events';
 import { debugLog } from '../utils/debug-logger';
+import multer from 'multer';
+
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit for playlist files
+  fileFilter: (_req, file, cb) => {
+    // Accept M3U, M3U8, and TXT files (some programs export as .txt)
+    const allowedExtensions = ['.m3u', '.m3u8', '.txt'];
+    const ext = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf('.'));
+    
+    if (allowedExtensions.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type. Please upload M3U, M3U8, or TXT playlist files. Got: ${ext}`));
+    }
+  }
+});
 
 const router = Router();
 
@@ -138,7 +155,7 @@ async function handleImport(
   req: Request,
   res: Response,
   next: NextFunction,
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'aria'
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'aria' | 'billboard'
 ) {
   debugLog('========== IMPORT REQUEST RECEIVED ==========');
   debugLog('Source:', source);
@@ -146,10 +163,11 @@ async function handleImport(
   debugLog('============================================');
 
   try {
-    const { url, sessionId } = req.body;
+    const { url, sessionId, customName } = req.body;
 
     debugLog('[Import Route] URL:', url);
     debugLog('[Import Route] SessionId:', sessionId);
+    debugLog('[Import Route] Custom Name:', customName);
 
     if (!url || typeof url !== 'string') {
       debugLog('[Import Route] ERROR: URL validation failed');
@@ -199,6 +217,7 @@ async function handleImport(
       serverUrl,
       plexToken,
       libraryId,
+      customName: customName?.trim() || undefined,
     };
 
     // Get progress emitter if sessionId provided
@@ -348,6 +367,14 @@ router.post('/aria', async (req: Request, res: Response, next: NextFunction) => 
 });
 
 /**
+ * POST /api/import/billboard
+ * Import a Billboard chart
+ */
+router.post('/billboard', async (req: Request, res: Response, next: NextFunction) => {
+  await handleImport(req, res, next, 'billboard');
+});
+
+/**
  * POST /api/import/listenbrainz
  * Import a ListenBrainz playlist
  */
@@ -359,43 +386,140 @@ router.post('/listenbrainz', async (req: Request, res: Response, next: NextFunct
  * POST /api/import/file
  * Import a playlist from a file (M3U, CSV, etc.)
  */
-router.post('/file', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/file', requireAuth, upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { content, filename, serverUrl, plexToken, libraryId } = req.body;
+    const { sessionId } = req.body;
+    const file = req.file;
 
-    if (!content || typeof content !== 'string') {
-      return next(createValidationError('content is required and must be a string'));
+    if (!file) {
+      return next(createValidationError('No file uploaded'));
     }
 
-    if (!filename || typeof filename !== 'string') {
-      return next(createValidationError('filename is required and must be a string'));
+    // Read file content with encoding detection
+    let content: string;
+    try {
+      // Try UTF-8 first
+      content = file.buffer.toString('utf-8');
+      
+      // Check for invalid UTF-8 sequences
+      if (content.includes('\uFFFD')) {
+        // Try other encodings if UTF-8 fails
+        content = file.buffer.toString('latin1');
+      }
+    } catch (error) {
+      return next(createValidationError('Unable to read file. Please ensure it is a text-based playlist file.'));
     }
+    
+    const filename = file.originalname;
 
-    if (!serverUrl || typeof serverUrl !== 'string') {
-      return next(createValidationError('serverUrl is required and must be a string'));
+    debugLog('[File Import] ========== FILE UPLOAD ==========');
+    debugLog('[File Import] Filename: ' + filename);
+    debugLog('[File Import] Size: ' + file.size + ' bytes');
+    debugLog('[File Import] Content length: ' + content.length + ' chars');
+    debugLog('[File Import] SessionId: ' + sessionId);
+    debugLog('[File Import] ==========================================');
+
+    if (!content || content.trim().length === 0) {
+      return next(createValidationError('File is empty. Please upload a valid playlist file.'));
     }
-
-    if (!plexToken || typeof plexToken !== 'string') {
-      return next(createValidationError('plexToken is required and must be a string'));
+    
+    // Basic validation - check if it looks like a playlist file
+    const hasExtinf = content.includes('#EXTINF');
+    const hasM3UHeader = content.includes('#EXTM3U');
+    const hasFilePaths = /\.(mp3|m4a|flac|wav|ogg|aac|wma)/i.test(content);
+    
+    if (!hasExtinf && !hasM3UHeader && !hasFilePaths) {
+      debugLog('[File Import] File validation failed - no playlist markers found');
+      return next(createValidationError('File does not appear to be a valid M3U playlist. Please check the file format.'));
     }
 
     const userId = req.session.userId!;
     const db = req.dbService!;
+
+    // Get user's Plex token from users table
+    const userRow = (db as any).db.prepare('SELECT plex_token FROM users WHERE id = ?').get(userId);
+
+    if (!userRow) {
+      return next(createValidationError('User not found'));
+    }
+
+    const { plex_token: plexToken } = userRow;
+
+    if (!plexToken || typeof plexToken !== 'string') {
+      return next(createValidationError('No Plex token found. Please log in again.'));
+    }
+
+    // Get user's server configuration from user_servers table
+    const serverRow = (db as any).db.prepare('SELECT server_url, library_id FROM user_servers WHERE user_id = ? LIMIT 1').get(userId);
+
+    if (!serverRow) {
+      return next(createValidationError('No Plex server configured. Please go to Settings and select a server.'));
+    }
+
+    const { server_url: serverUrl, library_id: libraryId } = serverRow;
+
+    if (!serverUrl || typeof serverUrl !== 'string') {
+      return next(createValidationError('No Plex server URL configured. Please go to Settings and select a server.'));
+    }
 
     const options: ImportOptions = {
       userId,
       serverUrl,
       plexToken,
       libraryId,
+      filename, // Pass filename for parseM3UFile
     };
 
-    // For file imports, we use the content as the sourceIdentifier
-    const result = await importPlaylist('file', content, options, db);
+    // Get progress emitter if sessionId provided
+    let progressEmitter = sessionId ? importSessions.get(sessionId) : undefined;
 
-    res.json(result);
-  } catch (error) {
-    logger.error('Failed to import playlist from file', { error, filename: req.body.filename });
-    next(createInternalError('Failed to import playlist from file'));
+    // If sessionId was provided but emitter not found, create a fallback emitter
+    if (sessionId && !progressEmitter) {
+      debugLog('[File Import] No SSE emitter found, creating fallback for polling');
+      progressEmitter = new EventEmitter();
+      importSessions.set(sessionId, progressEmitter);
+      progressEmitter.on('progress', (data: any) => {
+        progressState.set(sessionId, data);
+      });
+      progressEmitter.on('complete', (data: any) => {
+        progressState.set(sessionId, { type: 'complete', ...data });
+      });
+      progressEmitter.on('error', (data: any) => {
+        progressState.set(sessionId, { type: 'error', ...data });
+      });
+    }
+
+    // For file imports, we pass the content and filename separately
+    // The parseM3UFile function expects content as the sourceIdentifier
+    debugLog('[File Import] Calling importPlaylist with file content');
+    
+    if (!progressEmitter) {
+      // No SSE connection, run synchronously
+      const result = await importPlaylist('file', content, options, db, progressEmitter, sessionId, cancelledSessions);
+      debugLog('[File Import] Import complete, sending response');
+      res.json(result);
+    } else {
+      // SSE connection exists, run asynchronously
+      debugLog('[File Import] Running import asynchronously with SSE');
+      
+      // Return immediately
+      res.json({ success: true, message: 'Import started' });
+      
+      // Run import in background
+      importPlaylist('file', content, options, db, progressEmitter, sessionId, cancelledSessions)
+        .then((result) => {
+          debugLog('[File Import] Background import complete');
+          progressEmitter!.emit('complete', result);
+        })
+        .catch((error) => {
+          debugLog('[File Import] Background import error:', error.message);
+          logger.error('File import failed', { error, filename });
+          progressEmitter!.emit('error', { message: error.message || 'Import failed' });
+        });
+    }
+  } catch (error: any) {
+    logger.error('Failed to import playlist from file', { error, filename: req.file?.originalname });
+    next(createInternalError(`Failed to import playlist: ${error.message || 'Unknown error'}`));
   }
 });
 

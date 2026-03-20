@@ -917,15 +917,50 @@ export async function scrapeAriaPlaylist(url: string, progressEmitter?: EventEmi
   }
 }
 
+/**
+ * Scrape Billboard chart
+ * Uses billboard-top-100 NPM package for reliable data
+ */
+export async function scrapeBillboardPlaylist(url: string, progressEmitter?: EventEmitter): Promise<ExternalPlaylist> {
+  progressEmitter?.emit('progress', {
+    type: 'progress',
+    phase: 'scraping',
+    current: 0,
+    total: 0,
+    currentTrackName: 'Fetching Billboard chart...'
+  });
+
+  try {
+    const { scrapeBillboardChart } = await import('./browser-scrapers');
+    return await scrapeBillboardChart(url, progressEmitter);
+  } catch (error) {
+    console.error('[Billboard] Scraping failed:', error);
+    throw new Error(`Failed to scrape Billboard chart: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
 
 // ==================== M3U FILE PARSING ====================
 
 /**
  * Parse M3U/M3U8 playlist file content
+ * Supports various formats:
+ * - iTunes/Apple Music: #EXTINF:duration,Title - Artist
+ * - Standard M3U: #EXTINF:duration,Artist - Title
+ * - Simple M3U: Just file paths (no EXTINF)
+ * - Extended formats with additional metadata
  */
 export function parseM3UFile(content: string, fileName: string): ExternalPlaylist {
+  debugLog('[parseM3UFile] ========== PARSING FILE ==========');
+  debugLog('[parseM3UFile] Filename: ' + fileName);
+  debugLog('[parseM3UFile] Content length: ' + content.length + ' chars');
+  debugLog('[parseM3UFile] First 200 chars: ' + content.substring(0, 200));
+  debugLog('[parseM3UFile] =====================================');
+  
   const lines = content.split(/\r?\n/);
   const tracks: ExternalTrack[] = [];
+  
+  debugLog('[parseM3UFile] Total lines: ' + lines.length);
   
   let currentTitle = '';
   let currentArtist = '';
@@ -933,12 +968,16 @@ export function parseM3UFile(content: string, fileName: string): ExternalPlaylis
   // Detect format by analyzing first few EXTINF lines
   // Apple Music/iTunes uses "Title - Artist", most others use "Artist - Title"
   let useAppleFormat = false;
-  const sampleLines = lines.slice(0, 20).filter(l => l.trim().startsWith('#EXTINF:'));
-  if (sampleLines.length >= 3) {
+  const sampleLines = lines.slice(0, 30).filter(l => l.trim().startsWith('#EXTINF:'));
+  debugLog('[parseM3UFile] Sample EXTINF lines found: ' + sampleLines.length);
+  
+  if (sampleLines.length >= 2) {
     // Heuristic: if the part after " - " looks like a single artist name (no special chars like parentheses),
     // it's likely Apple format (Title - Artist)
     let appleFormatCount = 0;
-    for (const sample of sampleLines.slice(0, Math.min(5, sampleLines.length))) {
+    let standardFormatCount = 0;
+    
+    for (const sample of sampleLines.slice(0, Math.min(10, sampleLines.length))) {
       const match = sample.match(/#EXTINF:[^,]*,(.+)/);
       if (match) {
         const info = match[1].trim();
@@ -946,20 +985,31 @@ export function parseM3UFile(content: string, fileName: string): ExternalPlaylis
         if (dashIndex > 0) {
           const beforeDash = info.substring(0, dashIndex).trim();
           const afterDash = info.substring(dashIndex + 3).trim();
-          // If after dash has no parentheses/brackets and is relatively short, likely artist name
-          // Also check if before dash has parentheses (common in song titles)
-          if (!/[(\[{]/.test(afterDash) && afterDash.length < 50 && /[(\[{]/.test(beforeDash)) {
+          
+          // Check for Apple format indicators:
+          // - After dash is short and simple (likely artist name)
+          // - Before dash has special chars (common in song titles)
+          const afterDashSimple = !/[(\[{]/.test(afterDash) && afterDash.length < 50;
+          const beforeDashComplex = /[(\[{]/.test(beforeDash);
+          
+          if (afterDashSimple && beforeDashComplex) {
             appleFormatCount++;
+          } else if (!afterDashSimple || afterDash.length > 50) {
+            // Likely standard format (Artist - Title)
+            standardFormatCount++;
           }
         }
       }
     }
-    useAppleFormat = appleFormatCount >= Math.ceil(sampleLines.slice(0, Math.min(5, sampleLines.length)).length / 2);
+    
+    // Use Apple format if majority of samples indicate it
+    useAppleFormat = appleFormatCount > standardFormatCount;
+    debugLog(`[parseM3UFile] Format detection - Apple: ${appleFormatCount}, Standard: ${standardFormatCount}`);
     debugLog(`[parseM3UFile] Detected format: ${useAppleFormat ? 'Apple (Title - Artist)' : 'Standard (Artist - Title)'}`);
   }
   
-  for (const line of lines) {
-    const trimmed = line.trim();
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
     
     // Skip empty lines and comments (except EXTINF)
     if (!trimmed || (trimmed.startsWith('#') && !trimmed.startsWith('#EXTINF'))) {
@@ -972,7 +1022,11 @@ export function parseM3UFile(content: string, fileName: string): ExternalPlaylis
       if (match) {
         const info = match[1].trim();
         
-        // Use lastIndexOf to handle titles with multiple dashes
+        // Try to parse artist and title from the info string
+        // Support multiple formats:
+        // 1. "Artist - Title" or "Title - Artist"
+        // 2. "Title" only (no artist)
+        
         const dashIndex = info.lastIndexOf(' - ');
         if (dashIndex > 0) {
           const part1 = info.substring(0, dashIndex).trim();
@@ -1004,11 +1058,18 @@ export function parseM3UFile(content: string, fileName: string): ExternalPlaylis
         currentTitle = '';
         currentArtist = '';
       } else {
-        // Try to extract from filename
+        // No EXTINF metadata - try to extract from filename
+        // This handles simple M3U files without extended info
         const filename = trimmed.split(/[/\\]/).pop() || '';
         const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
         
-        // Use lastIndexOf to handle filenames with multiple dashes
+        // Skip if it looks like a URL without useful info
+        if (nameWithoutExt.length < 3 || /^https?:/.test(trimmed)) {
+          debugLog('[parseM3UFile] Skipping line without metadata: ' + trimmed.substring(0, 50));
+          continue;
+        }
+        
+        // Try to parse filename for artist/title
         const dashIndex = nameWithoutExt.lastIndexOf(' - ');
         if (dashIndex > 0) {
           const part1 = nameWithoutExt.substring(0, dashIndex).trim();
@@ -1028,6 +1089,7 @@ export function parseM3UFile(content: string, fileName: string): ExternalPlaylis
             });
           }
         } else {
+          // No separator - use filename as title
           tracks.push({
             title: nameWithoutExt,
             artist: 'Unknown',
@@ -1037,9 +1099,21 @@ export function parseM3UFile(content: string, fileName: string): ExternalPlaylis
     }
   }
   
+  debugLog('[parseM3UFile] ========== PARSING COMPLETE ==========');
+  debugLog('[parseM3UFile] Tracks found: ' + tracks.length);
+  if (tracks.length > 0) {
+    debugLog('[parseM3UFile] First track: ' + JSON.stringify(tracks[0]));
+    debugLog('[parseM3UFile] Last track: ' + JSON.stringify(tracks[tracks.length - 1]));
+  }
+  debugLog('[parseM3UFile] =====================================');
+  
+  if (tracks.length === 0) {
+    throw new Error('No tracks found in file. Please ensure the file is a valid M3U/M3U8 playlist with track information.');
+  }
+  
   return {
     id: `m3u-${Date.now()}`,
-    name: fileName,
+    name: fileName.replace(/\.[^.]+$/, ''), // Remove extension from name
     description: `Imported from ${fileName}`,
     source: 'file',
     tracks,

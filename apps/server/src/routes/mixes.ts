@@ -461,9 +461,9 @@ router.post('/custom-advanced', async (req: Request, res: Response, next: NextFu
   try {
     const userId = req.session.userId!;
     const db = req.dbService!;
-    const customSettings = req.body;
+    const { name, trackCount, ...filterOptions } = req.body;
 
-    if (!customSettings.name || !customSettings.trackCount) {
+    if (!name || !trackCount) {
       return next(createValidationError('Playlist name and track count are required'));
     }
 
@@ -473,14 +473,17 @@ router.post('/custom-advanced', async (req: Request, res: Response, next: NextFu
       return next(createInternalError('User not found'));
     }
 
-    logger.info('Generating custom advanced mix', { userId, libraryId: userServer.library_id, settings: customSettings });
+    logger.info('Generating custom advanced mix', { userId, libraryId: userServer.library_id, name, trackCount });
 
     // Generate mix with custom filters
     const result = await mixService.generateCustomMix(
       userServer.server_url,
       user.plex_token,
       userServer.library_id!,
-      customSettings
+      {
+        trackCount,
+        ...filterOptions
+      }
     );
 
     if (result.trackCount === 0) {
@@ -492,7 +495,7 @@ router.post('/custom-advanced', async (req: Request, res: Response, next: NextFu
 
     // Create playlist
     const playlist = await createPlaylistFromMix(
-      customSettings.name,
+      name,
       result.trackKeys,
       userServer.server_url,
       user.plex_token,
@@ -508,13 +511,185 @@ router.post('/custom-advanced', async (req: Request, res: Response, next: NextFu
       success: true,
       playlist: {
         id: playlist.playlistId,
-        name: customSettings.name,
+        name: name,
         trackCount: playlist.trackCount
       }
     });
   } catch (error: any) {
     logger.error('Failed to generate custom advanced mix', { error: error.message });
     next(createInternalError(error.message || 'Failed to generate custom advanced mix'));
+  }
+});
+
+/**
+ * POST /api/mixes/sonic
+ * Generate sonic similarity mix based on a seed track
+ */
+router.post('/sonic', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const { name, seedTrackKey, trackCount, maxDistance, tempoRange, energyRange, danceabilityRange } = req.body;
+
+    if (!name || !seedTrackKey || !trackCount) {
+      return next(createValidationError('Playlist name, seed track, and track count are required'));
+    }
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    logger.info('Generating sonic mix', { userId, libraryId: userServer.library_id, seedTrackKey, trackCount });
+
+    // Generate sonic mix
+    const result = await mixService.generateSonicMix(
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      {
+        seedTrackKey,
+        trackCount,
+        maxDistance,
+        tempoRange,
+        energyRange,
+        danceabilityRange
+      }
+    );
+
+    if (result.trackCount === 0) {
+      return res.json({
+        success: false,
+        message: 'No similar tracks found. Try adjusting the parameters or selecting a different seed track.'
+      });
+    }
+
+    // Create playlist
+    const playlist = await createPlaylistFromMix(
+      name,
+      result.trackKeys,
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      userServer.server_client_id,
+      userId,
+      db
+    );
+
+    logger.info('Sonic mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
+
+    res.json({
+      success: true,
+      playlist: {
+        id: playlist.playlistId,
+        name: name,
+        trackCount: playlist.trackCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to generate sonic mix', { error: error.message });
+    next(createInternalError(error.message || 'Failed to generate sonic mix'));
+  }
+});
+
+/**
+ * GET /api/mixes/metadata/genres
+ * Get all available genres from the user's library
+ */
+router.get('/metadata/genres', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    const plex = new PlexClient(userServer.server_url, user.plex_token);
+    const genres = await plex.getLibraryGenres(userServer.library_id!);
+
+    res.json({ genres });
+  } catch (error: any) {
+    logger.error('Failed to get library genres', { error: error.message });
+    next(createInternalError(error.message || 'Failed to get library genres'));
+  }
+});
+
+/**
+ * GET /api/mixes/metadata/moods
+ * Get all available moods from the user's library
+ */
+router.get('/metadata/moods', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    const plex = new PlexClient(userServer.server_url, user.plex_token);
+    const moods = await plex.getLibraryMoods(userServer.library_id!);
+
+    res.json({ moods });
+  } catch (error: any) {
+    logger.error('Failed to get library moods', { error: error.message });
+    next(createInternalError(error.message || 'Failed to get library moods'));
+  }
+});
+
+/**
+ * GET /api/mixes/metadata/styles
+ * Get all available styles from the user's library
+ */
+router.get('/metadata/styles', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    const plex = new PlexClient(userServer.server_url, user.plex_token);
+    const styles = await plex.getLibraryStyles(userServer.library_id!);
+
+    res.json({ styles });
+  } catch (error: any) {
+    logger.error('Failed to get library styles', { error: error.message });
+    next(createInternalError(error.message || 'Failed to get library styles'));
+  }
+});
+
+/**
+ * GET /api/mixes/metadata/collections
+ * Get all available collections from the user's library
+ */
+router.get('/metadata/collections', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    const plex = new PlexClient(userServer.server_url, user.plex_token);
+    const collections = await plex.getLibraryCollections(userServer.library_id!);
+
+    res.json({ collections });
+  } catch (error: any) {
+    logger.error('Failed to get library collections', { error: error.message });
+    next(createInternalError(error.message || 'Failed to get library collections'));
   }
 });
 
@@ -620,3 +795,567 @@ router.post('/all', async (req: Request, res: Response, next: NextFunction) => {
 
 export default router;
 
+
+/**
+ * POST /api/mixes/deep-cuts
+ * Generate Deep Cuts Mix: Hidden gems with low play counts
+ */
+router.post('/deep-cuts', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const { trackCount = 50, maxPlayCount = 5, excludePopular = true } = req.body;
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    logger.info('Generating Deep Cuts Mix', { userId, libraryId: userServer.library_id });
+
+    const result = await mixService.generateDeepCutsMix(
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      { trackCount, maxPlayCount, excludePopular }
+    );
+
+    if (result.trackCount === 0) {
+      return res.json({
+        success: false,
+        message: 'No deep cuts found. Try adjusting the play count threshold.'
+      });
+    }
+
+    const playlistName = req.body.playlistName || 'Deep Cuts';
+    const playlist = await createPlaylistFromMix(
+      playlistName,
+      result.trackKeys,
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      userServer.server_client_id,
+      userId,
+      db
+    );
+
+    logger.info('Deep Cuts Mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
+
+    res.json({
+      success: true,
+      playlist: {
+        id: playlist.playlistId,
+        name: playlistName,
+        trackCount: playlist.trackCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to generate Deep Cuts Mix', { error: error.message });
+    next(createInternalError(error.message || 'Failed to generate Deep Cuts Mix'));
+  }
+});
+
+/**
+ * POST /api/mixes/artist-discovery
+ * Generate Artist Discovery Mix: Tracks from similar artists
+ */
+router.post('/artist-discovery', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const { seedArtistKey, trackCount = 50, tracksPerArtist = 3 } = req.body;
+
+    if (!seedArtistKey) {
+      return next(createValidationError('Seed artist key is required'));
+    }
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    logger.info('Generating Artist Discovery Mix', { userId, libraryId: userServer.library_id, seedArtistKey });
+
+    const result = await mixService.generateArtistDiscoveryMix(
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      { seedArtistKey, trackCount, tracksPerArtist }
+    );
+
+    if (result.trackCount === 0) {
+      return res.json({
+        success: false,
+        message: 'No similar artists found. Try a different seed artist.'
+      });
+    }
+
+    const playlistName = req.body.playlistName || 'Artist Discovery';
+    const playlist = await createPlaylistFromMix(
+      playlistName,
+      result.trackKeys,
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      userServer.server_client_id,
+      userId,
+      db
+    );
+
+    logger.info('Artist Discovery Mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
+
+    res.json({
+      success: true,
+      playlist: {
+        id: playlist.playlistId,
+        name: playlistName,
+        trackCount: playlist.trackCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to generate Artist Discovery Mix', { error: error.message });
+    next(createInternalError(error.message || 'Failed to generate Artist Discovery Mix'));
+  }
+});
+
+/**
+ * POST /api/mixes/mood
+ * Generate Mood Mix: Tracks filtered by mood tags
+ */
+router.post('/mood', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const { moods, trackCount = 50, useSonicAnalysis = false } = req.body;
+
+    if (!moods || !Array.isArray(moods) || moods.length === 0) {
+      return next(createValidationError('At least one mood is required'));
+    }
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    logger.info('Generating Mood Mix', { userId, libraryId: userServer.library_id, moods });
+
+    const result = await mixService.generateMoodMix(
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      { moods, trackCount, useSonicAnalysis }
+    );
+
+    if (result.trackCount === 0) {
+      return res.json({
+        success: false,
+        message: 'No tracks found with the selected moods.'
+      });
+    }
+
+    const playlistName = req.body.playlistName || `${moods.join(' & ')} Mix`;
+    const playlist = await createPlaylistFromMix(
+      playlistName,
+      result.trackKeys,
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      userServer.server_client_id,
+      userId,
+      db
+    );
+
+    logger.info('Mood Mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
+
+    res.json({
+      success: true,
+      playlist: {
+        id: playlist.playlistId,
+        name: playlistName,
+        trackCount: playlist.trackCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to generate Mood Mix', { error: error.message });
+    next(createInternalError(error.message || 'Failed to generate Mood Mix'));
+  }
+});
+
+/**
+ * POST /api/mixes/era
+ * Generate Era Mix: Tracks from a specific decade/era
+ */
+router.post('/era', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const { startYear, endYear, trackCount = 50 } = req.body;
+
+    if (!startYear || !endYear) {
+      return next(createValidationError('Start year and end year are required'));
+    }
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    logger.info('Generating Era Mix', { userId, libraryId: userServer.library_id, startYear, endYear });
+
+    const result = await mixService.generateEraMix(
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      { startYear, endYear, trackCount }
+    );
+
+    if (result.trackCount === 0) {
+      return res.json({
+        success: false,
+        message: `No tracks found from ${startYear}-${endYear}.`
+      });
+    }
+
+    const playlistName = req.body.playlistName || `${startYear}s Mix`;
+    const playlist = await createPlaylistFromMix(
+      playlistName,
+      result.trackKeys,
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      userServer.server_client_id,
+      userId,
+      db
+    );
+
+    logger.info('Era Mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
+
+    res.json({
+      success: true,
+      playlist: {
+        id: playlist.playlistId,
+        name: playlistName,
+        trackCount: playlist.trackCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to generate Era Mix', { error: error.message });
+    next(createInternalError(error.message || 'Failed to generate Era Mix'));
+  }
+});
+
+/**
+ * POST /api/mixes/genre-evolution
+ * Generate Genre Evolution Mix: Show how a genre evolved chronologically
+ */
+router.post('/genre-evolution', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const { genre, trackCount = 50, tracksPerDecade = 5 } = req.body;
+
+    if (!genre) {
+      return next(createValidationError('Genre is required'));
+    }
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    logger.info('Generating Genre Evolution Mix', { userId, libraryId: userServer.library_id, genre });
+
+    const result = await mixService.generateGenreEvolutionMix(
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      { genre, trackCount, tracksPerDecade }
+    );
+
+    if (result.trackCount === 0) {
+      return res.json({
+        success: false,
+        message: `No tracks found for genre: ${genre}`
+      });
+    }
+
+    const playlistName = req.body.playlistName || `${genre} Evolution`;
+    const playlist = await createPlaylistFromMix(
+      playlistName,
+      result.trackKeys,
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      userServer.server_client_id,
+      userId,
+      db
+    );
+
+    logger.info('Genre Evolution Mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
+
+    res.json({
+      success: true,
+      playlist: {
+        id: playlist.playlistId,
+        name: playlistName,
+        trackCount: playlist.trackCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to generate Genre Evolution Mix', { error: error.message });
+    next(createInternalError(error.message || 'Failed to generate Genre Evolution Mix'));
+  }
+});
+
+/**
+ * POST /api/mixes/artist-journey
+ * Generate Artist Journey Mix: Chronological journey through an artist's discography
+ */
+router.post('/artist-journey', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const { artistKey, trackCount = 50, tracksPerAlbum = 3 } = req.body;
+
+    if (!artistKey) {
+      return next(createValidationError('Artist key is required'));
+    }
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    logger.info('Generating Artist Journey Mix', { userId, libraryId: userServer.library_id, artistKey });
+
+    const result = await mixService.generateArtistJourneyMix(
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      { artistKey, trackCount, tracksPerAlbum }
+    );
+
+    if (result.trackCount === 0) {
+      return res.json({
+        success: false,
+        message: 'No tracks found for this artist.'
+      });
+    }
+
+    const playlistName = req.body.playlistName || 'Artist Journey';
+    const playlist = await createPlaylistFromMix(
+      playlistName,
+      result.trackKeys,
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      userServer.server_client_id,
+      userId,
+      db
+    );
+
+    logger.info('Artist Journey Mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
+
+    res.json({
+      success: true,
+      playlist: {
+        id: playlist.playlistId,
+        name: playlistName,
+        trackCount: playlist.trackCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to generate Artist Journey Mix', { error: error.message });
+    next(createInternalError(error.message || 'Failed to generate Artist Journey Mix'));
+  }
+});
+
+/**
+ * POST /api/mixes/workout
+ * Generate Workout Mix: Progressive tempo/energy build (warmup → peak → cooldown)
+ */
+router.post('/workout', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const { trackCount = 50, warmupTracks = 5, peakTracks = 30, cooldownTracks = 5 } = req.body;
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    logger.info('Generating Workout Mix', { userId, libraryId: userServer.library_id });
+
+    const result = await mixService.generateWorkoutMix(
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      { trackCount, warmupTracks, peakTracks, cooldownTracks }
+    );
+
+    if (result.trackCount === 0) {
+      return res.json({
+        success: false,
+        message: 'Not enough tracks with tempo/energy data to generate workout mix.'
+      });
+    }
+
+    const playlistName = req.body.playlistName || 'Workout Mix';
+    const playlist = await createPlaylistFromMix(
+      playlistName,
+      result.trackKeys,
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      userServer.server_client_id,
+      userId,
+      db
+    );
+
+    logger.info('Workout Mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
+
+    res.json({
+      success: true,
+      playlist: {
+        id: playlist.playlistId,
+        name: playlistName,
+        trackCount: playlist.trackCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to generate Workout Mix', { error: error.message });
+    next(createInternalError(error.message || 'Failed to generate Workout Mix'));
+  }
+});
+
+/**
+ * POST /api/mixes/forgotten-favorites
+ * Generate Forgotten Favorites Mix: High play count but not played recently
+ */
+router.post('/forgotten-favorites', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const { trackCount = 50, minPlayCount = 10, notPlayedDays = 180 } = req.body;
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    logger.info('Generating Forgotten Favorites Mix', { userId, libraryId: userServer.library_id });
+
+    const result = await mixService.generateForgottenFavoritesMix(
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      { trackCount, minPlayCount, notPlayedDays }
+    );
+
+    if (result.trackCount === 0) {
+      return res.json({
+        success: false,
+        message: 'No forgotten favorites found. Try adjusting the play count or time threshold.'
+      });
+    }
+
+    const playlistName = req.body.playlistName || 'Forgotten Favorites';
+    const playlist = await createPlaylistFromMix(
+      playlistName,
+      result.trackKeys,
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      userServer.server_client_id,
+      userId,
+      db
+    );
+
+    logger.info('Forgotten Favorites Mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
+
+    res.json({
+      success: true,
+      playlist: {
+        id: playlist.playlistId,
+        name: playlistName,
+        trackCount: playlist.trackCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to generate Forgotten Favorites Mix', { error: error.message });
+    next(createInternalError(error.message || 'Failed to generate Forgotten Favorites Mix'));
+  }
+});
+
+/**
+ * POST /api/mixes/genre-blend
+ * Generate Genre Blend Mix: Tracks that span multiple genres
+ */
+router.post('/genre-blend', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const { genres, trackCount = 50, minGenres = 2 } = req.body;
+
+    if (!genres || !Array.isArray(genres) || genres.length < 2) {
+      return next(createValidationError('At least two genres are required'));
+    }
+
+    const { userServer } = await getUserServerAndSettings(userId, db);
+    const user = await db.getUserById(userId);
+    if (!user) {
+      return next(createInternalError('User not found'));
+    }
+
+    logger.info('Generating Genre Blend Mix', { userId, libraryId: userServer.library_id, genres });
+
+    const result = await mixService.generateGenreBlendMix(
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      { genres, trackCount, minGenres }
+    );
+
+    if (result.trackCount === 0) {
+      return res.json({
+        success: false,
+        message: 'No tracks found that blend the selected genres.'
+      });
+    }
+
+    const playlistName = req.body.playlistName || `${genres.join(' + ')} Blend`;
+    const playlist = await createPlaylistFromMix(
+      playlistName,
+      result.trackKeys,
+      userServer.server_url,
+      user.plex_token,
+      userServer.library_id!,
+      userServer.server_client_id,
+      userId,
+      db
+    );
+
+    logger.info('Genre Blend Mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
+
+    res.json({
+      success: true,
+      playlist: {
+        id: playlist.playlistId,
+        name: playlistName,
+        trackCount: playlist.trackCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to generate Genre Blend Mix', { error: error.message });
+    next(createInternalError(error.message || 'Failed to generate Genre Blend Mix'));
+  }
+});

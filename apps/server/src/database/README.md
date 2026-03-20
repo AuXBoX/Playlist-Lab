@@ -24,6 +24,10 @@ The database uses SQLite with the following tables:
 - **cached_playlists** - Scraped playlist data cache
 - **sessions** - User session storage
 - **admin_users** - Admin privilege tracking
+- **playlist_shares** - Playlist sharing between users
+- **cross_import_jobs** - Cross-platform playlist import operations
+- **oauth_connections** - OAuth tokens for external services
+- **mix_templates** - Saved mix configurations for quick regeneration
 
 All tables use foreign key constraints with CASCADE delete to maintain referential integrity.
 
@@ -84,6 +88,14 @@ The `DatabaseService` class provides a high-level interface for all database ope
 - `isAdmin()` - Check if user is admin
 - `addAdmin()` - Add admin user
 - `removeAdmin()` - Remove admin user
+
+### Mix Template Operations
+- `createMixTemplate()` - Create a new mix template
+- `getUserMixTemplates()` - Get all templates for a user
+- `getMixTemplateById()` - Get template by ID
+- `updateMixTemplate()` - Update template fields
+- `deleteMixTemplate()` - Delete template
+- `updateTemplateUsage()` - Update last_used_at and use_count
 
 ## Usage Example
 
@@ -160,10 +172,94 @@ Users can customize these settings through the `saveUserSettings()` method.
 
 The schema uses CASCADE delete to maintain data integrity:
 
-- Deleting a user cascades to: user_servers, user_settings, playlists, schedules, missing_tracks
+- Deleting a user cascades to: user_servers, user_settings, playlists, schedules, missing_tracks, mix_templates
 - Deleting a playlist cascades to: schedules, missing_tracks
 
 This ensures no orphaned records remain in the database.
+
+## Mix Templates Table
+
+The `mix_templates` table stores saved mix configurations that users can quickly regenerate without rebuilding settings each time.
+
+**Migration Documentation**: See `docs/MIX_TEMPLATES_MIGRATION.md` for complete migration procedures, including staging tests, backup procedures, and rollback plans.
+
+### Table Structure
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER | Primary key |
+| `user_id` | INTEGER | Foreign key to users table |
+| `name` | TEXT | User-defined template name |
+| `description` | TEXT | Optional description |
+| `mix_type` | TEXT | Type: 'artist', 'album', 'genre', 'mood', 'decade', 'custom' |
+| `configuration` | TEXT | JSON blob with all mix parameters |
+| `created_at` | INTEGER | Unix timestamp |
+| `updated_at` | INTEGER | Unix timestamp |
+| `last_used_at` | INTEGER | Unix timestamp of last generation |
+| `use_count` | INTEGER | Number of times template has been used |
+
+### Configuration JSON Structure
+
+The `configuration` field stores a JSON object with the following structure:
+
+```typescript
+interface MixTemplateConfiguration {
+  // Mix type
+  mixType: 'artist' | 'album' | 'genre' | 'mood' | 'decade' | 'custom';
+  
+  // Common parameters
+  trackCount: number;
+  sortBy?: 'random' | 'rating' | 'playCount' | 'dateAdded';
+  
+  // Type-specific parameters
+  artistIds?: string[];      // For artist mix
+  albumIds?: string[];       // For album mix
+  genres?: string[];         // For genre mix
+  moods?: string[];          // For mood mix
+  decades?: number[];        // For decade mix
+  
+  // Custom mix parameters
+  customRules?: {
+    includeGenres?: string[];
+    excludeGenres?: string[];
+    minRating?: number;
+    maxRating?: number;
+    yearRange?: { min: number; max: number };
+    includeUnplayed?: boolean;
+  };
+  
+  // Advanced options
+  allowDuplicateArtists?: boolean;
+  allowDuplicateAlbums?: boolean;
+  maxTracksPerArtist?: number;
+  maxTracksPerAlbum?: number;
+}
+```
+
+### Example Configuration
+
+```json
+{
+  "mixType": "mood",
+  "trackCount": 50,
+  "moods": ["chill", "relaxing"],
+  "sortBy": "random",
+  "allowDuplicateArtists": false,
+  "maxTracksPerArtist": 3
+}
+```
+
+### Indexes
+
+- `idx_mix_templates_user_id` - Fast lookup by user
+- `idx_mix_templates_mix_type` - Filter by mix type
+
+### Usage Tracking
+
+The `last_used_at` and `use_count` fields track template usage:
+- `last_used_at` is updated each time a mix is generated from the template
+- `use_count` is incremented on each generation
+- These fields enable sorting by popularity and showing recently used templates
 
 ## Performance Considerations
 

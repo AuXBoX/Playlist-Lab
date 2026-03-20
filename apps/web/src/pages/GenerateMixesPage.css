@@ -1,3 +1,351 @@
+/* Main content container */
+.generate-mixes-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+/* Section Styling */
+.section-header {
+  margin-bottom: 1.25rem;
+}
+
+.section-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.section-description {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin: 0.25rem 0 0 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Quick Mixes Section */
+.quick-mixes-section {
+  background: var(--gradient-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--card-shadow);
+}
+
+.quick-mixes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+/* Custom Mixes Section */
+.custom-mixes-section {
+  background: var(--gradient-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--card-shadow);
+}
+
+.custom-mixes-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Saved Mixes Wrapper */
+.saved-mixes-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Create New Custom Mix Button - Compact */
+.create-custom-mix-btn-compact {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  width: fit-content;
+  margin: 0 auto;
+}
+
+.create-custom-mix-btn-compact:hover:not(:disabled) {
+  background: rgba(91, 155, 213, 0.08);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.create-custom-mix-btn-compact:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.create-custom-icon-compact {
+  font-size: 1.25rem;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.create-custom-text-compact {
+  font-weight: 500;
+}
+
+.quick-mix-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+}
+
+.quick-mix-card:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-light);
+}
+
+.quick-mix-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quick-mix-card.custom-mix-card {
+  border: 2px dashed var(--primary-color);
+  background: rgba(91, 155, 213, 0.05);
+}
+
+.quick-mix-card.custom-mix-card:hover:not(:disabled) {
+  background: rgba(91, 155, 213, 0.1);
+  border-color: var(--primary-color);
+}
+
+.quick-mix-card.generating {
+  border-color: var(--primary-color);
+  background: rgba(91, 155, 213, 0.08);
+}
+
+.quick-mix-content {
+  position: relative;
+  z-index: 1;
+}
+
+.quick-mix-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.quick-mix-description {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.quick-mix-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: rgba(91, 155, 213, 0.1);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  color: var(--primary-color);
+  font-weight: 500;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(91, 155, 213, 0.3);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Mix Settings Display */
+.mix-settings-section-display {
+  background: var(--gradient-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--card-shadow);
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.setting-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  transition: all 0.2s ease;
+}
+
+.setting-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-light);
+}
+
+.setting-name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.setting-value {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Generated Playlists */
+.generated-playlists-section {
+  background: var(--gradient-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--card-shadow);
+}
+
+.generated-playlists-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.generated-playlist-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background: rgba(76, 175, 80, 0.08);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+  gap: 1rem;
+}
+
+.generated-playlist-item:hover {
+  background: rgba(76, 175, 80, 0.12);
+  border-color: rgba(76, 175, 80, 0.5);
+}
+
+.playlist-info {
+  flex: 1;
+}
+
+.playlist-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.playlist-status {
+  font-size: 0.875rem;
+  color: rgba(76, 175, 80, 1);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.playlist-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* Success/Error Messages */
+.generate-mixes-success {
+  padding: 1rem;
+  background-color: rgba(76, 175, 80, 0.1);
+  border: 1px solid rgba(76, 175, 80, 0.5);
+  border-radius: var(--radius-md);
+  color: rgba(76, 175, 80, 1);
+  font-size: 0.875rem;
+  margin-top: 1rem;
+  animation: slideDown 0.3s ease;
+  white-space: pre-line;
+}
+
+.generate-mixes-error {
+  padding: 1rem;
+  background-color: rgba(244, 67, 54, 0.1);
+  border: 1px solid var(--error);
+  border-radius: var(--radius-md);
+  color: var(--error);
+  font-size: 0.875rem;
+  margin-top: 1rem;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive layout */
+@media (max-width: 768px) {
+  .quick-mixes-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .create-custom-mix-btn-compact {
+    width: 100%;
+  }
+  
+  .generated-playlist-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .playlist-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+  
+  .playlist-actions .btn {
+    width: 100%;
+  }
+}
+
 /* Mix Settings Modal */
 
 .mix-settings-overlay {
@@ -36,6 +384,7 @@
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 .mix-settings-close {
@@ -95,6 +444,7 @@
   font-weight: 600;
   color: var(--text-primary);
   margin: 0 0 0.875rem 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 .mix-settings-fields {
@@ -113,6 +463,7 @@
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--text-secondary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 .mix-settings-label span {

@@ -274,3 +274,76 @@ export interface MissingTrackStat {
   artist: string;
   count: number;
 }
+
+/**
+ * Mix template configuration structure
+ */
+export interface MixTemplateConfiguration {
+  schemaVersion?: number;
+  mixType: 'artist' | 'album' | 'genre' | 'mood' | 'decade' | 'custom';
+  trackCount: number;
+  sortBy?: 'random' | 'rating' | 'playCount' | 'dateAdded';
+  sortDirection?: 'asc' | 'desc';
+  artistIds?: string[];
+  albumIds?: string[];
+  genres?: string[];
+  moods?: string[];
+  decades?: number[];
+  customRules?: {
+    includeGenres?: string[];
+    excludeGenres?: string[];
+    minRating?: number;
+    maxRating?: number;
+    yearRange?: { min: number; max: number };
+    includeUnplayed?: boolean;
+    playedInLastDays?: number;
+    notPlayedInLastDays?: number;
+    addedInLastDays?: number;
+  };
+  allowDuplicateArtists?: boolean;
+  allowDuplicateAlbums?: boolean;
+  maxTracksPerArtist?: number;
+  maxTracksPerAlbum?: number;
+}
+
+/**
+ * Mix template record from the mix_templates table
+ */
+export interface MixTemplate {
+  id: number;
+  user_id: number;
+  name: string;
+  description?: string;
+  mix_type: string;
+  configuration: string;  // JSON string
+  created_at: number;
+  updated_at: number;
+  last_used_at?: number;
+  use_count: number;
+}
+
+/**
+ * Parsed mix template with typed configuration
+ */
+export interface ParsedMixTemplate {
+  id: number;
+  user_id: number;
+  name: string;
+  description?: string;
+  mix_type: string;
+  configuration: MixTemplateConfiguration;
+  created_at: number;
+  updated_at: number;
+  last_used_at?: number;
+  use_count: number;
+}
+
+/**
+ * Input type for creating a mix template
+ */
+export interface MixTemplateInput {
+  name: string;
+  description?: string;
+  mix_type: string;
+  configuration: MixTemplateConfiguration;
+}

@@ -21,6 +21,58 @@ export const SchedulesPage: FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Handle URL parameters for pre-selecting playlist or mix type
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const playlistId = params.get('playlist');
+    const mixType = params.get('mixType');
+    const settingsParam = params.get('settings');
+    const templateId = params.get('templateId');
+    const templateName = params.get('templateName');
+
+    if (playlistId) {
+      // Pre-select playlist for refresh schedule
+      setFormData(prev => ({
+        ...prev,
+        scheduleType: 'playlist_refresh',
+        playlistId: playlistId,
+      }));
+      setShowCreateForm(true);
+    } else if (mixType && settingsParam) {
+      // Pre-select mix generation schedule
+      try {
+        const settings = JSON.parse(decodeURIComponent(settingsParam));
+        setFormData(prev => ({
+          ...prev,
+          scheduleType: 'mix_generation',
+          config: {
+            mixType,
+            ...settings,
+          },
+        }));
+        setShowCreateForm(true);
+      } catch (err) {
+        console.error('Failed to parse mix settings from URL:', err);
+      }
+    } else if (templateId) {
+      // Pre-select template for schedule
+      setFormData(prev => ({
+        ...prev,
+        scheduleType: 'mix_generation',
+        config: {
+          templateId: parseInt(templateId),
+          templateName: templateName || 'Template Mix',
+        },
+      }));
+      setShowCreateForm(true);
+    }
+    
+    // Clear URL parameters after state is set
+    if (playlistId || mixType || templateId) {
+      window.history.replaceState({}, '', '/schedules');
+    }
+  }, []);
+
   useEffect(() => {
     if (showCreateForm && formData.scheduleType === 'playlist_refresh' && !editingSchedule) {
       loadPlaylists();
@@ -135,6 +187,14 @@ export const SchedulesPage: FC = () => {
   };
 
   const getScheduleTitle = (schedule: Schedule) => {
+    // Check if it's a template schedule
+    if (schedule.config?.templateName) {
+      return schedule.config.templateName;
+    }
+    // Check if it's a quick mix schedule
+    if (schedule.config?.mixName) {
+      return schedule.config.mixName;
+    }
     // Check if it's a chart import schedule
     if (schedule.config?.chartName) {
       // Use custom playlist name if set, otherwise use chart name
@@ -307,6 +367,26 @@ export const SchedulesPage: FC = () => {
                   />
                   <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                     Chart: {formData.config?.chartName}
+                  </div>
+                </div>
+              )}
+
+              {formData.config?.templateId && (
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+                    Template
+                  </label>
+                  <div style={{
+                    padding: '0.75rem',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    backgroundColor: 'var(--surface)',
+                    color: 'var(--text-primary)',
+                  }}>
+                    {formData.config?.templateName || `Template #${formData.config?.templateId}`}
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                    This schedule will generate a new playlist from this template
                   </div>
                 </div>
               )}

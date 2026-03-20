@@ -22,14 +22,12 @@ export default defineConfig({
             console.log('proxy error', err);
           });
           proxy.on('proxyReq', (proxyReq, req, _res) => {
-            console.log('Sending Request to the Target:', req.method, req.url);
             // Ensure SSE connections don't timeout
             if (req.url?.includes('/progress/')) {
               proxyReq.setTimeout(0);
             }
           });
           proxy.on('proxyRes', (proxyRes, req, _res) => {
-            console.log('Received Response from the Target:', proxyRes.statusCode, req.url);
             // For SSE, keep connection alive
             if (req.url?.includes('/progress/')) {
               proxyRes.headers['connection'] = 'keep-alive';

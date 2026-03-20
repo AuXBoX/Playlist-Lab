@@ -6,6 +6,7 @@
  */
 
 import Database from 'better-sqlite3';
+import { logger } from '../utils/logger';
 import type {
   User,
   UserServer,
@@ -21,7 +22,9 @@ import type {
   CachedPlaylist,
   ParsedCachedPlaylist,
   ExternalTrack,
-  MissingTrackStat
+  MissingTrackStat,
+  MixTemplate,
+  ParsedMixTemplate
 } from './types';
 
 /**
@@ -138,6 +141,15 @@ export class DatabaseService {
   getUserById(id: number): User | null {
     const stmt = this.db.prepare('SELECT * FROM users WHERE id = ?');
     const result = stmt.get(id) as User | undefined;
+    return result ?? null;
+  }
+
+  /**
+   * Get user by Plex username
+   */
+  getUserByPlexUsername(username: string): User | null {
+    const stmt = this.db.prepare('SELECT * FROM users WHERE plex_username = ?');
+    const result = stmt.get(username) as User | undefined;
     return result ?? null;
   }
 
@@ -835,12 +847,33 @@ export class DatabaseService {
   }
 
   /**
+   * Record a single playlist share
+   */
+  recordPlaylistShare(
+    playlistId: number,
+    ownerUserId: number,
+    sharedWithUserId: number,
+    plexPlaylistId: string,
+    playlistName: string
+  ): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO playlist_shares 
+      (playlist_id, owner_user_id, shared_with_user_id, plex_playlist_id, playlist_name, shared_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    const now = Date.now();
+    stmt.run(playlistId, ownerUserId, sharedWithUserId, plexPlaylistId, playlistName, now);
+  }
+
+  /**
    * Get playlists shared with a user
    */
   getPlaylistsSharedWithUser(userId: number): Array<{
     id: number;
     playlistName: string;
-    ownerUsername: string;
+    sharedByUsername: string;
+    plexPlaylistId: string;
     sharedAt: number;
     trackCount: number;
   }> {
@@ -848,7 +881,8 @@ export class DatabaseService {
       SELECT 
         ps.id,
         ps.playlist_name as playlistName,
-        u.plex_username as ownerUsername,
+        ps.plex_playlist_id as plexPlaylistId,
+        u.plex_username as sharedByUsername,
         ps.shared_at as sharedAt,
         0 as trackCount
       FROM playlist_shares ps
@@ -870,6 +904,193 @@ export class DatabaseService {
 
     return stmt.get(plexPlaylistId) as Playlist | null;
   }
+
+
+    /**
+     * Create a new mix template
+     */
+    createMixTemplate(
+      userId: number,
+      name: string,
+      description: string | null,
+      mixType: string,
+      configuration: any
+    ): ParsedMixTemplate {
+      const now = Date.now();
+      const stmt = this.db.prepare(`
+        INSERT INTO mix_templates (user_id, name, description, mix_type, configuration, created_at, updated_at, use_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+      `);
+
+      const result = stmt.run(
+        userId,
+        name,
+        description,
+        mixType,
+        JSON.stringify(configuration),
+        now,
+        now
+      );
+
+      return {
+        id: result.lastInsertRowid as number,
+        user_id: userId,
+        name,
+        description: description || undefined,
+        mix_type: mixType,
+        configuration,
+        created_at: now,
+        updated_at: now,
+        use_count: 0
+      };
+    }
+
+    /**
+     * Get all mix templates for a user
+     * 
+     * Performance optimizations:
+     * - Uses composite index on (user_id, last_used_at, updated_at)
+     * - Prepared statement for efficient repeated queries
+     * - Sorts by usage for better UX
+     */
+    getMixTemplates(userId: number): ParsedMixTemplate[] {
+      const stmt = this.db.prepare(`
+        SELECT * FROM mix_templates
+        WHERE user_id = ?
+        ORDER BY 
+          CASE WHEN last_used_at IS NULL THEN 0 ELSE 1 END DESC,
+          last_used_at DESC, 
+          updated_at DESC
+      `);
+
+      const templates = stmt.all(userId) as MixTemplate[];
+
+      const parsedTemplates: ParsedMixTemplate[] = [];
+      
+      for (const t of templates) {
+        // Parse configuration JSON with error handling
+        let configuration: any;
+        try {
+          configuration = JSON.parse(t.configuration);
+        } catch (error: any) {
+          logger.error('Failed to parse template configuration JSON', { 
+            templateId: t.id, 
+            userId,
+            error: error.message 
+          });
+          // Skip corrupted templates
+          continue;
+        }
+
+        parsedTemplates.push({
+          ...t,
+          description: t.description || undefined,
+          configuration,
+          last_used_at: t.last_used_at || undefined
+        });
+      }
+      
+      return parsedTemplates;
+    }
+
+    /**
+     * Get a specific mix template by ID
+     */
+    getMixTemplateById(id: number): ParsedMixTemplate | null {
+      const stmt = this.db.prepare('SELECT * FROM mix_templates WHERE id = ?');
+      const template = stmt.get(id) as MixTemplate | undefined;
+
+      if (!template) {
+        return null;
+      }
+
+      // Parse configuration JSON with error handling
+      let configuration: any;
+      try {
+        configuration = JSON.parse(template.configuration);
+      } catch (error: any) {
+        logger.error('Failed to parse template configuration JSON', { 
+          templateId: id, 
+          error: error.message 
+        });
+        // Return null to indicate corrupted template
+        return null;
+      }
+
+      return {
+        ...template,
+        description: template.description || undefined,
+        configuration,
+        last_used_at: template.last_used_at || undefined
+      };
+    }
+
+    /**
+     * Update a mix template
+     */
+    updateMixTemplate(id: number, updates: {
+      name?: string;
+      description?: string | null;
+      configuration?: any;
+    }): void {
+      const template = this.getMixTemplateById(id);
+      if (!template) {
+        throw new Error('Template not found');
+      }
+
+      const fields: string[] = [];
+      const values: any[] = [];
+
+      if (updates.name !== undefined) {
+        fields.push('name = ?');
+        values.push(updates.name);
+      }
+
+      if (updates.description !== undefined) {
+        fields.push('description = ?');
+        values.push(updates.description);
+      }
+
+      if (updates.configuration !== undefined) {
+        fields.push('configuration = ?');
+        values.push(JSON.stringify(updates.configuration));
+      }
+
+      fields.push('updated_at = ?');
+      values.push(Date.now());
+
+      values.push(id);
+
+      const stmt = this.db.prepare(`
+        UPDATE mix_templates
+        SET ${fields.join(', ')}
+        WHERE id = ?
+      `);
+
+      stmt.run(...values);
+    }
+
+    /**
+     * Delete a mix template
+     */
+    deleteMixTemplate(id: number): void {
+      const stmt = this.db.prepare('DELETE FROM mix_templates WHERE id = ?');
+      stmt.run(id);
+    }
+
+    /**
+     * Update template usage statistics
+     */
+    updateMixTemplateUsage(id: number): void {
+      const now = Date.now();
+      const stmt = this.db.prepare(`
+        UPDATE mix_templates
+        SET last_used_at = ?, use_count = use_count + 1
+        WHERE id = ?
+      `);
+      stmt.run(now, id);
+    }
+
 
 
 }

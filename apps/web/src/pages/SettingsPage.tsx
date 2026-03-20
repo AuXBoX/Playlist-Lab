@@ -335,33 +335,87 @@ interface PlexTabProps {
 
 const PlexTab: FC<PlexTabProps> = ({
   servers, libraries, server, isLoadingServers, isLoadingLibraries, onSelectServer,
-}) => (
-  <div className="settings-section">
-    <div className="settings-section-header">
-      <h2>Plex Server</h2>
-      <p>Connect Playlist Lab to your Plex Media Server and choose a music library.</p>
-    </div>
-    <div className="settings-field-group">
-      <div className="settings-field">
-        <label className="settings-label">Server</label>
-        {isLoadingServers ? (
-          <p className="settings-loading">Loading servers...</p>
-        ) : (
-          <select
-            className="settings-select"
-            value={server?.clientId || ''}
-            onChange={(e) => {
-              const selected = servers.find(s => s.clientId === e.target.value);
-              if (selected) onSelectServer(selected);
-            }}
-          >
-            <option value="">Select a server...</option>
-            {servers.map(s => (
-              <option key={s.clientId} value={s.clientId}>{s.name}</option>
-            ))}
-          </select>
-        )}
+}) => {
+  const [manualServerUrl, setManualServerUrl] = useState('');
+  const [showManualEntry, setShowManualEntry] = useState(false);
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <h2>Plex Server</h2>
+        <p>Connect Playlist Lab to your Plex Media Server and choose a music library.</p>
       </div>
+      <div className="settings-field-group">
+        <div className="settings-field">
+          <label className="settings-label">Server</label>
+          {isLoadingServers ? (
+            <p className="settings-loading">Loading servers...</p>
+          ) : showManualEntry ? (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', flexDirection: 'column' }}>
+              <input
+                type="text"
+                className="settings-input"
+                placeholder="http://192.168.1.100:32400"
+                value={manualServerUrl}
+                onChange={(e) => setManualServerUrl(e.target.value)}
+                style={{ width: '100%' }}
+              />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  className="btn btn-secondary btn-small"
+                  onClick={() => {
+                    setShowManualEntry(false);
+                    setManualServerUrl('');
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary btn-small"
+                  onClick={() => {
+                    if (manualServerUrl.trim()) {
+                      onSelectServer({
+                        name: 'Manual Server',
+                        clientId: `manual-${Date.now()}`,
+                        url: manualServerUrl.trim(),
+                      });
+                      setShowManualEntry(false);
+                      setManualServerUrl('');
+                    }
+                  }}
+                  disabled={!manualServerUrl.trim()}
+                >
+                  Connect
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <select
+                className="settings-select"
+                value={server?.clientId || ''}
+                onChange={(e) => {
+                  const selected = servers.find(s => s.clientId === e.target.value);
+                  if (selected) onSelectServer(selected);
+                }}
+              >
+                <option value="">Select a server...</option>
+                {servers.map(s => (
+                  <option key={s.clientId} value={s.clientId}>{s.name}</option>
+                ))}
+              </select>
+              {servers.length === 0 && (
+                <button
+                  className="btn btn-secondary btn-small"
+                  onClick={() => setShowManualEntry(true)}
+                  style={{ marginTop: '8px' }}
+                >
+                  Enter Server Address Manually
+                </button>
+              )}
+            </>
+          )}
+        </div>
       {server && (
         <div className="settings-field">
           <label className="settings-label">Music Library</label>
@@ -384,16 +438,17 @@ const PlexTab: FC<PlexTabProps> = ({
           )}
         </div>
       )}
-    </div>
-    {server?.libraryId && (
-      <div className="settings-subsection">
-        <h3>Library Scan</h3>
-        <p className="settings-hint">Trigger Plex to scan for new or changed files in your library.</p>
-        <LibraryScanSection />
       </div>
-    )}
-  </div>
-);
+      {server?.libraryId && (
+        <div className="settings-subsection">
+          <h3>Library Scan</h3>
+          <p className="settings-hint">Trigger Plex to scan for new or changed files in your library.</p>
+          <LibraryScanSection />
+        </div>
+      )}
+    </div>
+  );
+};
 
 interface AITabProps {
   geminiApiKey: string;
@@ -639,6 +694,7 @@ const ConnectedServicesTab: FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const loadTargets = async () => {
@@ -659,6 +715,45 @@ const ConnectedServicesTab: FC = () => {
   };
 
   useEffect(() => { loadTargets(); }, []);
+
+  const handleConnect = async (serviceId: string) => {
+    setConnecting(serviceId);
+    setMessage(null);
+    setError(null);
+    try {
+      // Initiate OAuth flow
+      const res = await fetch(`/api/cross-import/oauth/${serviceId}/authorize`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error(`Failed to initiate ${serviceId} connection`);
+      const data = await res.json();
+      
+      // Open OAuth popup
+      const width = 600;
+      const height = 700;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      const popup = window.open(
+        data.authUrl,
+        `${serviceId}_oauth`,
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
+
+      // Poll for completion
+      const checkInterval = setInterval(async () => {
+        if (popup?.closed) {
+          clearInterval(checkInterval);
+          setConnecting(null);
+          // Refresh to see if connection succeeded
+          await loadTargets();
+        }
+      }, 500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to connect');
+      setConnecting(null);
+    }
+  };
 
   const handleRevoke = async (serviceId: string, serviceName: string) => {
     setRevoking(serviceId);
@@ -683,14 +778,14 @@ const ConnectedServicesTab: FC = () => {
     <div className="settings-section">
       <div className="settings-section-header">
         <h2>Connected Services</h2>
-        <p>Manage OAuth connections for external streaming services used in Cross Import.</p>
+        <p>Manage OAuth connections for external streaming services. Connect services here to use them in Cross Import without re-authenticating.</p>
       </div>
       {message && <div className="settings-alert settings-alert--success">{message}</div>}
       {error && <div className="settings-alert settings-alert--error">{error}</div>}
       {isLoading ? (
         <p className="settings-loading">Loading services...</p>
       ) : targets.length === 0 ? (
-        <p className="settings-hint">No external services available. Use Cross Import to connect services.</p>
+        <p className="settings-hint">No external services available.</p>
       ) : (
         <div className="settings-services-list">
           {targets.map((target) => (
@@ -701,15 +796,25 @@ const ConnectedServicesTab: FC = () => {
                   {target.connected ? 'Connected' : 'Not connected'}
                 </span>
               </div>
-              {target.connected && (
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => handleRevoke(target.id, target.name)}
-                  disabled={revoking === target.id}
-                >
-                  {revoking === target.id ? 'Revoking...' : 'Revoke'}
-                </button>
-              )}
+              <div className="settings-service-actions">
+                {target.connected ? (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleRevoke(target.id, target.name)}
+                    disabled={revoking === target.id}
+                  >
+                    {revoking === target.id ? 'Revoking...' : 'Revoke'}
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => handleConnect(target.id)}
+                    disabled={connecting === target.id}
+                  >
+                    {connecting === target.id ? 'Connecting...' : 'Connect'}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -775,27 +880,55 @@ const LibraryScanSection: FC = () => {
         <label className="settings-label">Scan specific folder</label>
         {isLoadingFolders ? (
           <p className="settings-loading">Loading folders...</p>
-        ) : folders.length > 0 && (
-          <div className="settings-folder-list">
-            {folders.map((folder, i) => (
-              <span key={i} className="settings-folder-path">{folder.path}</span>
-            ))}
+        ) : folders.length > 0 ? (
+          <>
+            <div className="settings-folder-list">
+              {folders.map((folder, i) => (
+                <button
+                  key={i}
+                  className="settings-folder-button"
+                  onClick={() => setSelectedFolder(folder.path)}
+                  title="Click to select this folder"
+                >
+                  {folder.path}
+                </button>
+              ))}
+            </div>
+            <div className="settings-input-group">
+              <input
+                type="text"
+                className="settings-input settings-input--mono"
+                value={selectedFolder}
+                onChange={(e) => setSelectedFolder(e.target.value)}
+                placeholder="Select a folder above or type a path"
+              />
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleScan(selectedFolder)}
+                disabled={isScanning || !selectedFolder}
+              >
+                {isScanning ? 'Scanning...' : 'Scan Folder'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="settings-input-group">
+            <input
+              type="text"
+              className="settings-input settings-input--mono"
+              value={selectedFolder}
+              onChange={(e) => setSelectedFolder(e.target.value)}
+              placeholder="/music/Artist or C:\Music\Artist"
+            />
+            <button
+              className="btn btn-secondary"
+              onClick={() => handleScan(selectedFolder)}
+              disabled={isScanning || !selectedFolder}
+            >
+              {isScanning ? 'Scanning...' : 'Scan Folder'}
+            </button>
           </div>
         )}
-        <input
-          type="text"
-          className="settings-input settings-input--mono"
-          value={selectedFolder}
-          onChange={(e) => setSelectedFolder(e.target.value)}
-          placeholder="/music/Artist or C:\Music\Artist"
-        />
-        <button
-          className="btn btn-secondary"
-          onClick={() => handleScan(selectedFolder)}
-          disabled={isScanning || !selectedFolder}
-        >
-          {isScanning ? 'Scanning...' : 'Scan Folder'}
-        </button>
       </div>
     </div>
   );

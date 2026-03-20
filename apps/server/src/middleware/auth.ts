@@ -46,13 +46,20 @@ export function attachDatabase(dbService: DatabaseService) {
  * Returns 401 if user is not authenticated
  */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  console.log(`[Auth] Checking authentication for ${req.method} ${req.path}`);
-  console.log(`[Auth] Session ID: ${req.sessionID?.substring(0, 10)}...`);
-  console.log(`[Auth] Session userId: ${req.session.userId || 'none'}`);
-  console.log(`[Auth] Cookie header: ${req.headers.cookie ? 'present' : 'missing'}`);
+  // Skip verbose logging for frequently polled endpoints
+  const isPolling = req.path.startsWith('/status/') || req.path.startsWith('/progress/');
+  
+  if (!isPolling) {
+    console.log(`[Auth] Checking authentication for ${req.method} ${req.path}`);
+    console.log(`[Auth] Session ID: ${req.sessionID?.substring(0, 10)}...`);
+    console.log(`[Auth] Session userId: ${req.session.userId || 'none'}`);
+    console.log(`[Auth] Cookie header: ${req.headers.cookie ? 'present' : 'missing'}`);
+  }
   
   if (!req.session.userId) {
-    console.log('[Auth] No userId in session, returning 401');
+    if (!isPolling) {
+      console.log('[Auth] No userId in session, returning 401');
+    }
     res.status(401).json({
       error: {
         code: 'AUTH_REQUIRED',
@@ -119,7 +126,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
 
-  console.log(`[Auth] Authentication successful for user ${user.id} (${user.plex_username})`);
+  if (!isPolling) {
+    console.log(`[Auth] Authentication successful for user ${user.id} (${user.plex_username})`);
+  }
   next();
 }
 

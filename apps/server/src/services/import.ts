@@ -22,6 +22,7 @@ import {
   getListenBrainzPlaylists,
   parseM3UFile,
   scrapeAriaPlaylist,
+  scrapeBillboardPlaylist,
   ExternalPlaylist,
 } from './scrapers';
 import { matchPlaylist, MatchedTrack } from './matching';
@@ -49,13 +50,15 @@ export interface ImportOptions {
   serverUrl: string;
   plexToken: string;
   libraryId?: string;
+  customName?: string;
+  filename?: string; // For file imports
 }
 
 /**
  * Import a playlist from an external source
  */
 export async function importPlaylist(
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'aria',
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'aria' | 'billboard',
   sourceIdentifier: string,
   options: ImportOptions,
   db: DatabaseService,
@@ -127,7 +130,7 @@ export async function importPlaylist(
     
     try {
       debugLog('[Import] Calling scrapePlaylist...');
-      externalPlaylist = await scrapePlaylist(source, sourceIdentifier, progressEmitter, options.userId, db);
+      externalPlaylist = await scrapePlaylist(source, sourceIdentifier, progressEmitter, options.userId, db, options);
       debugLog('[Import] scrapePlaylist returned successfully');
       
       logImportDebug('=== SCRAPING COMPLETE ===', {
@@ -286,9 +289,12 @@ export async function importPlaylist(
     
     logger.info(`[Import] Matched ${matched.length}/${matchedTracks.length} tracks`);
     
+    // Use custom name if provided, otherwise use the scraped name
+    const finalPlaylistName = options.customName || externalPlaylist.name;
+    
     return {
       playlistId: externalPlaylist.id,
-      playlistName: externalPlaylist.name,
+      playlistName: finalPlaylistName,
       source: externalPlaylist.source,
       matched,
       unmatched,
@@ -360,11 +366,12 @@ export function storeMissingTracks(
  * Scrape a playlist from an external source
  */
 async function scrapePlaylist(
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'aria',
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'aria' | 'billboard',
   sourceIdentifier: string,
   progressEmitter?: EventEmitter,
   userId?: number,
-  db?: DatabaseService
+  db?: DatabaseService,
+  options?: ImportOptions
 ): Promise<ExternalPlaylist> {
   debugLog('[scrapePlaylist] ========== FUNCTION CALLED ==========');
   debugLog('[scrapePlaylist] Source:', source);
@@ -415,6 +422,10 @@ async function scrapePlaylist(
         debugLog('[scrapePlaylist] Calling scrapeAriaPlaylist...');
         return await scrapeAriaPlaylist(sourceIdentifier, progressEmitter);
       
+      case 'billboard':
+        debugLog('[scrapePlaylist] Calling scrapeBillboardPlaylist...');
+        return await scrapeBillboardPlaylist(sourceIdentifier, progressEmitter);
+      
       case 'listenbrainz':
         debugLog('[scrapePlaylist] Calling getListenBrainzPlaylists...');
         // For ListenBrainz, sourceIdentifier is username
@@ -428,8 +439,9 @@ async function scrapePlaylist(
       case 'file':
         debugLog('[scrapePlaylist] Calling parseM3UFile...');
         // For file imports, sourceIdentifier is the file content
-        // The filename should be passed separately in a real implementation
-        return parseM3UFile(sourceIdentifier, 'imported-playlist.m3u');
+        const fileName = options?.filename || 'imported-playlist.m3u';
+        debugLog('[scrapePlaylist] Filename:', fileName);
+        return parseM3UFile(sourceIdentifier, fileName);
       
       default:
         throw new Error(`Unsupported source: ${source}`);

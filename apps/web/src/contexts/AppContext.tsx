@@ -281,36 +281,34 @@ export const AppProvider: FC<AppProviderProps> = ({ children }) => {
     setState((prev) => ({ ...prev, isLoading: true }));
 
     try {
-      // Fetch current server first
-      try {
-        const serverResponse = await fetch('/api/servers/current', {
-          credentials: 'include',
-        });
-        if (serverResponse.ok) {
-          const data = await serverResponse.json();
-          if (data.server) {
-            setState((prev) => ({ ...prev, server: data.server }));
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch current server in refreshAll:', error);
+      // Fetch server and settings first (these are critical for routing)
+      const [serverResponse, settingsResponse] = await Promise.all([
+        fetch('/api/servers/current', { credentials: 'include' }),
+        fetch('/api/settings', { credentials: 'include' })
+      ]);
+
+      let serverData = null;
+      let settingsData = null;
+
+      if (serverResponse.ok) {
+        const data = await serverResponse.json();
+        serverData = data.server || null;
       }
 
-      // Fetch settings
-      try {
-        const settingsResponse = await fetch('/api/settings', {
-          credentials: 'include',
-        });
-        if (settingsResponse.ok) {
-          const data = await settingsResponse.json();
-          // API returns { settings: {...} }
-          setState((prev) => ({ ...prev, settings: data.settings }));
-        }
-      } catch (error) {
-        console.error('Failed to fetch settings in refreshAll:', error);
+      if (settingsResponse.ok) {
+        const data = await settingsResponse.json();
+        settingsData = data.settings;
       }
 
-      // Fetch all data in parallel, but don't let failures stop other requests
+      // Update server, settings, and isLoading in a single state update
+      setState((prev) => ({ 
+        ...prev, 
+        server: serverData,
+        settings: settingsData,
+        isLoading: false
+      }));
+
+      // Fetch remaining data in parallel (doesn't affect routing)
       await Promise.allSettled([
         refreshPlaylists(),
         refreshSchedules(),
@@ -318,7 +316,6 @@ export const AppProvider: FC<AppProviderProps> = ({ children }) => {
       ]);
     } catch (error) {
       console.error('Failed to refresh app data:', error);
-    } finally {
       setState((prev) => ({ ...prev, isLoading: false }));
     }
   };

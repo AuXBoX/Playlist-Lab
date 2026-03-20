@@ -6,12 +6,16 @@
 
 /// <reference lib="dom" />
 
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { ExternalPlaylist } from './scrapers';
 import { logger } from '../utils/logger';
 import { logImportDebug } from '../utils/import-debug-logger';
 import { EventEmitter } from 'events';
 import { debugLog } from '../utils/debug-logger';
+
+// Add stealth plugin to avoid bot detection
+puppeteer.use(StealthPlugin());
 
 // Shared browser instance for better performance
 let browserInstance: any = null;
@@ -992,6 +996,157 @@ export async function scrapeAriaChartWithBrowser(url: string, progressEmitter?: 
     await page.close();
     logger.error('[ARIA Browser] Error:', error);
     throw error;
+  }
+}
+
+/**
+ * Scrape Official Charts UK page
+ * NOTE: Official Charts actively blocks automated scraping.
+ * This function is kept for reference but may not work reliably.
+ */
+/**
+ * Billboard chart scraping using GitHub data source
+ * 
+ * Instead of scraping Billboard.com (which blocks automation), we use a public
+ * GitHub repository that provides daily-updated Billboard Hot 100 data as JSON.
+ * 
+ * Data source: https://github.com/mhollingshead/billboard-hot-100
+ * This repository is updated daily and provides historical data back to 1958.
+ */
+export async function scrapeBillboardChart(url: string, progressEmitter?: EventEmitter): Promise<ExternalPlaylist> {
+  logger.info(`[Billboard] Fetching chart data from GitHub: ${url}`);
+
+  progressEmitter?.emit('progress', {
+    type: 'progress',
+    phase: 'scraping',
+    current: 0,
+    total: 0,
+    currentTrackName: 'Fetching Billboard chart data...'
+  });
+
+  try {
+    // Parse the chart type and date from URL
+    // Expected formats:
+    // - https://www.billboard.com/charts/hot-100/
+    // - https://www.billboard.com/charts/hot-100/2024-03-15/
+    
+    const chartMatch = url.match(/\/charts\/([^/]+)/);
+    if (!chartMatch) {
+      throw new Error('Invalid Billboard chart URL');
+    }
+    
+    const chartType = chartMatch[1];
+    const dateMatch = url.match(/\/(\d{4}-\d{2}-\d{2})\/?$/);
+    
+    // Currently only Hot 100 is supported via the GitHub data source
+    if (chartType !== 'hot-100') {
+      throw new Error(
+        `Billboard ${chartType} chart is not currently supported. ` +
+        'Only the Hot 100 chart is available at this time. ' +
+        '\n\nAlternative chart sources:\n' +
+        '• Spotify Charts - Available in the Import page\n' +
+        '• Deezer Charts - Available in the Import page\n' +
+        '• ARIA Charts - For Australian music (if country set to AU)'
+      );
+    }
+    
+    // Determine which JSON file to fetch
+    let dataUrl: string;
+    let chartDate: string;
+    
+    if (dateMatch) {
+      // Specific date requested
+      chartDate = dateMatch[1];
+      dataUrl = `https://raw.githubusercontent.com/mhollingshead/billboard-hot-100/main/date/${chartDate}.json`;
+    } else {
+      // Most recent chart
+      chartDate = 'current';
+      dataUrl = 'https://raw.githubusercontent.com/mhollingshead/billboard-hot-100/main/recent.json';
+    }
+    
+    logger.info(`[Billboard] Fetching from: ${dataUrl}`);
+    
+    progressEmitter?.emit('progress', {
+      type: 'progress',
+      phase: 'scraping',
+      current: 0,
+      total: 0,
+      currentTrackName: 'Downloading chart data...'
+    });
+    
+    // Fetch the JSON data
+    const axios = (await import('axios')).default;
+    const response = await axios.get(dataUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      timeout: 10000,
+    });
+    
+    if (!response.data || !response.data.data) {
+      throw new Error('Invalid response from Billboard data source');
+    }
+    
+    const chartData = response.data;
+    const tracks: { title: string; artist: string }[] = [];
+    
+    // Convert the chart data to our format
+    for (const entry of chartData.data) {
+      if (entry.song && entry.artist) {
+        tracks.push({
+          title: entry.song,
+          artist: entry.artist,
+        });
+      }
+    }
+    
+    logger.info(`[Billboard] Successfully fetched ${tracks.length} tracks`);
+    
+    progressEmitter?.emit('progress', {
+      type: 'progress',
+      phase: 'scraping',
+      current: tracks.length,
+      total: tracks.length,
+      currentTrackName: `Found ${tracks.length} tracks`
+    });
+    
+    // Format the playlist name
+    const displayDate = chartDate === 'current' 
+      ? chartData.date 
+      : chartDate;
+    const playlistName = `Billboard Hot 100 - ${displayDate}`;
+    
+    return {
+      id: `billboard-hot-100-${chartData.date}`,
+      name: playlistName,
+      description: `Billboard Hot 100 chart for the week of ${chartData.date}`,
+      source: 'billboard',
+      tracks,
+    };
+  } catch (error) {
+    // Extract error message safely without circular references
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const statusCode = (error as any)?.response?.status;
+    
+    logger.error('[Billboard] Error fetching chart:', { message: errorMessage, statusCode });
+    
+    // Provide helpful error messages
+    if (statusCode === 404 || errorMessage.includes('404') || errorMessage.includes('Not Found')) {
+      throw new Error(
+        'Billboard chart not found for the specified date. ' +
+        'Charts are dated for Saturdays and may not be available for the current week yet. ' +
+        'Please try a previous Saturday date in YYYY-MM-DD format.'
+      );
+    }
+    
+    if (errorMessage.includes('timeout') || errorMessage.includes('ECONNREFUSED')) {
+      throw new Error(
+        'Failed to connect to Billboard data source. ' +
+        'Please check your internet connection and try again.'
+      );
+    }
+    
+    throw new Error(`Failed to fetch Billboard chart: ${errorMessage}`);
   }
 }
 

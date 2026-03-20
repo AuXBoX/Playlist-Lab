@@ -35,6 +35,7 @@ import spotifyAuthRoutes from './routes/spotify-auth';
 import chartsRoutes from './routes/charts';
 import plexSharingRoutes from './routes/plex-sharing';
 import crossImportRoutes from './routes/cross-import';
+import mixTemplatesRoutes from './routes/mix-templates';
 import './adapters'; // Register all source/target adapters
 
 // Load environment variables
@@ -147,7 +148,7 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 
 // Request logging middleware (skip noisy polling endpoints)
 app.use((req: Request, _res: Response, next: NextFunction) => {
-  if (!req.path.includes('/import/status/')) {
+  if (!req.path.includes('/import/status/') && !req.path.includes('/import/progress/')) {
     logger.info(`${req.method} ${req.path}`, {
       ip: req.ip,
       userAgent: req.get('user-agent'),
@@ -367,6 +368,7 @@ app.use('/api/spotify', spotifyAuthRoutes);
 app.use('/api/charts', chartsRoutes);
 app.use('/api/plex', plexSharingRoutes);
 app.use('/api/cross-import', crossImportRoutes);
+app.use('/api/mix-templates', mixTemplatesRoutes);
 
 // Serve static files from the web app (in production)
 if (NODE_ENV === 'production') {

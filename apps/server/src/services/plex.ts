@@ -985,6 +985,27 @@ export class PlexClient {
     }
   }
 
+  async searchArtists(libraryId: string, query: string): Promise<PlexTrack[]> {
+    try {
+      const response = await this.client.get<PlexMediaContainer>(
+        `/library/sections/${libraryId}/all`,
+        {
+          params: {
+            type: 8, // Artist
+            title: query
+          }
+        }
+      );
+
+      return response.data.MediaContainer.Metadata || [];
+    } catch (error: any) {
+      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        throw new Error('Plex server is unreachable');
+      }
+      throw error;
+    }
+  }
+
   /**
    * Get popular tracks from an artist using hubs (external popularity data)
    * Falls back to play count if hubs unavailable
@@ -1034,6 +1055,24 @@ export class PlexClient {
   }
 
   /**
+   * Get all albums from an artist
+   */
+  async getArtistAlbums(artistKey: string): Promise<PlexTrack[]> {
+    try {
+      const response = await this.client.get<PlexMediaContainer>(
+        `/library/metadata/${artistKey}/children`
+      );
+
+      return response.data.MediaContainer.Metadata || [];
+    } catch (error: any) {
+      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        throw new Error('Plex server is unreachable');
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Get similar/related tracks (sonically similar or from same artist/album)
    */
   async getSimilarTracks(trackKey: string, limit: number = 10): Promise<PlexTrack[]> {
@@ -1065,6 +1104,25 @@ export class PlexClient {
       } catch {
         return [];
       }
+    }
+  }
+
+  /**
+   * Get related content hubs for an artist or track
+   * Returns organized hubs like "Fans Also Like", "Similar Artists", etc.
+   */
+  async getRelatedHubs(ratingKey: string): Promise<any[]> {
+    try {
+      const response = await this.client.get<PlexMediaContainer>(
+        `/library/metadata/${ratingKey}/related`
+      );
+
+      return response.data.MediaContainer.Hub || [];
+    } catch (error: any) {
+      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        throw new Error('Plex server is unreachable');
+      }
+      return [];
     }
   }
 
@@ -1146,6 +1204,470 @@ export class PlexClient {
       logger.error('Failed to get tracks with filters', { error, libraryId, filters });
       return [];
     }
+  }
+
+  /**
+   * Get tracks with advanced filters including sonic analysis
+   * Supports all Plex filter fields and complex boolean logic
+   */
+  async getTracksWithAdvancedFilters(
+    libraryId: string,
+    options: {
+      // Time filters
+      playedInLastDays?: number;
+      notPlayedInLastDays?: number;
+      addedInLastDays?: number;
+      
+      // Release date filters
+      releasedAfterYear?: number;
+      releasedBeforeYear?: number;
+      
+      // Rating & popularity
+      minRating?: number;
+      maxRating?: number;
+      minPlayCount?: number;
+      maxPlayCount?: number;
+      minSkipCount?: number;
+      maxSkipCount?: number;
+      
+      // Track characteristics
+      minDuration?: number; // in seconds
+      maxDuration?: number; // in seconds
+      minTrackNumber?: number;
+      maxTrackNumber?: number;
+      discNumber?: number;
+      
+      // Quality filters
+      minBitrate?: number; // in kbps
+      audioCodec?: string[]; // e.g., ['flac', 'mp3']
+      minSampleRate?: number; // in Hz
+      losslessOnly?: boolean;
+      
+      // Metadata filters
+      genres?: string[];
+      excludeGenres?: string[];
+      moods?: string[];
+      excludeMoods?: string[];
+      styles?: string[];
+      excludeStyles?: string[];
+      collections?: string[];
+      labels?: string[]; // record labels
+      
+      // Artist/Album filters
+      artistNames?: string[];
+      albumTitles?: string[];
+      
+      // Sorting
+      sortBy?: 'random' | 'playCount' | 'lastPlayed' | 'dateAdded' | 'releaseDate' | 'rating' | 'duration' | 'title';
+      sortDirection?: 'asc' | 'desc';
+      
+      // Limit
+      limit?: number;
+    }
+  ): Promise<PlexTrack[]> {
+    try {
+      const filters: string[] = [];
+      const now = Math.floor(Date.now() / 1000);
+
+      // Time filters
+      if (options.playedInLastDays) {
+        const daysAgo = now - (options.playedInLastDays * 24 * 60 * 60);
+        filters.push(`lastViewedAt>=${daysAgo}`);
+      }
+
+      if (options.notPlayedInLastDays) {
+        const daysAgo = now - (options.notPlayedInLastDays * 24 * 60 * 60);
+        filters.push(`lastViewedAt<${daysAgo}`);
+      }
+
+      if (options.addedInLastDays) {
+        const daysAgo = now - (options.addedInLastDays * 24 * 60 * 60);
+        filters.push(`addedAt>=${daysAgo}`);
+      }
+
+      // Release date filters
+      if (options.releasedAfterYear) {
+        filters.push(`year>=${options.releasedAfterYear}`);
+      }
+
+      if (options.releasedBeforeYear) {
+        filters.push(`year<=${options.releasedBeforeYear}`);
+      }
+
+      // Rating filters
+      if (options.minRating) {
+        filters.push(`userRating>=${options.minRating}`);
+      }
+
+      if (options.maxRating) {
+        filters.push(`userRating<=${options.maxRating}`);
+      }
+
+      // Play count filters
+      if (options.minPlayCount !== undefined) {
+        filters.push(`viewCount>=${options.minPlayCount}`);
+      }
+
+      if (options.maxPlayCount !== undefined) {
+        filters.push(`viewCount<=${options.maxPlayCount}`);
+      }
+
+      // Duration filters (convert seconds to milliseconds)
+      if (options.minDuration) {
+        filters.push(`duration>=${options.minDuration * 1000}`);
+      }
+
+      if (options.maxDuration) {
+        filters.push(`duration<=${options.maxDuration * 1000}`);
+      }
+
+      // Track number filters
+      if (options.minTrackNumber) {
+        filters.push(`index>=${options.minTrackNumber}`);
+      }
+
+      if (options.maxTrackNumber) {
+        filters.push(`index<=${options.maxTrackNumber}`);
+      }
+
+      if (options.discNumber) {
+        filters.push(`parentIndex=${options.discNumber}`);
+      }
+
+      // Quality filters
+      if (options.minBitrate) {
+        filters.push(`bitrate>=${options.minBitrate}`);
+      }
+
+      if (options.losslessOnly) {
+        // Common lossless codecs
+        filters.push('push=1');
+        filters.push('audioCodec=flac');
+        filters.push('or=1');
+        filters.push('audioCodec=alac');
+        filters.push('or=1');
+        filters.push('audioCodec=ape');
+        filters.push('or=1');
+        filters.push('audioCodec=wav');
+        filters.push('pop=1');
+      } else if (options.audioCodec && options.audioCodec.length > 0) {
+        if (options.audioCodec.length === 1) {
+          filters.push(`audioCodec=${options.audioCodec[0]}`);
+        } else {
+          filters.push('push=1');
+          filters.push(`audioCodec=${options.audioCodec[0]}`);
+          for (let i = 1; i < options.audioCodec.length; i++) {
+            filters.push('or=1');
+            filters.push(`audioCodec=${options.audioCodec[i]}`);
+          }
+          filters.push('pop=1');
+        }
+      }
+
+      if (options.minSampleRate) {
+        filters.push(`sampleRate>=${options.minSampleRate}`);
+      }
+
+      // Build the query
+      let url = `/library/sections/${libraryId}/all?type=10`;
+      
+      if (filters.length > 0) {
+        url += '&' + filters.join('&');
+      }
+
+      // Add sorting
+      if (options.sortBy && options.sortBy !== 'random') {
+        const sortField = this.getSortField(options.sortBy);
+        const direction = options.sortDirection || 'desc';
+        url += `&sort=${sortField}:${direction}`;
+      }
+
+      // Add limit
+      const limit = options.limit || 1000;
+      url += `&X-Plex-Container-Size=${limit}`;
+
+      logger.info('Advanced filter query', { url: url.substring(0, 500) });
+
+      const response = await this.client.get<PlexMediaContainer>(url);
+
+      let tracks = response.data.MediaContainer.Metadata || [];
+
+      // Client-side filtering for complex fields
+      // Genre filters (OR logic within includes, AND logic between includes/excludes)
+      if (options.genres && options.genres.length > 0) {
+        const genreLower = options.genres.map(g => g.toLowerCase());
+        tracks = tracks.filter((track: PlexTrack) => {
+          const trackGenres = track.Genre?.map((g: any) => g.tag.toLowerCase()) || [];
+          return genreLower.some(genre => trackGenres.includes(genre));
+        });
+      }
+
+      if (options.excludeGenres && options.excludeGenres.length > 0) {
+        const excludeLower = options.excludeGenres.map(g => g.toLowerCase());
+        tracks = tracks.filter((track: PlexTrack) => {
+          const trackGenres = track.Genre?.map((g: any) => g.tag.toLowerCase()) || [];
+          return !excludeLower.some(genre => trackGenres.includes(genre));
+        });
+      }
+
+      // Mood filters
+      if (options.moods && options.moods.length > 0) {
+        const moodLower = options.moods.map(m => m.toLowerCase());
+        tracks = tracks.filter((track: PlexTrack) => {
+          const trackMoods = (track as any).Mood?.map((m: any) => m.tag.toLowerCase()) || [];
+          return moodLower.some(mood => trackMoods.includes(mood));
+        });
+      }
+
+      if (options.excludeMoods && options.excludeMoods.length > 0) {
+        const excludeLower = options.excludeMoods.map(m => m.toLowerCase());
+        tracks = tracks.filter((track: PlexTrack) => {
+          const trackMoods = (track as any).Mood?.map((m: any) => m.tag.toLowerCase()) || [];
+          return !excludeLower.some(mood => trackMoods.includes(mood));
+        });
+      }
+
+      // Style filters
+      if (options.styles && options.styles.length > 0) {
+        const styleLower = options.styles.map(s => s.toLowerCase());
+        tracks = tracks.filter((track: PlexTrack) => {
+          const trackStyles = (track as any).Style?.map((s: any) => s.tag.toLowerCase()) || [];
+          return styleLower.some(style => trackStyles.includes(style));
+        });
+      }
+
+      if (options.excludeStyles && options.excludeStyles.length > 0) {
+        const excludeLower = options.excludeStyles.map(s => s.toLowerCase());
+        tracks = tracks.filter((track: PlexTrack) => {
+          const trackStyles = (track as any).Style?.map((s: any) => s.tag.toLowerCase()) || [];
+          return !excludeLower.some(style => trackStyles.includes(style));
+        });
+      }
+
+      // Collection filters
+      if (options.collections && options.collections.length > 0) {
+        const collectionLower = options.collections.map(c => c.toLowerCase());
+        tracks = tracks.filter((track: PlexTrack) => {
+          const trackCollections = (track as any).Collection?.map((c: any) => c.tag.toLowerCase()) || [];
+          return collectionLower.some(collection => trackCollections.includes(collection));
+        });
+      }
+
+      // Label filters (record labels)
+      if (options.labels && options.labels.length > 0) {
+        const labelLower = options.labels.map(l => l.toLowerCase());
+        tracks = tracks.filter((track: PlexTrack) => {
+          const trackLabel = (track as any).parentStudio?.toLowerCase() || '';
+          return labelLower.some(label => trackLabel.includes(label));
+        });
+      }
+
+      // Artist name filters
+      if (options.artistNames && options.artistNames.length > 0) {
+        const artistLower = options.artistNames.map(a => a.toLowerCase());
+        tracks = tracks.filter((track: PlexTrack) => {
+          const artistName = track.grandparentTitle?.toLowerCase() || '';
+          return artistLower.some(artist => artistName.includes(artist));
+        });
+      }
+
+      // Album title filters
+      if (options.albumTitles && options.albumTitles.length > 0) {
+        const albumLower = options.albumTitles.map(a => a.toLowerCase());
+        tracks = tracks.filter((track: PlexTrack) => {
+          const albumTitle = track.parentTitle?.toLowerCase() || '';
+          return albumLower.some(album => albumTitle.includes(album));
+        });
+      }
+
+      // Random shuffle if requested
+      if (options.sortBy === 'random') {
+        tracks = this.shuffleArray(tracks);
+      }
+
+      return tracks;
+    } catch (error: any) {
+      logger.error('Failed to get tracks with advanced filters', { error: error.message, libraryId });
+      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        throw new Error('Plex server is unreachable');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Get sonically similar tracks using Plex's sonic analysis
+   */
+  async getSonicallySimilarTracks(
+    seedTrackKey: string,
+    _libraryId: string, // Unused but kept for API consistency
+    options: {
+      maxDistance?: number; // 0-1, lower = more similar (default 0.25)
+      limit?: number;
+      tempoRange?: { min: number; max: number }; // BPM
+      energyRange?: { min: number; max: number }; // 0-1
+      danceabilityRange?: { min: number; max: number }; // 0-1
+    } = {}
+  ): Promise<PlexTrack[]> {
+    try {
+      // First, get the seed track's music analysis
+      const seedTrack = await this.getTrackDetails(seedTrackKey);
+      if (!seedTrack) {
+        throw new Error('Seed track not found');
+      }
+
+      // Try to get nearest tracks using Plex's sonic analysis
+      try {
+        const response = await this.client.get<PlexMediaContainer>(
+          `/library/metadata/${seedTrackKey}/nearest`,
+          {
+            params: {
+              limit: options.limit || 50
+            }
+          }
+        );
+
+        let tracks = response.data.MediaContainer.Metadata || [];
+
+        // Apply additional filters if provided
+        if (options.tempoRange || options.energyRange || options.danceabilityRange) {
+          tracks = tracks.filter((track: any) => {
+            const analysis = track.musicAnalysis;
+            if (!analysis) return true; // Include if no analysis data
+
+            if (options.tempoRange) {
+              const tempo = analysis.tempo;
+              if (tempo < options.tempoRange.min || tempo > options.tempoRange.max) {
+                return false;
+              }
+            }
+
+            if (options.energyRange) {
+              const energy = analysis.energy;
+              if (energy < options.energyRange.min || energy > options.energyRange.max) {
+                return false;
+              }
+            }
+
+            if (options.danceabilityRange) {
+              const danceability = analysis.danceability;
+              if (danceability < options.danceabilityRange.min || danceability > options.danceabilityRange.max) {
+                return false;
+              }
+            }
+
+            return true;
+          });
+        }
+
+        return tracks;
+      } catch (nearestError) {
+        logger.warn('Sonic analysis not available, falling back to metadata similarity', { error: nearestError });
+        
+        // Fallback: use similar tracks endpoint (metadata-based)
+        return await this.getSimilarTracks(seedTrackKey, options.limit || 50);
+      }
+    } catch (error: any) {
+      logger.error('Failed to get sonically similar tracks', { error: error.message, seedTrackKey });
+      throw error;
+    }
+  }
+
+  /**
+   * Get all available genres from a library
+   */
+  async getLibraryGenres(libraryId: string): Promise<string[]> {
+    try {
+      const response = await this.client.get<PlexMediaContainer>(
+        `/library/sections/${libraryId}/genre`
+      );
+
+      const genres = response.data.MediaContainer.Directory || [];
+      return genres.map((g: any) => g.title).sort();
+    } catch (error: any) {
+      logger.error('Failed to get library genres', { error: error.message, libraryId });
+      return [];
+    }
+  }
+
+  /**
+   * Get all available moods from a library
+   */
+  async getLibraryMoods(libraryId: string): Promise<string[]> {
+    try {
+      const response = await this.client.get<PlexMediaContainer>(
+        `/library/sections/${libraryId}/mood`
+      );
+
+      const moods = response.data.MediaContainer.Directory || [];
+      return moods.map((m: any) => m.title).sort();
+    } catch (error: any) {
+      logger.error('Failed to get library moods', { error: error.message, libraryId });
+      return [];
+    }
+  }
+
+  /**
+   * Get all available styles from a library
+   */
+  async getLibraryStyles(libraryId: string): Promise<string[]> {
+    try {
+      const response = await this.client.get<PlexMediaContainer>(
+        `/library/sections/${libraryId}/style`
+      );
+
+      const styles = response.data.MediaContainer.Directory || [];
+      return styles.map((s: any) => s.title).sort();
+    } catch (error: any) {
+      logger.error('Failed to get library styles', { error: error.message, libraryId });
+      return [];
+    }
+  }
+
+  /**
+   * Get all available collections from a library
+   */
+  async getLibraryCollections(libraryId: string): Promise<string[]> {
+    try {
+      const response = await this.client.get<PlexMediaContainer>(
+        `/library/sections/${libraryId}/collection`
+      );
+
+      const collections = response.data.MediaContainer.Directory || [];
+      return collections.map((c: any) => c.title).sort();
+    } catch (error: any) {
+      logger.error('Failed to get library collections', { error: error.message, libraryId });
+      return [];
+    }
+  }
+
+  /**
+   * Helper method to map sort field names to Plex API field names
+   */
+  private getSortField(sortBy: string): string {
+    const sortFieldMap: Record<string, string> = {
+      'playCount': 'viewCount',
+      'lastPlayed': 'lastViewedAt',
+      'dateAdded': 'addedAt',
+      'releaseDate': 'year',
+      'rating': 'userRating',
+      'duration': 'duration',
+      'title': 'titleSort'
+    };
+
+    return sortFieldMap[sortBy] || sortBy;
+  }
+
+  /**
+   * Helper method to shuffle an array
+   */
+  private shuffleArray<T>(array: T[]): T[] {
+    const result = [...array];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
   }
 
 

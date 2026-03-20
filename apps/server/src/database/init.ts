@@ -88,7 +88,8 @@ export function verifySchema(db: Database.Database): boolean {
     'sessions',
     'admin_users',
     'cross_import_jobs',
-    'oauth_connections'
+    'oauth_connections',
+    'mix_templates'
   ];
 
   try {
@@ -136,7 +137,8 @@ export function getDatabaseStats(db: Database.Database): Record<string, number> 
     'sessions',
     'admin_users',
     'cross_import_jobs',
-    'oauth_connections'
+    'oauth_connections',
+    'mix_templates'
   ];
 
   const stats: Record<string, number> = {};
@@ -304,6 +306,32 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_oauth_connections_user_service ON oauth_connections(user_id, service);
       `);
       console.log('Migration completed: oauth_connections table created');
+    }
+
+    // Create mix_templates table if it doesn't exist
+    const hasMixTemplates = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='mix_templates'"
+    ).get();
+    if (!hasMixTemplates) {
+      console.log('Creating mix_templates table...');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS mix_templates (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          mix_type TEXT NOT NULL,
+          configuration TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          last_used_at INTEGER,
+          use_count INTEGER DEFAULT 0,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_mix_templates_user_id ON mix_templates(user_id);
+        CREATE INDEX IF NOT EXISTS idx_mix_templates_mix_type ON mix_templates(mix_type);
+      `);
+      console.log('Migration completed: mix_templates table created');
     }
   } catch (error) {
     console.error('Migration failed:', error);
