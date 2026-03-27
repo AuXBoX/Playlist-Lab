@@ -1,4 +1,4 @@
-import React, { type FC, useState, useEffect } from 'react';
+import { type FC, useState, useEffect } from 'react';
 import './SaveTemplateModal.css';
 
 interface SaveTemplateModalProps {
