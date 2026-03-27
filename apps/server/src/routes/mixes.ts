@@ -1120,7 +1120,7 @@ router.post('/artist-journey', async (req: Request, res: Response, next: NextFun
   try {
     const userId = req.session.userId!;
     const db = req.dbService!;
-    const { artistKey, trackCount = 50, tracksPerAlbum = 3 } = req.body;
+    const { artistKey, tracksPerAlbum = 3 } = req.body;
 
     if (!artistKey) {
       return next(createValidationError('Artist key is required'));
