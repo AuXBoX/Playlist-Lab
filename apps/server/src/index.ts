@@ -434,7 +434,7 @@ app.post('/api/update/install', async (_req: Request, res: Response) => {
         data += chunk;
       });
       
-      response.on('end', async () => {
+      response.on('end', () => {
         if (response.statusCode === 200) {
           try {
             const release = JSON.parse(data);
