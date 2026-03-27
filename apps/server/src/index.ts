@@ -544,7 +544,6 @@ function isNewerVersion(latest: string, current: string): boolean {
   }
 
   return false; // Versions are equal
-}  return false;
 }
 
 // Helper function to format uptime
