@@ -17,12 +17,67 @@ import { DatabaseService } from '../database/database';
 import { requireAuth } from '../middleware/auth';
 import { createValidationError, createInternalError } from '../middleware/error-handler';
 import { logger } from '../utils/logger';
+import { EventEmitter } from 'events';
+
+// Store active mix generation sessions for progress tracking
+export const mixGenerationSessions = new Map<string, EventEmitter>();
 
 const router = Router();
 const mixService = new MixService();
 
 // All mix routes require authentication
 router.use(requireAuth);
+
+/**
+ * GET /api/mixes/progress/:sessionId
+ * Server-Sent Events endpoint for mix generation progress
+ */
+router.get('/progress/:sessionId', (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+  res.flushHeaders();
+  
+  const emitter = new EventEmitter();
+  mixGenerationSessions.set(sessionId, emitter);
+  
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+  
+  // Listen for progress events
+  const progressHandler = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  
+  const completeHandler = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    cleanup();
+  };
+  
+  const errorHandler = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    cleanup();
+  };
+  
+  emitter.on('progress', progressHandler);
+  emitter.on('complete', completeHandler);
+  emitter.on('error', errorHandler);
+  
+  const cleanup = () => {
+    emitter.removeListener('progress', progressHandler);
+    emitter.removeListener('complete', completeHandler);
+    emitter.removeListener('error', errorHandler);
+    mixGenerationSessions.delete(sessionId);
+    res.end();
+  };
+  
+  // Clean up on client disconnect
+  req.on('close', cleanup);
+  req.on('end', cleanup);
+});
 
 /**
  * Default mix settings
@@ -461,7 +516,7 @@ router.post('/custom-advanced', async (req: Request, res: Response, next: NextFu
   try {
     const userId = req.session.userId!;
     const db = req.dbService!;
-    const { name, trackCount, ...filterOptions } = req.body;
+    const { name, trackCount, sessionId, ...filterOptions } = req.body;
 
     if (!name || !trackCount) {
       return next(createValidationError('Playlist name and track count are required'));
@@ -473,7 +528,19 @@ router.post('/custom-advanced', async (req: Request, res: Response, next: NextFu
       return next(createInternalError('User not found'));
     }
 
-    logger.info('Generating custom advanced mix', { userId, libraryId: userServer.library_id, name, trackCount });
+    logger.info('Generating custom advanced mix', { userId, libraryId: userServer.library_id, name, trackCount, sessionId });
+
+    // Get progress emitter if sessionId provided
+    const progressEmitter = sessionId ? mixGenerationSessions.get(sessionId) : undefined;
+    
+    if (progressEmitter) {
+      progressEmitter.emit('progress', {
+        type: 'progress',
+        stage: 'starting',
+        message: 'Starting mix generation...',
+        progress: 0
+      });
+    }
 
     // Generate mix with custom filters
     const result = await mixService.generateCustomMix(
@@ -483,13 +550,29 @@ router.post('/custom-advanced', async (req: Request, res: Response, next: NextFu
       {
         trackCount,
         ...filterOptions
-      }
+      },
+      progressEmitter // Pass emitter for progress updates
     );
 
     if (result.trackCount === 0) {
+      if (progressEmitter) {
+        progressEmitter.emit('error', {
+          type: 'error',
+          message: 'No tracks found matching your criteria. Try adjusting the filters.'
+        });
+      }
       return res.json({
         success: false,
         message: 'No tracks found matching your criteria. Try adjusting the filters.'
+      });
+    }
+
+    if (progressEmitter) {
+      progressEmitter.emit('progress', {
+        type: 'progress',
+        stage: 'creating_playlist',
+        message: 'Creating playlist...',
+        progress: 90
       });
     }
 
@@ -507,6 +590,19 @@ router.post('/custom-advanced', async (req: Request, res: Response, next: NextFu
 
     logger.info('Custom advanced mix created', { userId, playlistId: playlist.playlistId, trackCount: playlist.trackCount });
 
+    if (progressEmitter) {
+      progressEmitter.emit('complete', {
+        type: 'complete',
+        message: 'Mix generated successfully!',
+        progress: 100,
+        playlist: {
+          id: playlist.playlistId,
+          name: name,
+          trackCount: playlist.trackCount
+        }
+      });
+    }
+
     res.json({
       success: true,
       playlist: {
@@ -517,6 +613,16 @@ router.post('/custom-advanced', async (req: Request, res: Response, next: NextFu
     });
   } catch (error: any) {
     logger.error('Failed to generate custom advanced mix', { error: error.message });
+    
+    const { sessionId } = req.body;
+    const progressEmitter = sessionId ? mixGenerationSessions.get(sessionId) : undefined;
+    if (progressEmitter) {
+      progressEmitter.emit('error', {
+        type: 'error',
+        message: error.message || 'Failed to generate custom advanced mix'
+      });
+    }
+    
     next(createInternalError(error.message || 'Failed to generate custom advanced mix'));
   }
 });

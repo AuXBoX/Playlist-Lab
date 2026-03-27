@@ -17,6 +17,7 @@ import { logger } from '../utils/logger';
 import { MixService } from '../services/mixes';
 import { PlexClient } from '../services/plex';
 import type { DatabaseService } from '../database/database';
+import { mixGenerationSessions } from './mixes';
 
 const router = Router();
 const mixService = new MixService();
@@ -418,7 +419,8 @@ async function generateMixFromTemplate(
   serverClientId: string,
   playlistName: string,
   userId: number,
-  db: DatabaseService
+  db: DatabaseService,
+  progressEmitter?: any
 ): Promise<{ playlistId: string; trackCount: number; warnings: string[] }> {
   const config = template.configuration;
   const plex = new PlexClient(serverUrl, plexToken);
@@ -449,7 +451,8 @@ async function generateMixFromTemplate(
               minRating: config.customRules?.minRating,
               sortBy: config.sortBy || 'random',
               sortDirection: config.sortDirection || 'desc'
-            }
+            },
+            progressEmitter
           ),
           'Generate custom mix'
         );
@@ -1065,7 +1068,7 @@ router.post('/:id/generate', async (req: Request, res: Response, next: NextFunct
     const userId = req.session.userId!;
     const db = req.dbService!;
     const templateId = parseInt(req.params.id, 10);
-    const { playlistName } = req.body;
+    const { playlistName, sessionId } = req.body;
 
     if (isNaN(templateId)) {
       return next(createValidationError('Invalid template ID'));
@@ -1137,8 +1140,21 @@ router.post('/:id/generate', async (req: Request, res: Response, next: NextFunct
       templateId, 
       templateName: template.name,
       mixType: template.mix_type,
-      trackCount: configuration.trackCount
+      trackCount: configuration.trackCount,
+      sessionId
     });
+
+    // Get progress emitter if sessionId provided
+    const progressEmitter = sessionId ? mixGenerationSessions.get(sessionId) : undefined;
+    
+    if (progressEmitter) {
+      progressEmitter.emit('progress', {
+        type: 'progress',
+        stage: 'starting',
+        message: 'Starting mix generation from template...',
+        progress: 0
+      });
+    }
 
     // Generate playlist name if not provided
     const finalPlaylistName = playlistName || `${template.name} - ${new Date().toLocaleDateString()}`;
@@ -1152,7 +1168,8 @@ router.post('/:id/generate', async (req: Request, res: Response, next: NextFunct
       userServer.server_client_id,
       finalPlaylistName,
       userId,
-      db
+      db,
+      progressEmitter
     );
 
     logger.info('Mix generated from template', { 
@@ -1162,6 +1179,18 @@ router.post('/:id/generate', async (req: Request, res: Response, next: NextFunct
       trackCount: result.trackCount,
       warningCount: result.warnings.length
     });
+
+    if (progressEmitter) {
+      progressEmitter.emit('complete', {
+        type: 'complete',
+        message: 'Mix generated successfully!',
+        progress: 100,
+        playlist: {
+          id: result.playlistId,
+          trackCount: result.trackCount
+        }
+      });
+    }
 
     res.json({
       success: true,
@@ -1179,6 +1208,15 @@ router.post('/:id/generate', async (req: Request, res: Response, next: NextFunct
       userId: req.session.userId, 
       templateId: req.params.id 
     });
+    
+    const { sessionId } = req.body;
+    const progressEmitter = sessionId ? mixGenerationSessions.get(sessionId) : undefined;
+    if (progressEmitter) {
+      progressEmitter.emit('error', {
+        type: 'error',
+        message: error.message || 'Failed to generate mix from template'
+      });
+    }
     
     // Provide user-friendly error messages based on error type
     let errorMessage = error.message || 'Failed to generate mix from template';

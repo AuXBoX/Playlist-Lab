@@ -318,6 +318,7 @@ export class MixService {
       minPlayCount?: number;
       maxPlayCount?: number;
       popularTracksOnly?: boolean; // Only include tracks from Plex's "Popular Tracks" section
+      popularArtistsOnly?: boolean; // Only include tracks from popular/well-known artists
       
       // Track characteristics
       minDuration?: number; // in seconds
@@ -357,7 +358,8 @@ export class MixService {
       // Sorting
       sortBy: 'random' | 'playCount' | 'lastPlayed' | 'dateAdded' | 'releaseDate' | 'rating' | 'duration' | 'title';
       sortDirection: 'asc' | 'desc';
-    }
+    },
+    progressEmitter?: any
   ): Promise<MixResult> {
     const plex = this.createPlexClient(serverUrl, plexToken);
 
@@ -365,6 +367,13 @@ export class MixService {
 
     // If popularTracksOnly is requested, get popular tracks from all artists
     if (settings.popularTracksOnly) {
+      progressEmitter?.emit('progress', {
+        type: 'progress',
+        stage: 'fetching_artists',
+        message: 'Fetching artists from library...',
+        progress: 10
+      });
+      
       // Get all artists from the library
       const allArtists = await plex.getTracksWithAdvancedFilters(libraryId, {
         sortBy: 'random',
@@ -380,10 +389,18 @@ export class MixService {
         }
       });
 
+      progressEmitter?.emit('progress', {
+        type: 'progress',
+        stage: 'fetching_popular',
+        message: `Fetching popular tracks from ${artistKeys.size} artists...`,
+        progress: 30
+      });
+
       // Get popular tracks from each artist
       const popularTracksPerArtist = Math.max(3, Math.ceil(settings.trackCount / artistKeys.size));
       const allPopularTracks: PlexTrack[] = [];
 
+      let processed = 0;
       for (const artistKey of Array.from(artistKeys)) {
         try {
           const popularTracks = await plex.getArtistPopularTracks(
@@ -392,6 +409,16 @@ export class MixService {
             popularTracksPerArtist
           );
           allPopularTracks.push(...popularTracks);
+          
+          processed++;
+          if (processed % 10 === 0) {
+            progressEmitter?.emit('progress', {
+              type: 'progress',
+              stage: 'fetching_popular',
+              message: `Processed ${processed}/${artistKeys.size} artists...`,
+              progress: 30 + (processed / artistKeys.size) * 40
+            });
+          }
         } catch (error) {
           // Skip artists that fail
           continue;
@@ -402,6 +429,13 @@ export class MixService {
     }
     // If sonic analysis is requested, use that as the primary source
     else if (settings.sonicSeedTrackKey || settings.sonicSeedArtistKey) {
+      progressEmitter?.emit('progress', {
+        type: 'progress',
+        stage: 'sonic_analysis',
+        message: 'Analyzing sonic similarity...',
+        progress: 20
+      });
+      
       const seedKey = settings.sonicSeedTrackKey || settings.sonicSeedArtistKey!;
       
       // If popular tracks are requested and we have an artist seed
@@ -425,6 +459,13 @@ export class MixService {
 
         tracks = sonicTracks;
       }
+
+      progressEmitter?.emit('progress', {
+        type: 'progress',
+        stage: 'expanding_results',
+        message: 'Expanding results with similar artists...',
+        progress: 50
+      });
 
       // If seed is a track and we want same artist tracks
       if (settings.sonicSeedTrackKey && settings.sonicIncludeSameArtist) {
@@ -452,6 +493,13 @@ export class MixService {
       tracks.forEach(track => uniqueTracks.set(track.ratingKey, track));
       tracks = Array.from(uniqueTracks.values());
     } else {
+      progressEmitter?.emit('progress', {
+        type: 'progress',
+        stage: 'fetching_tracks',
+        message: 'Fetching tracks from library...',
+        progress: 30
+      });
+      
       // Use the standard advanced filtering method
       tracks = await plex.getTracksWithAdvancedFilters(libraryId, {
         ...settings,
@@ -459,8 +507,82 @@ export class MixService {
       });
     }
 
+    progressEmitter?.emit('progress', {
+      type: 'progress',
+      stage: 'filtering',
+      message: 'Applying filters...',
+      progress: 70
+    });
+
     // Apply additional filters if specified (even for sonic results)
-    if (settings.genres || settings.excludeGenres || settings.minRating || settings.minPlayCount) {
+    if (settings.genres || settings.excludeGenres || settings.minRating || settings.minPlayCount || settings.popularArtistsOnly) {
+      
+      // If popularArtistsOnly is enabled, we need to check artist popularity first
+      if (settings.popularArtistsOnly) {
+        progressEmitter?.emit('progress', {
+          type: 'progress',
+          stage: 'filtering_artists',
+          message: 'Filtering by popular artists (Last.fm data)...',
+          progress: 75
+        });
+
+        // Get unique artist keys from tracks
+        const artistKeys = new Set<string>();
+        tracks.forEach(track => {
+          if (track.grandparentRatingKey) {
+            artistKeys.add(track.grandparentRatingKey);
+          }
+        });
+
+        // Check each artist for Last.fm popularity data
+        const popularArtistKeys = new Set<string>();
+        let checkedCount = 0;
+        
+        for (const artistKey of Array.from(artistKeys)) {
+          try {
+            const artistDetails = await plex.getArtistDetails(artistKey);
+            
+            // Artists with ratingCount > 0 have external popularity data from Last.fm/MusicBrainz
+            // This indicates the artist is well-known enough to have ratings on Last.fm
+            if (artistDetails && artistDetails.ratingCount && artistDetails.ratingCount > 0) {
+              popularArtistKeys.add(artistKey);
+              console.log(`[Popular Artist] ${artistDetails.title}: ratingCount=${artistDetails.ratingCount}`);
+            }
+            
+            checkedCount++;
+            if (checkedCount % 10 === 0) {
+              progressEmitter?.emit('progress', {
+                type: 'progress',
+                stage: 'filtering_artists',
+                message: `Checked ${checkedCount}/${artistKeys.size} artists for Last.fm data...`,
+                progress: 75 + (checkedCount / artistKeys.size) * 10
+              });
+            }
+          } catch (error) {
+            // Skip artists that fail to fetch
+            continue;
+          }
+        }
+
+        console.log(`[Popular Artists Filter] Found ${popularArtistKeys.size} popular artists out of ${artistKeys.size} total`);
+
+        // Filter tracks to only include those from popular artists
+        const beforeCount = tracks.length;
+        tracks = tracks.filter(track => 
+          track.grandparentRatingKey && popularArtistKeys.has(track.grandparentRatingKey)
+        );
+        
+        console.log(`[Popular Artists Filter] Filtered from ${beforeCount} to ${tracks.length} tracks`);
+        
+        if (tracks.length === 0) {
+          console.warn('[Popular Artists Filter] No tracks found from popular artists. This may mean:');
+          console.warn('  1. Plex has not fetched Last.fm data for your artists yet');
+          console.warn('  2. Your library contains mostly lesser-known artists');
+          console.warn('  3. Last.fm agent is not enabled in Plex settings');
+        }
+      }
+
+      // Apply other filters
       tracks = tracks.filter(track => {
         // Genre filters
         if (settings.genres && settings.genres.length > 0) {
@@ -487,6 +609,13 @@ export class MixService {
         return true;
       });
     }
+
+    progressEmitter?.emit('progress', {
+      type: 'progress',
+      stage: 'finalizing',
+      message: 'Finalizing track selection...',
+      progress: 85
+    });
 
     // Limit to requested track count
     const selectedTracks = tracks.slice(0, settings.trackCount);

@@ -1082,6 +1082,26 @@ export class PlexClient {
   }
 
   /**
+   * Get artist details including popularity data
+   * Returns artist metadata with ratingCount (external popularity from Last.fm/MusicBrainz)
+   */
+  async getArtistDetails(artistKey: string): Promise<any> {
+    try {
+      const response = await this.client.get<PlexMediaContainer>(
+        `/library/metadata/${artistKey}`
+      );
+
+      const artist = response.data.MediaContainer.Metadata?.[0];
+      return artist || null;
+    } catch (error: any) {
+      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        throw new Error('Plex server is unreachable');
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Get all albums from an artist
    */
   async getArtistAlbums(artistKey: string): Promise<PlexTrack[]> {

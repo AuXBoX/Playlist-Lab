@@ -17,6 +17,7 @@ type QuickMixType = 'weekly' | 'daily' | 'timecapsule' | 'newmusic' | 'deepcuts'
 export const GenerateMixesPage: FC = () => {
   const { apiClient, settings, refreshPlaylists, refreshSchedules } = useApp();
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<{ message: string; progress: number } | null>(null);
   const [generatedPlaylists, setGeneratedPlaylists] = useState<Playlist[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedMix, setSelectedMix] = useState<MixType | null>(null);
@@ -163,12 +164,46 @@ export const GenerateMixesPage: FC = () => {
     setError(null);
     setGeneratedPlaylists([]);
     setIsGenerating(true);
+    setGenerationProgress(null);
     setSelectedMix('custom');
     setShowCustomMixModal(false);
     setCurrentCustomSettings(customSettings); // Store settings for potential template save
 
+    // Generate a unique session ID for progress tracking
+    const sessionId = `custom-mix-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Set up SSE connection for progress updates
+    const eventSource = new EventSource(`/api/mixes/progress/${sessionId}`, {
+      withCredentials: true
+    });
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'progress') {
+          setGenerationProgress({ message: data.message, progress: data.progress });
+        } else if (data.type === 'complete') {
+          setGenerationProgress({ message: 'Complete!', progress: 100 });
+          eventSource.close();
+        } else if (data.type === 'error') {
+          setError(data.message);
+          eventSource.close();
+          setIsGenerating(false);
+          setGenerationProgress(null);
+          setSelectedMix(null);
+        }
+      } catch (err) {
+        console.error('Failed to parse SSE message:', err);
+      }
+    };
+
+    eventSource.onerror = () => {
+      eventSource.close();
+    };
+
     try {
-      const result = await apiClient.generateCustomMix(customSettings);
+      const result = await apiClient.generateCustomMix({ ...customSettings, sessionId } as any);
       if (result.success) {
         // Convert the response to match the expected Playlist type
         const now = Date.now();
@@ -188,7 +223,9 @@ export const GenerateMixesPage: FC = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate custom mix');
     } finally {
+      eventSource.close();
       setIsGenerating(false);
+      setGenerationProgress(null);
       setSelectedMix(null);
     }
   };
@@ -466,7 +503,41 @@ export const GenerateMixesPage: FC = () => {
     setError(null);
     setGeneratedPlaylists([]);
     setIsGenerating(true);
+    setGenerationProgress(null);
     setSelectedMix('custom');
+
+    // Generate a unique session ID for progress tracking
+    const sessionId = `template-mix-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Set up SSE connection for progress updates
+    const eventSource = new EventSource(`/api/mixes/progress/${sessionId}`, {
+      withCredentials: true
+    });
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'progress') {
+          setGenerationProgress({ message: data.message, progress: data.progress });
+        } else if (data.type === 'complete') {
+          setGenerationProgress({ message: 'Complete!', progress: 100 });
+          eventSource.close();
+        } else if (data.type === 'error') {
+          setError(data.message);
+          eventSource.close();
+          setIsGenerating(false);
+          setGenerationProgress(null);
+          setSelectedMix(null);
+        }
+      } catch (err) {
+        console.error('Failed to parse SSE message:', err);
+      }
+    };
+
+    eventSource.onerror = () => {
+      eventSource.close();
+    };
 
     try {
       // Generate playlist name with timestamp
@@ -474,7 +545,7 @@ export const GenerateMixesPage: FC = () => {
       
       // Use the template generation endpoint which handles all mix types
       // and automatically updates usage statistics
-      const result = await apiClient.generateMixFromTemplate(template.id, playlistName);
+      const result = await apiClient.generateMixFromTemplate(template.id, playlistName, sessionId);
       
       // Create a playlist object for display
       const playlist: Playlist = {
@@ -502,7 +573,9 @@ export const GenerateMixesPage: FC = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate mix from template');
     } finally {
+      eventSource.close();
       setIsGenerating(false);
+      setGenerationProgress(null);
       setSelectedMix(null);
     }
   }, [apiClient, refreshPlaylists]);
@@ -679,6 +752,23 @@ export const GenerateMixesPage: FC = () => {
         {error && (
           <div className="generate-mixes-error">
             {error}
+          </div>
+        )}
+
+        {/* Progress Display */}
+        {isGenerating && generationProgress && (
+          <div className="generation-progress-container">
+            <div className="progress-header">
+              <div className="spinner"></div>
+              <span className="progress-message">{generationProgress.message}</span>
+            </div>
+            <div className="progress-bar-wrapper">
+              <div 
+                className="progress-bar-fill" 
+                style={{ width: `${generationProgress.progress}%` }}
+              />
+            </div>
+            <div className="progress-percentage">{Math.round(generationProgress.progress)}%</div>
           </div>
         )}
       </div>

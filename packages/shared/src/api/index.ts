@@ -391,6 +391,7 @@ export class APIClient {
     minPlayCount?: number;
     maxPlayCount?: number;
     popularTracksOnly?: boolean; // Only include tracks from Plex's "Popular Tracks" section
+    popularArtistsOnly?: boolean; // Only include tracks from popular/well-known artists
     
     // Track characteristics
     minDuration?: number; // in seconds
@@ -845,7 +846,7 @@ export class APIClient {
     });
   }
 
-  async generateMixFromTemplate(id: number, playlistName?: string): Promise<{
+  async generateMixFromTemplate(id: number, playlistName?: string, sessionId?: string): Promise<{
     success: boolean;
     playlistId: string;
     trackCount: number;
@@ -854,7 +855,7 @@ export class APIClient {
   }> {
     return this.request(`/api/mix-templates/${id}/generate`, {
       method: 'POST',
-      body: JSON.stringify({ playlistName }),
+      body: JSON.stringify({ playlistName, sessionId }),
     });
   }
 }

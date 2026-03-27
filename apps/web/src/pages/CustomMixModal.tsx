@@ -30,6 +30,7 @@ export interface CustomMixSettings {
   minPlayCount?: number;
   maxPlayCount?: number;
   popularTracksOnly?: boolean; // Only include tracks from Plex's "Popular Tracks" section
+  popularArtistsOnly?: boolean; // Only include tracks from popular/well-known artists (Last.fm data)
   
   // Track characteristics
   minDuration?: number; // in seconds
@@ -469,6 +470,22 @@ export const CustomMixModal: FC<CustomMixModalProps> = ({ onClose, onGenerate, o
               </label>
               <p className="form-hint">
                 Uses external popularity data (Last.fm, MusicBrainz) to select only the most popular tracks from each artist.
+              </p>
+            </div>
+
+            <div className="form-group">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={settings.popularArtistsOnly || false}
+                  onChange={(e) => updateSetting('popularArtistsOnly', e.target.checked || undefined)}
+                  disabled={isGenerating}
+                />
+                <span>Only include popular artists</span>
+              </label>
+              <p className="form-hint">
+                Filters to only include tracks from well-known artists based on Last.fm popularity data. 
+                Note: Plex must have fetched Last.fm metadata for your artists (requires Last.fm agent enabled in Plex settings).
               </p>
             </div>
           </div>

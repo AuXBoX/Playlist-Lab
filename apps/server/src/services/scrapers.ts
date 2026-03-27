@@ -939,6 +939,185 @@ export async function scrapeBillboardPlaylist(url: string, progressEmitter?: Eve
   }
 }
 
+/**
+ * Scrape Last.fm chart using their API
+ * Supports: top-tracks, top-artists, top-tags, and tag-based charts
+ */
+export async function scrapeLastfmPlaylist(url: string, progressEmitter?: EventEmitter): Promise<ExternalPlaylist> {
+  progressEmitter?.emit('progress', {
+    type: 'progress',
+    phase: 'scraping',
+    current: 0,
+    total: 0,
+    currentTrackName: 'Fetching Last.fm chart...'
+  });
+
+  try {
+    // Parse the URL to determine chart type
+    const chartType = url.includes('top-tracks') ? 'top-tracks' 
+      : url.includes('top-artists') ? 'top-artists'
+      : url.includes('top-tags') ? 'top-tags'
+      : url.includes('/tag/') ? 'tag'
+      : 'top-tracks';
+
+    const API_KEY = 'b25b959554ed76058ac220b7b2e0a026'; // Public Last.fm API key
+    const limit = 100;
+    let tracks: { artist: string; title: string }[] = [];
+    let playlistName = '';
+
+    if (chartType === 'top-tracks') {
+      playlistName = 'Last.fm Top Tracks';
+      const response = await axios.get('https://ws.audioscrobbler.com/2.0/', {
+        params: {
+          method: 'chart.gettoptracks',
+          api_key: API_KEY,
+          format: 'json',
+          limit
+        }
+      });
+
+      const topTracks = response.data.tracks?.track || [];
+      tracks = topTracks.map((track: any) => ({
+        artist: track.artist?.name || 'Unknown Artist',
+        title: track.name || 'Unknown Track'
+      }));
+
+    } else if (chartType === 'top-artists') {
+      playlistName = 'Last.fm Top Artists';
+      const response = await axios.get('https://ws.audioscrobbler.com/2.0/', {
+        params: {
+          method: 'chart.gettopartists',
+          api_key: API_KEY,
+          format: 'json',
+          limit: 50
+        }
+      });
+
+      const topArtists = response.data.artists?.artist || [];
+      
+      // For each artist, get their top tracks
+      for (let i = 0; i < Math.min(topArtists.length, 20); i++) {
+        const artist = topArtists[i];
+        try {
+          const artistTracksResponse = await axios.get('https://ws.audioscrobbler.com/2.0/', {
+            params: {
+              method: 'artist.gettoptracks',
+              artist: artist.name,
+              api_key: API_KEY,
+              format: 'json',
+              limit: 5
+            }
+          });
+
+          const artistTracks = artistTracksResponse.data.toptracks?.track || [];
+          tracks.push(...artistTracks.slice(0, 3).map((track: any) => ({
+            artist: artist.name,
+            title: track.name
+          })));
+
+          progressEmitter?.emit('progress', {
+            type: 'progress',
+            phase: 'scraping',
+            current: i + 1,
+            total: 20,
+            currentTrackName: `Fetching tracks from ${artist.name}...`
+          });
+        } catch (err) {
+          console.error(`Failed to fetch tracks for ${artist.name}:`, err);
+        }
+      }
+
+    } else if (chartType === 'top-tags') {
+      playlistName = 'Last.fm Top Tags';
+      // Get top tags first
+      const tagsResponse = await axios.get('https://ws.audioscrobbler.com/2.0/', {
+        params: {
+          method: 'chart.gettoptags',
+          api_key: API_KEY,
+          format: 'json',
+          limit: 10
+        }
+      });
+
+      const topTags = tagsResponse.data.tags?.tag || [];
+      
+      // For each tag, get top tracks
+      for (let i = 0; i < Math.min(topTags.length, 10); i++) {
+        const tag = topTags[i];
+        try {
+          const tagTracksResponse = await axios.get('https://ws.audioscrobbler.com/2.0/', {
+            params: {
+              method: 'tag.gettoptracks',
+              tag: tag.name,
+              api_key: API_KEY,
+              format: 'json',
+              limit: 10
+            }
+          });
+
+          const tagTracks = tagTracksResponse.data.tracks?.track || [];
+          tracks.push(...tagTracks.slice(0, 10).map((track: any) => ({
+            artist: track.artist?.name || 'Unknown Artist',
+            title: track.name || 'Unknown Track'
+          })));
+
+          progressEmitter?.emit('progress', {
+            type: 'progress',
+            phase: 'scraping',
+            current: i + 1,
+            total: 10,
+            currentTrackName: `Fetching tracks from ${tag.name} tag...`
+          });
+        } catch (err) {
+          console.error(`Failed to fetch tracks for tag ${tag.name}:`, err);
+        }
+      }
+
+    } else if (chartType === 'tag') {
+      // Extract tag name from URL: https://www.last.fm/tag/rock
+      const tagMatch = url.match(/\/tag\/([^\/]+)/);
+      const tagName = tagMatch ? decodeURIComponent(tagMatch[1]) : 'rock';
+      playlistName = `Last.fm Top ${tagName.charAt(0).toUpperCase() + tagName.slice(1)}`;
+      
+      const response = await axios.get('https://ws.audioscrobbler.com/2.0/', {
+        params: {
+          method: 'tag.gettoptracks',
+          tag: tagName,
+          api_key: API_KEY,
+          format: 'json',
+          limit
+        }
+      });
+
+      const tagTracks = response.data.tracks?.track || [];
+      tracks = tagTracks.map((track: any) => ({
+        artist: track.artist?.name || 'Unknown Artist',
+        title: track.name || 'Unknown Track'
+      }));
+    }
+
+    progressEmitter?.emit('progress', {
+      type: 'progress',
+      phase: 'scraping',
+      current: tracks.length,
+      total: tracks.length,
+      currentTrackName: 'Chart fetched successfully'
+    });
+
+    return {
+      id: chartType,
+      name: playlistName,
+      description: `Last.fm ${chartType.replace('-', ' ')} chart`,
+      tracks,
+      source: 'lastfm'
+    };
+
+  } catch (error) {
+    console.error('[Last.fm] API request failed:', error);
+    throw new Error(`Failed to fetch Last.fm chart: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
 
 // ==================== M3U FILE PARSING ====================
 

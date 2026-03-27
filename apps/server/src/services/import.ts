@@ -23,6 +23,7 @@ import {
   parseM3UFile,
   scrapeAriaPlaylist,
   scrapeBillboardPlaylist,
+  scrapeLastfmPlaylist,
   ExternalPlaylist,
 } from './scrapers';
 import { matchPlaylist, MatchedTrack } from './matching';
@@ -58,7 +59,7 @@ export interface ImportOptions {
  * Import a playlist from an external source
  */
 export async function importPlaylist(
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'aria' | 'billboard',
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'aria' | 'billboard' | 'lastfm',
   sourceIdentifier: string,
   options: ImportOptions,
   db: DatabaseService,
@@ -366,7 +367,7 @@ export function storeMissingTracks(
  * Scrape a playlist from an external source
  */
 async function scrapePlaylist(
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'aria' | 'billboard',
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'aria' | 'billboard' | 'lastfm',
   sourceIdentifier: string,
   progressEmitter?: EventEmitter,
   userId?: number,
@@ -425,6 +426,10 @@ async function scrapePlaylist(
       case 'billboard':
         debugLog('[scrapePlaylist] Calling scrapeBillboardPlaylist...');
         return await scrapeBillboardPlaylist(sourceIdentifier, progressEmitter);
+      
+      case 'lastfm':
+        debugLog('[scrapePlaylist] Calling scrapeLastfmPlaylist...');
+        return await scrapeLastfmPlaylist(sourceIdentifier, progressEmitter);
       
       case 'listenbrainz':
         debugLog('[scrapePlaylist] Calling getListenBrainzPlaylists...');

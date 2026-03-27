@@ -334,6 +334,219 @@ app.get('/api/version', (_req: Request, res: Response) => {
   res.json({ version: APP_VERSION });
 });
 
+// Check for updates endpoint
+app.get('/api/update/check', async (_req: Request, res: Response) => {
+  try {
+    const https = require('https');
+    const GITHUB_REPO = 'AuXBoX/Playlist-Lab';
+    
+    const options = {
+      hostname: 'api.github.com',
+      path: `/repos/${GITHUB_REPO}/releases/latest`,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Playlist-Lab-Server',
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    };
+
+    const request = https.request(options, (response: any) => {
+      let data = '';
+      
+      response.on('data', (chunk: any) => {
+        data += chunk;
+      });
+      
+      response.on('end', () => {
+        if (response.statusCode === 200) {
+          try {
+            const release = JSON.parse(data);
+            const latestVersion = release.tag_name.replace(/^v/, '');
+            const currentVersion = APP_VERSION;
+            
+            // Compare versions
+            const isNewer = isNewerVersion(latestVersion, currentVersion);
+            
+            // Find Windows installer
+            const windowsInstaller = release.assets?.find((asset: any) => 
+              asset.name.includes('Setup') && asset.name.endsWith('.exe')
+            );
+            
+            res.json({
+              updateAvailable: isNewer,
+              currentVersion,
+              latestVersion,
+              releaseNotes: release.body,
+              downloadUrl: windowsInstaller?.browser_download_url || null,
+              releaseUrl: release.html_url,
+              publishedAt: release.published_at
+            });
+          } catch (err) {
+            res.status(500).json({ error: 'Failed to parse release data' });
+          }
+        } else {
+          res.status(response.statusCode).json({ error: 'Failed to fetch release info' });
+        }
+      });
+    });
+
+    request.on('error', (err: Error) => {
+      res.status(500).json({ error: err.message });
+    });
+
+    request.setTimeout(10000, () => {
+      request.destroy();
+      res.status(504).json({ error: 'Request timeout' });
+    });
+
+    request.end();
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check for updates' });
+  }
+});
+
+// Trigger update endpoint
+app.post('/api/update/install', async (_req: Request, res: Response) => {
+  try {
+    const https = require('https');
+    const fs = require('fs');
+    const path = require('path');
+    const { spawn } = require('child_process');
+    const os = require('os');
+    
+    const GITHUB_REPO = 'AuXBoX/Playlist-Lab';
+    
+    // Get latest release
+    const options = {
+      hostname: 'api.github.com',
+      path: `/repos/${GITHUB_REPO}/releases/latest`,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Playlist-Lab-Server',
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    };
+
+    const request = https.request(options, (response: any) => {
+      let data = '';
+      
+      response.on('data', (chunk: any) => {
+        data += chunk;
+      });
+      
+      response.on('end', async () => {
+        if (response.statusCode === 200) {
+          try {
+            const release = JSON.parse(data);
+            const windowsInstaller = release.assets?.find((asset: any) => 
+              asset.name.includes('Setup') && asset.name.endsWith('.exe')
+            );
+            
+            if (!windowsInstaller) {
+              return res.status(404).json({ error: 'No installer found for this platform' });
+            }
+            
+            // Download installer
+            const dataDir = os.platform() === 'win32' 
+              ? path.join(process.env.APPDATA || os.homedir(), 'Playlist Lab')
+              : path.join(os.homedir(), '.local', 'share', 'playlist-lab');
+            
+            fs.mkdirSync(dataDir, { recursive: true });
+            
+            const installerPath = path.join(dataDir, `PlaylistLabServer-Setup-${release.tag_name}.exe`);
+            const file = fs.createWriteStream(installerPath);
+            
+            https.get(windowsInstaller.browser_download_url, (downloadResponse: any) => {
+              // Handle redirects
+              if (downloadResponse.statusCode === 302 || downloadResponse.statusCode === 301) {
+                https.get(downloadResponse.headers.location, (redirectResponse: any) => {
+                  redirectResponse.pipe(file);
+                  
+                  file.on('finish', () => {
+                    file.close();
+                    
+                    // Launch installer
+                    const installer = spawn(installerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
+                      detached: true,
+                      stdio: 'ignore'
+                    });
+                    
+                    installer.unref();
+                    
+                    res.json({ 
+                      success: true, 
+                      message: 'Update installer launched. The application will restart automatically.' 
+                    });
+                    
+                    // Exit after a delay to allow installer to start
+                    setTimeout(() => {
+                      process.exit(0);
+                    }, 3000);
+                  });
+                });
+                return;
+              }
+              
+              downloadResponse.pipe(file);
+              
+              file.on('finish', () => {
+                file.close();
+                
+                // Launch installer
+                const installer = spawn(installerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
+                  detached: true,
+                  stdio: 'ignore'
+                });
+                
+                installer.unref();
+                
+                res.json({ 
+                  success: true, 
+                  message: 'Update installer launched. The application will restart automatically.' 
+                });
+                
+                // Exit after a delay to allow installer to start
+                setTimeout(() => {
+                  process.exit(0);
+                }, 3000);
+              });
+            });
+          } catch (err) {
+            res.status(500).json({ error: 'Failed to process update' });
+          }
+        } else {
+          res.status(response.statusCode).json({ error: 'Failed to fetch release info' });
+        }
+      });
+    });
+
+    request.on('error', (err: Error) => {
+      res.status(500).json({ error: err.message });
+    });
+
+    request.end();
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to install update' });
+  }
+});
+
+// Helper function to compare versions
+function isNewerVersion(latest: string, current: string): boolean {
+  const latestParts = latest.split('.').map(Number);
+  const currentParts = current.split('.').map(Number);
+
+  for (let i = 0; i < 3; i++) {
+    const l = latestParts[i] || 0;
+    const c = currentParts[i] || 0;
+    
+    if (l > c) return true;
+    if (l < c) return false;
+  }
+
+  return false; // Versions are equal
+}  return false;
+}
+
 // Helper function to format uptime
 function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);

@@ -155,7 +155,7 @@ async function handleImport(
   req: Request,
   res: Response,
   next: NextFunction,
-  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'aria' | 'billboard'
+  source: 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'aria' | 'billboard' | 'lastfm'
 ) {
   debugLog('========== IMPORT REQUEST RECEIVED ==========');
   debugLog('Source:', source);
@@ -372,6 +372,14 @@ router.post('/aria', async (req: Request, res: Response, next: NextFunction) => 
  */
 router.post('/billboard', async (req: Request, res: Response, next: NextFunction) => {
   await handleImport(req, res, next, 'billboard');
+});
+
+/**
+ * POST /api/import/lastfm
+ * Import a Last.fm chart
+ */
+router.post('/lastfm', async (req: Request, res: Response, next: NextFunction) => {
+  await handleImport(req, res, next, 'lastfm');
 });
 
 /**
@@ -821,6 +829,12 @@ router.post('/preview', async (req: Request, res: Response, next: NextFunction) 
           break;
         case 'aria':
           playlistData = await scrapers.scrapeAriaPlaylist(url);
+          break;
+        case 'billboard':
+          playlistData = await scrapers.scrapeBillboardPlaylist(url);
+          break;
+        case 'lastfm':
+          playlistData = await scrapers.scrapeLastfmPlaylist(url);
           break;
         case 'listenbrainz':
           const playlists = await scrapers.getListenBrainzPlaylists(url);

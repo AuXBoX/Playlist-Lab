@@ -8,6 +8,9 @@ export const Sidebar: FC = () => {
   const { user } = useAuth();
   const location = useLocation();
   const [version, setVersion] = useState<string>('');
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<any>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [isManageOpen, setIsManageOpen] = useState(
     location.pathname.startsWith('/playlists/') || location.pathname === '/playlists'
   );
@@ -19,6 +22,56 @@ export const Sidebar: FC = () => {
       .then(data => setVersion(data.version))
       .catch(() => setVersion(''));
   }, []);
+
+  // Check for updates on mount and periodically
+  useEffect(() => {
+    const checkForUpdates = async () => {
+      try {
+        const res = await fetch('/api/update/check', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          setUpdateAvailable(data.updateAvailable);
+          setUpdateInfo(data);
+        }
+      } catch (err) {
+        // Silently fail
+      }
+    };
+
+    checkForUpdates();
+    
+    // Check every 6 hours
+    const interval = setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleUpdate = async () => {
+    if (!confirm(`Update to version ${updateInfo.latestVersion}?\n\nThe application will restart automatically.`)) {
+      return;
+    }
+
+    setIsUpdating(true);
+    
+    try {
+      const res = await fetch('/api/update/install', {
+        method: 'POST',
+        credentials: 'include'
+      });
+      
+      if (res.ok) {
+        // Show success message briefly before server restarts
+        alert('Update started! The application will restart in a few seconds.');
+      } else {
+        const data = await res.json();
+        alert(`Update failed: ${data.error || 'Unknown error'}`);
+        setIsUpdating(false);
+      }
+    } catch (err) {
+      alert(`Update failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setIsUpdating(false);
+    }
+  };
 
   const navItems = [
     { path: '/', label: 'Dashboard' },
@@ -101,8 +154,20 @@ export const Sidebar: FC = () => {
       </nav>
       
       {version && (
-        <div className="sidebar-version">
-          v{version}
+        <div className="sidebar-footer">
+          <div className="sidebar-version">
+            v{version}
+          </div>
+          {updateAvailable && (
+            <button 
+              className="sidebar-update-btn"
+              onClick={handleUpdate}
+              disabled={isUpdating}
+              title={`Update to v${updateInfo?.latestVersion}`}
+            >
+              {isUpdating ? 'Updating...' : 'Update Available'}
+            </button>
+          )}
         </div>
       )}
     </aside>

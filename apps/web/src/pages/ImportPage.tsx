@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../contexts/AppContext';
 import type { MatchedTrack } from '@playlist-lab/shared';
 
-type ImportSource = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'ai' | 'aria' | 'billboard';
+type ImportSource = 'spotify' | 'deezer' | 'apple' | 'tidal' | 'youtube' | 'amazon' | 'qobuz' | 'listenbrainz' | 'file' | 'ai' | 'aria' | 'billboard' | 'lastfm';
 
 interface ImportResult {
   matched: MatchedTrack[];
@@ -304,6 +304,7 @@ export const ImportPage: FC = () => {
   const sources = [
     ...(selectedCountry === 'AU' ? [{ id: 'aria' as const, name: 'ARIA Charts', placeholder: 'https://www.aria.com.au/charts/...' }] : []),
     { id: 'billboard' as const, name: 'Billboard', placeholder: 'https://www.billboard.com/charts/...' },
+    { id: 'lastfm' as const, name: 'Last.fm', placeholder: 'https://www.last.fm/...' },
     { id: 'deezer' as const, name: 'Deezer', placeholder: 'Playlist ID or URL' },
     { id: 'youtube' as const, name: 'YouTube Music', placeholder: 'https://music.youtube.com/playlist?list=...' },
     { id: 'spotify' as const, name: 'Spotify', placeholder: 'https://open.spotify.com/playlist/...' },
@@ -766,6 +767,10 @@ export const ImportPage: FC = () => {
             break;
           case 'billboard':
             endpoint = '/api/import/billboard';
+            body.url = urlToImport;
+            break;
+          case 'lastfm':
+            endpoint = '/api/import/lastfm';
             body.url = urlToImport;
             break;
           case 'listenbrainz':
@@ -1589,8 +1594,9 @@ export const ImportPage: FC = () => {
           </div>
 
           {/* Input Field - Moved to top */}
-          <div className="card" style={{ marginBottom: '2rem' }}>
-            {activeSource === 'file' ? (
+          {!['aria', 'billboard'].includes(activeSource) && (
+            <div className="card" style={{ marginBottom: '2rem' }}>
+              {activeSource === 'file' ? (
               <div>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
                   Select File
@@ -1784,7 +1790,8 @@ export const ImportPage: FC = () => {
                 {isImporting ? 'Importing...' : activeSource === 'ai' ? 'Generate Playlist' : 'Import Playlist'}
               </button>
             )}
-          </div>
+            </div>
+          )}
 
           {/* Popular/User Playlists */}
           {activeSource === 'spotify' && !spotifyConnected ? (
@@ -2009,19 +2016,6 @@ export const ImportPage: FC = () => {
             <>
               <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', fontWeight: 500 }}>Billboard Charts</h3>
               
-              {/* Info note about data source */}
-              <div style={{ 
-                padding: '0.75rem', 
-                marginBottom: '1rem', 
-                backgroundColor: 'var(--bg-secondary)', 
-                borderRadius: '8px',
-                fontSize: '0.875rem',
-                color: 'var(--text-secondary)'
-              }}>
-                <strong>Note:</strong> Billboard Hot 100 data is sourced from a public GitHub repository that's updated weekly. 
-                Charts are dated for Saturdays (though released on Tuesdays). Historical charts back to 1958 are available.
-              </div>
-              
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
                 
                 {/* Billboard Hot 100 with Date Picker */}
@@ -2067,6 +2061,476 @@ export const ImportPage: FC = () => {
                       onClick={() => handleSchedule({ 
                         name: `Billboard Hot 100 - ${formatDateDMY(billboardDate)}`, 
                         url: `https://www.billboard.com/charts/hot-100/${billboardDate}/` 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </>
+          ) : activeSource === 'lastfm' ? (
+            <>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', fontWeight: 500 }}>Last.fm Charts</h3>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
+                
+                {/* Top Tracks */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Tracks</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Most popular tracks globally
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Tracks', 
+                        url: 'https://www.last.fm/charts/top-tracks' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/charts/top-tracks')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Tracks', 
+                        url: 'https://www.last.fm/charts/top-tracks' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Top Artists */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Artists</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Top tracks from popular artists
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Artists', 
+                        url: 'https://www.last.fm/charts/top-artists' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/charts/top-artists')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Artists', 
+                        url: 'https://www.last.fm/charts/top-artists' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Top Tags */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Tags</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Tracks from trending genres/tags
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Tags', 
+                        url: 'https://www.last.fm/charts/top-tags' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/charts/top-tags')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Tags', 
+                        url: 'https://www.last.fm/charts/top-tags' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Rock Genre */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Rock</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Most popular rock tracks
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Rock', 
+                        url: 'https://www.last.fm/tag/rock' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/tag/rock')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Rock', 
+                        url: 'https://www.last.fm/tag/rock' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Pop Genre */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Pop</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Most popular pop tracks
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Pop', 
+                        url: 'https://www.last.fm/tag/pop' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/tag/pop')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Pop', 
+                        url: 'https://www.last.fm/tag/pop' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Electronic Genre */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Electronic</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Most popular electronic tracks
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Electronic', 
+                        url: 'https://www.last.fm/tag/electronic' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/tag/electronic')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Electronic', 
+                        url: 'https://www.last.fm/tag/electronic' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Hip Hop Genre */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Hip Hop</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Most popular hip hop tracks
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Hip Hop', 
+                        url: 'https://www.last.fm/tag/hip hop' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/tag/hip hop')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Hip Hop', 
+                        url: 'https://www.last.fm/tag/hip hop' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Indie Genre */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Indie</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Most popular indie tracks
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Indie', 
+                        url: 'https://www.last.fm/tag/indie' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/tag/indie')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Indie', 
+                        url: 'https://www.last.fm/tag/indie' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Metal Genre */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Metal</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Most popular metal tracks
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Metal', 
+                        url: 'https://www.last.fm/tag/metal' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/tag/metal')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Metal', 
+                        url: 'https://www.last.fm/tag/metal' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Jazz Genre */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Jazz</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Most popular jazz tracks
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Jazz', 
+                        url: 'https://www.last.fm/tag/jazz' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/tag/jazz')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Jazz', 
+                        url: 'https://www.last.fm/tag/jazz' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Classical Genre */}
+                <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Top Classical</div>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Most popular classical tracks
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handlePreview({ 
+                        name: 'Last.fm Top Classical', 
+                        url: 'https://www.last.fm/tag/classical' 
+                      })} 
+                      disabled={isImporting} 
+                      style={{ flex: 1, minWidth: '60px' }}
+                    >
+                      Preview
+                    </button>
+                    <button 
+                      className="btn btn-primary btn-small" 
+                      onClick={() => handleImport('https://www.last.fm/tag/classical')} 
+                      disabled={isImporting} 
+                      style={{ flex: 1 }}
+                    >
+                      Import
+                    </button>
+                    <button 
+                      className="btn btn-secondary btn-small" 
+                      onClick={() => handleSchedule({ 
+                        name: 'Last.fm Top Classical', 
+                        url: 'https://www.last.fm/tag/classical' 
                       })} 
                       disabled={isImporting} 
                       style={{ flex: 1 }}
