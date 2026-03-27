@@ -335,7 +335,7 @@ app.get('/api/version', (_req: Request, res: Response) => {
 });
 
 // Check for updates endpoint
-app.get('/api/update/check', async (_req: Request, res: Response) => {
+app.get('/api/update/check', async (_req: Request, res: Response): Promise<void> => {
   try {
     const https = require('https');
     const GITHUB_REPO = 'AuXBoX/Playlist-Lab';
@@ -350,14 +350,14 @@ app.get('/api/update/check', async (_req: Request, res: Response) => {
       }
     };
 
-    const request = https.request(options, (response: any) => {
+    const request = https.request(options, (response: any): void => {
       let data = '';
       
-      response.on('data', (chunk: any) => {
+      response.on('data', (chunk: any): void => {
         data += chunk;
       });
       
-      response.on('end', () => {
+      response.on('end', (): void => {
         if (response.statusCode === 200) {
           try {
             const release = JSON.parse(data);
@@ -390,11 +390,11 @@ app.get('/api/update/check', async (_req: Request, res: Response) => {
       });
     });
 
-    request.on('error', (err: Error) => {
+    request.on('error', (err: Error): void => {
       res.status(500).json({ error: err.message });
     });
 
-    request.setTimeout(10000, () => {
+    request.setTimeout(10000, (): void => {
       request.destroy();
       res.status(504).json({ error: 'Request timeout' });
     });
@@ -406,7 +406,7 @@ app.get('/api/update/check', async (_req: Request, res: Response) => {
 });
 
 // Trigger update endpoint
-app.post('/api/update/install', async (_req: Request, res: Response) => {
+app.post('/api/update/install', async (_req: Request, res: Response): Promise<void> => {
   try {
     const https = require('https');
     const fs = require('fs');
@@ -427,14 +427,14 @@ app.post('/api/update/install', async (_req: Request, res: Response) => {
       }
     };
 
-    const request = https.request(options, (response: any) => {
+    const request = https.request(options, (response: any): void => {
       let data = '';
       
-      response.on('data', (chunk: any) => {
+      response.on('data', (chunk: any): void => {
         data += chunk;
       });
       
-      response.on('end', () => {
+      response.on('end', (): void => {
         if (response.statusCode === 200) {
           try {
             const release = JSON.parse(data);
@@ -443,7 +443,8 @@ app.post('/api/update/install', async (_req: Request, res: Response) => {
             );
             
             if (!windowsInstaller) {
-              return res.status(404).json({ error: 'No installer found for this platform' });
+              res.status(404).json({ error: 'No installer found for this platform' });
+              return;
             }
             
             // Download installer
@@ -456,13 +457,13 @@ app.post('/api/update/install', async (_req: Request, res: Response) => {
             const installerPath = path.join(dataDir, `PlaylistLabServer-Setup-${release.tag_name}.exe`);
             const file = fs.createWriteStream(installerPath);
             
-            https.get(windowsInstaller.browser_download_url, (downloadResponse: any) => {
+            https.get(windowsInstaller.browser_download_url, (downloadResponse: any): void => {
               // Handle redirects
               if (downloadResponse.statusCode === 302 || downloadResponse.statusCode === 301) {
-                https.get(downloadResponse.headers.location, (redirectResponse: any) => {
+                https.get(downloadResponse.headers.location, (redirectResponse: any): void => {
                   redirectResponse.pipe(file);
                   
-                  file.on('finish', () => {
+                  file.on('finish', (): void => {
                     file.close();
                     
                     // Launch installer
@@ -479,7 +480,7 @@ app.post('/api/update/install', async (_req: Request, res: Response) => {
                     });
                     
                     // Exit after a delay to allow installer to start
-                    setTimeout(() => {
+                    setTimeout((): void => {
                       process.exit(0);
                     }, 3000);
                   });
@@ -489,7 +490,7 @@ app.post('/api/update/install', async (_req: Request, res: Response) => {
               
               downloadResponse.pipe(file);
               
-              file.on('finish', () => {
+              file.on('finish', (): void => {
                 file.close();
                 
                 // Launch installer
@@ -506,21 +507,24 @@ app.post('/api/update/install', async (_req: Request, res: Response) => {
                 });
                 
                 // Exit after a delay to allow installer to start
-                setTimeout(() => {
+                setTimeout((): void => {
                   process.exit(0);
                 }, 3000);
               });
             });
+            return; // Explicit return after async operation
           } catch (err) {
             res.status(500).json({ error: 'Failed to process update' });
+            return;
           }
         } else {
           res.status(response.statusCode).json({ error: 'Failed to fetch release info' });
+          return;
         }
       });
     });
 
-    request.on('error', (err: Error) => {
+    request.on('error', (err: Error): void => {
       res.status(500).json({ error: err.message });
     });
 
@@ -600,10 +604,11 @@ if (NODE_ENV === 'production') {
     app.use(express.static(webAppPath));
     
     // Serve index.html for all non-API routes (SPA fallback)
-    app.get('*', (req: Request, res: Response, next: NextFunction) => {
+    app.get('*', (req: Request, res: Response, next: NextFunction): void => {
       // Skip API routes
       if (req.path.startsWith('/api/')) {
-        return next();
+        next();
+        return;
       }
       const indexPath = path.join(webAppPath, 'index.html');
       logger.info(`Serving index.html for path: ${req.path}`);
