@@ -11,7 +11,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "rootDir": ".",
-    "types": ["vite/client"]
+    "types": ["vite/client", "@testing-library/jest-dom", "@types/jest"]
   },
   "references": [
     { "path": "../../packages/shared" }

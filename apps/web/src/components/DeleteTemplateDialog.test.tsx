@@ -1,4 +1,3 @@
-import React from 'react';
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { DeleteTemplateDialog } from './DeleteTemplateDialog';

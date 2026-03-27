@@ -83,6 +83,7 @@ export function verifySchema(db: Database.Database): boolean {
     'user_settings',
     'playlists',
     'schedules',
+    'schedule_executions',
     'missing_tracks',
     'cached_playlists',
     'sessions',
@@ -132,6 +133,7 @@ export function getDatabaseStats(db: Database.Database): Record<string, number> 
     'user_settings',
     'playlists',
     'schedules',
+    'schedule_executions',
     'missing_tracks',
     'cached_playlists',
     'sessions',
@@ -332,6 +334,34 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_mix_templates_mix_type ON mix_templates(mix_type);
       `);
       console.log('Migration completed: mix_templates table created');
+    }
+
+    // Create schedule_executions table if it doesn't exist
+    const hasScheduleExecutions = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='schedule_executions'"
+    ).get();
+    if (!hasScheduleExecutions) {
+      console.log('Creating schedule_executions table...');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS schedule_executions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          schedule_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          tracks_matched INTEGER DEFAULT 0,
+          tracks_unmatched INTEGER DEFAULT 0,
+          error_message TEXT,
+          playlist_name TEXT,
+          FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_schedule_executions_schedule_id ON schedule_executions(schedule_id);
+        CREATE INDEX IF NOT EXISTS idx_schedule_executions_user_id ON schedule_executions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_schedule_executions_started_at ON schedule_executions(started_at DESC);
+      `);
+      console.log('Migration completed: schedule_executions table created');
     }
   } catch (error) {
     console.error('Migration failed:', error);

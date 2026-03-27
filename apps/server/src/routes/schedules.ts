@@ -284,4 +284,126 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
   }
 });
 
+/**
+ * GET /api/schedules/:id/executions
+ * Get execution history for a schedule
+ */
+router.get('/:id/executions', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const scheduleId = parseInt(req.params.id, 10);
+    const limit = parseInt(req.query.limit as string) || 10;
+
+    if (isNaN(scheduleId)) {
+      return next(createValidationError('Invalid schedule ID'));
+    }
+
+    // Verify schedule exists and belongs to user
+    const schedule = db.getScheduleById(scheduleId);
+    if (!schedule) {
+      return res.status(404).json({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Schedule not found',
+          statusCode: 404
+        }
+      });
+    }
+
+    if (schedule.user_id !== userId) {
+      return res.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'You do not have permission to view this schedule',
+          statusCode: 403
+        }
+      });
+    }
+
+    const executions = db.getScheduleExecutions(scheduleId, limit);
+
+    res.json({
+      success: true,
+      executions: executions.map(e => ({
+        id: e.id,
+        scheduleId: e.schedule_id,
+        status: e.status,
+        startedAt: e.started_at,
+        completedAt: e.completed_at,
+        tracksMatched: e.tracks_matched,
+        tracksUnmatched: e.tracks_unmatched,
+        errorMessage: e.error_message,
+        playlistName: e.playlist_name,
+      }))
+    });
+  } catch (error: any) {
+    logger.error('Failed to get schedule executions', { error: error.message });
+    next(createInternalError(error.message || 'Failed to get schedule executions'));
+  }
+});
+
+/**
+ * GET /api/schedules/executions/recent
+ * Get recent execution history for all user schedules
+ */
+router.get('/executions/recent', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const limit = parseInt(req.query.limit as string) || 50;
+
+    const executions = db.getUserScheduleExecutions(userId, limit);
+
+    res.json({
+      success: true,
+      executions: executions.map(e => ({
+        id: e.id,
+        scheduleId: e.schedule_id,
+        scheduleType: e.schedule_type,
+        frequency: e.frequency,
+        status: e.status,
+        startedAt: e.started_at,
+        completedAt: e.completed_at,
+        tracksMatched: e.tracks_matched,
+        tracksUnmatched: e.tracks_unmatched,
+        errorMessage: e.error_message,
+        playlistName: e.playlist_name,
+      }))
+    });
+  } catch (error: any) {
+    logger.error('Failed to get recent executions', { error: error.message });
+    next(createInternalError(error.message || 'Failed to get recent executions'));
+  }
+});
+
+/**
+ * GET /api/schedules/executions/running
+ * Get currently running executions
+ */
+router.get('/executions/running', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+
+    const executions = db.getRunningExecutions(userId);
+
+    res.json({
+      success: true,
+      executions: executions.map(e => ({
+        id: e.id,
+        scheduleId: e.schedule_id,
+        scheduleType: e.schedule_type,
+        frequency: e.frequency,
+        status: e.status,
+        startedAt: e.started_at,
+        playlistName: e.playlist_name,
+      }))
+    });
+  } catch (error: any) {
+    logger.error('Failed to get running executions', { error: error.message });
+    next(createInternalError(error.message || 'Failed to get running executions'));
+  }
+});
+
 export default router;

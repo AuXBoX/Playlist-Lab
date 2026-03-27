@@ -621,6 +621,59 @@ export class APIClient {
     return this.request(`/api/schedules/${id}`, { method: 'DELETE' });
   }
 
+  async getScheduleExecutions(scheduleId: number, limit?: number): Promise<{
+    success: boolean;
+    executions: Array<{
+      id: number;
+      scheduleId: number;
+      status: 'running' | 'success' | 'failed';
+      startedAt: number;
+      completedAt?: number;
+      tracksMatched: number;
+      tracksUnmatched: number;
+      errorMessage?: string;
+      playlistName?: string;
+    }>;
+  }> {
+    const query = limit ? `?limit=${limit}` : '';
+    return this.request(`/api/schedules/${scheduleId}/executions${query}`);
+  }
+
+  async getRecentExecutions(limit?: number): Promise<{
+    success: boolean;
+    executions: Array<{
+      id: number;
+      scheduleId: number;
+      scheduleType: string;
+      frequency: string;
+      status: 'running' | 'success' | 'failed';
+      startedAt: number;
+      completedAt?: number;
+      tracksMatched: number;
+      tracksUnmatched: number;
+      errorMessage?: string;
+      playlistName?: string;
+    }>;
+  }> {
+    const query = limit ? `?limit=${limit}` : '';
+    return this.request(`/api/schedules/executions/recent${query}`);
+  }
+
+  async getRunningExecutions(): Promise<{
+    success: boolean;
+    executions: Array<{
+      id: number;
+      scheduleId: number;
+      scheduleType: string;
+      frequency: string;
+      status: 'running';
+      startedAt: number;
+      playlistName?: string;
+    }>;
+  }> {
+    return this.request('/api/schedules/executions/running');
+  }
+
   // Missing tracks methods
   async getMissingTracks(): Promise<{
     missingTracks: Array<{

@@ -1,4 +1,3 @@
-import React from 'react';
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { EditTemplateModal } from './EditTemplateModal';
@@ -21,7 +20,7 @@ describe('EditTemplateModal - Success/Error Messages', () => {
   };
 
   const mockOnClose = jest.fn();
-  const mockOnSave = jest.fn();
+  const mockOnSave = jest.fn<(id: number, name: string, description: string, configuration: any) => Promise<void>>();
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -29,7 +28,7 @@ describe('EditTemplateModal - Success/Error Messages', () => {
 
   describe('Error Messages', () => {
     it('displays error message when save fails with Error object', async () => {
-      mockOnSave.mockRejectedValue(new Error('Network error'));
+      mockOnSave.mockRejectedValue(new Error('Network error') as never);
 
       render(
         <EditTemplateModal
@@ -53,7 +52,7 @@ describe('EditTemplateModal - Success/Error Messages', () => {
     });
 
     it('displays generic error message when save fails without Error object', async () => {
-      mockOnSave.mockRejectedValue('Something went wrong');
+      mockOnSave.mockRejectedValue('Something went wrong' as never);
 
       render(
         <EditTemplateModal

@@ -9,6 +9,8 @@ export const SchedulesPage: FC = () => {
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
   const [playlists, setPlaylists] = useState<any[]>([]);
   const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(false);
+  const [runningExecutions, setRunningExecutions] = useState<any[]>([]);
+  const [selectedScheduleHistory, setSelectedScheduleHistory] = useState<{ scheduleId: number; history: any[] } | null>(null);
   const [formData, setFormData] = useState({
     scheduleType: 'playlist_refresh' as 'playlist_refresh' | 'mix_generation',
     frequency: 'weekly' as 'daily' | 'weekly' | 'fortnightly' | 'monthly',
@@ -20,6 +22,42 @@ export const SchedulesPage: FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recentExecutions, setRecentExecutions] = useState<any[]>([]);
+  const [isLoadingExecutions, setIsLoadingExecutions] = useState(false);
+
+  // Load recent executions on mount
+  useEffect(() => {
+    const fetchRecentExecutions = async () => {
+      setIsLoadingExecutions(true);
+      try {
+        const response = await apiClient.getRecentExecutions(20);
+        setRecentExecutions(response.executions || []);
+      } catch (err) {
+        console.error('Failed to fetch recent executions:', err);
+      } finally {
+        setIsLoadingExecutions(false);
+      }
+    };
+
+    fetchRecentExecutions();
+  }, [apiClient]);
+
+  // Poll for running executions
+  useEffect(() => {
+    const fetchRunningExecutions = async () => {
+      try {
+        const response = await apiClient.getRunningExecutions();
+        setRunningExecutions(response.executions || []);
+      } catch (err) {
+        console.error('Failed to fetch running executions:', err);
+      }
+    };
+
+    fetchRunningExecutions();
+    const interval = setInterval(fetchRunningExecutions, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [apiClient]);
 
   // Handle URL parameters for pre-selecting playlist or mix type
   useEffect(() => {
@@ -122,6 +160,10 @@ export const SchedulesPage: FC = () => {
       setShowCreateForm(false);
       setEditingSchedule(null);
       resetForm();
+      
+      // Refresh recent executions
+      const response = await apiClient.getRecentExecutions(20);
+      setRecentExecutions(response.executions || []);
     } catch (err) {
       console.error('Error saving schedule:', err);
       setError(err instanceof Error ? err.message : 'Failed to save schedule');
@@ -161,6 +203,10 @@ export const SchedulesPage: FC = () => {
     try {
       await apiClient.deleteSchedule(schedule.id);
       await refreshSchedules();
+      
+      // Refresh recent executions
+      const response = await apiClient.getRecentExecutions(20);
+      setRecentExecutions(response.executions || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete schedule');
     } finally {
@@ -184,6 +230,19 @@ export const SchedulesPage: FC = () => {
     setEditingSchedule(null);
     resetForm();
     setError(null);
+  };
+
+  const handleViewHistory = async (schedule: Schedule) => {
+    try {
+      const response = await apiClient.getScheduleExecutions(schedule.id, 20);
+      setSelectedScheduleHistory({
+        scheduleId: schedule.id,
+        history: response.executions || []
+      });
+    } catch (err) {
+      console.error('Failed to load execution history:', err);
+      setError('Failed to load execution history');
+    }
   };
 
   const getScheduleTitle = (schedule: Schedule) => {
@@ -492,12 +551,40 @@ export const SchedulesPage: FC = () => {
         <div style={{ display: 'grid', gap: '1rem' }}>
           {schedules.map(schedule => {
             const isChartImport = schedule.config?.chartName;
+            const isRunning = runningExecutions.some(e => e.scheduleId === schedule.id);
+            const runningExecution = runningExecutions.find(e => e.scheduleId === schedule.id);
+            
             return (
             <div key={schedule.id} className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '1rem', fontWeight: 500, marginBottom: '0.5rem' }}>
-                    {getScheduleTitle(schedule)}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                    <div style={{ fontSize: '1rem', fontWeight: 500 }}>
+                      {getScheduleTitle(schedule)}
+                    </div>
+                    {isRunning && (
+                      <span style={{
+                        padding: '0.25rem 0.5rem',
+                        backgroundColor: 'rgba(33, 150, 243, 0.2)',
+                        color: '#2196F3',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        fontWeight: 500,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                      }}>
+                        <span style={{ 
+                          display: 'inline-block',
+                          width: '6px',
+                          height: '6px',
+                          borderRadius: '50%',
+                          backgroundColor: '#2196F3',
+                          animation: 'pulse 1.5s ease-in-out infinite',
+                        }} />
+                        Running
+                      </span>
+                    )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
                     {isChartImport && (
@@ -552,11 +639,25 @@ export const SchedulesPage: FC = () => {
                   </div>
                   {schedule.lastRun && (
                     <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                      Last run: {new Date(schedule.lastRun).toLocaleString()}
+                      Last run: {new Date(schedule.lastRun * 1000).toLocaleString()}
+                    </div>
+                  )}
+                  {isRunning && runningExecution && (
+                    <div style={{ fontSize: '0.875rem', color: '#2196F3', marginTop: '0.25rem' }}>
+                      Started: {new Date(runningExecution.startedAt * 1000).toLocaleTimeString()}
+                      {runningExecution.playlistName && ` • ${runningExecution.playlistName}`}
                     </div>
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    className="btn btn-secondary btn-small"
+                    onClick={() => handleViewHistory(schedule)}
+                    disabled={isDeleting}
+                    title="View execution history"
+                  >
+                    History
+                  </button>
                   <button
                     className="btn btn-secondary btn-small"
                     onClick={() => handleEdit(schedule)}
@@ -576,6 +677,219 @@ export const SchedulesPage: FC = () => {
             </div>
           );
           })}
+        </div>
+      )}
+
+      {/* Recent Executions Section */}
+      {!showCreateForm && (
+        <div style={{ marginTop: '3rem' }}>
+          <h2 style={{ marginBottom: '1.5rem', fontSize: '1.25rem' }}>Recent Executions</h2>
+          
+          {isLoadingExecutions ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+              Loading execution history...
+            </div>
+          ) : recentExecutions.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+              No executions yet. Schedules will run at their configured times.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {recentExecutions.slice(0, 10).map((execution) => {
+                const schedule = schedules.find(s => s.id === execution.scheduleId);
+                return (
+                  <div key={execution.id} style={{
+                    padding: '1rem',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    backgroundColor: execution.status === 'running' ? 'rgba(33, 150, 243, 0.05)' :
+                                   execution.status === 'success' ? 'rgba(76, 175, 80, 0.05)' :
+                                   'rgba(244, 67, 54, 0.05)',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>
+                          {execution.playlistName || 'Playlist'}
+                          {schedule && (
+                            <span style={{ 
+                              marginLeft: '0.5rem',
+                              fontSize: '0.875rem',
+                              color: 'var(--text-secondary)',
+                              fontWeight: 'normal'
+                            }}>
+                              ({schedule.frequency})
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                          {new Date(execution.startedAt * 1000).toLocaleString()}
+                        </div>
+                        {execution.completedAt && (
+                          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                            Duration: {Math.round((execution.completedAt - execution.startedAt) / 60)}m {(execution.completedAt - execution.startedAt) % 60}s
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        {execution.status === 'success' && (
+                          <div style={{ fontSize: '0.875rem', textAlign: 'right' }}>
+                            <div style={{ color: '#4CAF50' }}>
+                              ✓ {execution.tracksMatched} matched
+                            </div>
+                            {execution.tracksUnmatched > 0 && (
+                              <div style={{ color: '#FF9800' }}>
+                                ⚠ {execution.tracksUnmatched} missing
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <span style={{
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          fontWeight: 500,
+                          whiteSpace: 'nowrap',
+                          backgroundColor: execution.status === 'running' ? 'rgba(33, 150, 243, 0.2)' :
+                                         execution.status === 'success' ? 'rgba(76, 175, 80, 0.2)' :
+                                         'rgba(244, 67, 54, 0.2)',
+                          color: execution.status === 'running' ? '#2196F3' :
+                                 execution.status === 'success' ? '#4CAF50' :
+                                 '#F44336',
+                        }}>
+                          {execution.status === 'running' ? 'Running' :
+                           execution.status === 'success' ? 'Success' :
+                           'Failed'}
+                        </span>
+                      </div>
+                    </div>
+                    {execution.status === 'failed' && execution.errorMessage && (
+                      <div style={{
+                        marginTop: '0.5rem',
+                        padding: '0.5rem',
+                        backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                        borderRadius: '4px',
+                        fontSize: '0.875rem',
+                        color: '#F44336',
+                      }}>
+                        {execution.errorMessage}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {selectedScheduleHistory && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '1rem',
+        }} onClick={() => setSelectedScheduleHistory(null)}>
+          <div className="card" style={{
+            maxWidth: '800px',
+            width: '100%',
+            maxHeight: '80vh',
+            overflow: 'auto',
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ margin: 0 }}>Execution History</h2>
+              <button
+                className="btn btn-secondary btn-small"
+                onClick={() => setSelectedScheduleHistory(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            {selectedScheduleHistory.history.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+                No execution history yet
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: '0.75rem' }}>
+                {selectedScheduleHistory.history.map((execution) => (
+                  <div key={execution.id} style={{
+                    padding: '1rem',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    backgroundColor: execution.status === 'running' ? 'rgba(33, 150, 243, 0.05)' :
+                                   execution.status === 'success' ? 'rgba(76, 175, 80, 0.05)' :
+                                   'rgba(244, 67, 54, 0.05)',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.5rem' }}>
+                      <div>
+                        <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>
+                          {execution.playlistName || 'Playlist'}
+                        </div>
+                        <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                          Started: {new Date(execution.startedAt * 1000).toLocaleString()}
+                        </div>
+                        {execution.completedAt && (
+                          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                            Completed: {new Date(execution.completedAt * 1000).toLocaleString()}
+                            {' '}({Math.round((execution.completedAt - execution.startedAt) / 60)}m {(execution.completedAt - execution.startedAt) % 60}s)
+                          </div>
+                        )}
+                      </div>
+                      <span style={{
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        fontWeight: 500,
+                        backgroundColor: execution.status === 'running' ? 'rgba(33, 150, 243, 0.2)' :
+                                       execution.status === 'success' ? 'rgba(76, 175, 80, 0.2)' :
+                                       'rgba(244, 67, 54, 0.2)',
+                        color: execution.status === 'running' ? '#2196F3' :
+                               execution.status === 'success' ? '#4CAF50' :
+                               '#F44336',
+                      }}>
+                        {execution.status === 'running' ? 'Running' :
+                         execution.status === 'success' ? 'Success' :
+                         'Failed'}
+                      </span>
+                    </div>
+
+                    {execution.status === 'success' && (
+                      <div style={{ display: 'flex', gap: '1rem', fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                        <div style={{ color: '#4CAF50' }}>
+                          ✓ {execution.tracksMatched} matched
+                        </div>
+                        {execution.tracksUnmatched > 0 && (
+                          <div style={{ color: '#FF9800' }}>
+                            ⚠ {execution.tracksUnmatched} missing
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {execution.status === 'failed' && execution.errorMessage && (
+                      <div style={{
+                        marginTop: '0.5rem',
+                        padding: '0.5rem',
+                        backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                        borderRadius: '4px',
+                        fontSize: '0.875rem',
+                        color: '#F44336',
+                      }}>
+                        {execution.errorMessage}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -22,6 +22,7 @@ async function executePlaylistRefreshSchedules(db: DatabaseService): Promise<{ e
   let failed = 0;
 
   for (const schedule of dueSchedules) {
+    let executionId: number | null = null;
     try {
       logger.info('Executing playlist refresh schedule', {
         scheduleId: schedule.id,
@@ -53,6 +54,21 @@ async function executePlaylistRefreshSchedules(db: DatabaseService): Promise<{ e
 
       let result;
       let playlistName;
+
+      if (isChartImport) {
+        playlistName = config.playlistName || config.chartName || 'Chart Import';
+      } else {
+        const playlist = schedule.playlist_id ? db.getPlaylistById(schedule.playlist_id) : null;
+        if (!playlist) {
+          logger.error('Playlist not found for schedule', { scheduleId: schedule.id, playlistId: schedule.playlist_id });
+          failed++;
+          continue;
+        }
+        playlistName = playlist.name;
+      }
+
+      // Create execution record
+      executionId = db.createScheduleExecution(schedule.id, schedule.user_id, playlistName);
 
       if (isChartImport) {
         // Chart import schedule
@@ -178,6 +194,13 @@ async function executePlaylistRefreshSchedules(db: DatabaseService): Promise<{ e
       // Update schedule last_run
       db.updateScheduleLastRun(schedule.id);
 
+      // Update execution record with success
+      if (executionId) {
+        const matchedCount = result.matched?.filter((t: any) => t.matched).length || 0;
+        const unmatchedCount = result.unmatched?.length || 0;
+        db.updateScheduleExecution(executionId, 'success', matchedCount, unmatchedCount);
+      }
+
       executed++;
       logger.info('Playlist refresh schedule executed successfully', {
         scheduleId: schedule.id,
@@ -190,6 +213,12 @@ async function executePlaylistRefreshSchedules(db: DatabaseService): Promise<{ e
         error: error.message,
         stack: error.stack
       });
+      
+      // Update execution record with failure
+      if (executionId) {
+        db.updateScheduleExecution(executionId, 'failed', 0, 0, error.message);
+      }
+      
       failed++;
     }
   }

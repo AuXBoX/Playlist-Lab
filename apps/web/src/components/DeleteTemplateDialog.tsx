@@ -1,4 +1,4 @@
-import React, { type FC, useEffect } from 'react';
+import { type FC, useEffect } from 'react';
 import './DeleteTemplateDialog.css';
 
 interface DeleteTemplateDialogProps {

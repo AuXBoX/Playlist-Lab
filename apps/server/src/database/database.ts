@@ -433,31 +433,65 @@ export class DatabaseService {
    */
   getDueSchedules(): Schedule[] {
     const now = Math.floor(Date.now() / 1000);
+    const currentDate = new Date();
+    const currentHour = currentDate.getHours();
+    const currentMinute = currentDate.getMinutes();
     
-    // Get schedules that have never run or are due based on frequency
-    const stmt = this.db.prepare(`
-      SELECT * FROM schedules
-      WHERE last_run IS NULL
-         OR (frequency = 'daily' AND last_run < ?)
-         OR (frequency = 'weekly' AND last_run < ?)
-         OR (frequency = 'fortnightly' AND last_run < ?)
-         OR (frequency = 'monthly' AND last_run < ?)
-    `);
+    // Get all schedules
+    const stmt = this.db.prepare('SELECT * FROM schedules');
+    const allSchedules = stmt.all() as Schedule[];
     
-    const oneDayAgo = now - 86400;
-    const oneWeekAgo = now - 604800;
-    const twoWeeksAgo = now - 1209600;
-    const oneMonthAgo = now - 2592000;
-    
-    const candidates = stmt.all(oneDayAgo, oneWeekAgo, twoWeeksAgo, oneMonthAgo) as Schedule[];
-
-    // Filter by run_time if set: only run during the correct hour
-    const currentHour = new Date().getHours();
-    return candidates.filter(schedule => {
+    return allSchedules.filter(schedule => {
       const config = schedule.config ? JSON.parse(schedule.config as any) : {};
-      if (!config.run_time) return true; // No time preference — always eligible
-      const [h] = (config.run_time as string).split(':').map(Number);
-      return h === currentHour;
+      
+      // Check if we're at the scheduled time (if specified)
+      if (config.run_time) {
+        const [scheduleHour, scheduleMinute] = (config.run_time as string).split(':').map(Number);
+        
+        // Only run if we're within the scheduled hour and haven't run in the last 50 minutes
+        // This prevents multiple runs within the same hour
+        if (currentHour !== scheduleHour) {
+          return false;
+        }
+        
+        // If we have a specific minute, check if we're within 10 minutes of it
+        if (scheduleMinute !== undefined) {
+          const minuteDiff = Math.abs(currentMinute - scheduleMinute);
+          if (minuteDiff > 10) {
+            return false;
+          }
+        }
+        
+        // Check if we already ran in the last 50 minutes
+        if (schedule.last_run && (now - schedule.last_run) < 3000) {
+          return false;
+        }
+      }
+      
+      // If no last_run, check if we've passed the start date
+      if (!schedule.last_run) {
+        const startDate = new Date(schedule.start_date + 'T00:00:00');
+        if (currentDate < startDate) {
+          return false; // Not yet time to start
+        }
+        return true; // First run
+      }
+      
+      // Check if enough time has passed based on frequency
+      const timeSinceLastRun = now - schedule.last_run;
+      
+      switch (schedule.frequency) {
+        case 'daily':
+          return timeSinceLastRun >= 86400; // 24 hours
+        case 'weekly':
+          return timeSinceLastRun >= 604800; // 7 days
+        case 'fortnightly':
+          return timeSinceLastRun >= 1209600; // 14 days
+        case 'monthly':
+          return timeSinceLastRun >= 2592000; // 30 days
+        default:
+          return false;
+      }
     });
   }
 
@@ -504,6 +538,82 @@ export class DatabaseService {
   deleteSchedule(id: number): void {
     const stmt = this.db.prepare('DELETE FROM schedules WHERE id = ?');
     stmt.run(id);
+  }
+
+  // ==================== Schedule Execution Operations ====================
+
+  /**
+   * Create a schedule execution record
+   */
+  createScheduleExecution(scheduleId: number, userId: number, playlistName?: string): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO schedule_executions (schedule_id, user_id, status, started_at, playlist_name)
+      VALUES (?, ?, 'running', ?, ?)
+    `);
+    const now = Math.floor(Date.now() / 1000);
+    const result = stmt.run(scheduleId, userId, now, playlistName || null);
+    return result.lastInsertRowid as number;
+  }
+
+  /**
+   * Update schedule execution with results
+   */
+  updateScheduleExecution(
+    executionId: number,
+    status: 'success' | 'failed',
+    tracksMatched: number = 0,
+    tracksUnmatched: number = 0,
+    errorMessage?: string
+  ): void {
+    const stmt = this.db.prepare(`
+      UPDATE schedule_executions
+      SET status = ?, completed_at = ?, tracks_matched = ?, tracks_unmatched = ?, error_message = ?
+      WHERE id = ?
+    `);
+    const now = Math.floor(Date.now() / 1000);
+    stmt.run(status, now, tracksMatched, tracksUnmatched, errorMessage || null, executionId);
+  }
+
+  /**
+   * Get execution history for a schedule
+   */
+  getScheduleExecutions(scheduleId: number, limit: number = 10): any[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM schedule_executions
+      WHERE schedule_id = ?
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+    return stmt.all(scheduleId, limit);
+  }
+
+  /**
+   * Get all recent executions for a user
+   */
+  getUserScheduleExecutions(userId: number, limit: number = 50): any[] {
+    const stmt = this.db.prepare(`
+      SELECT se.*, s.schedule_type, s.frequency
+      FROM schedule_executions se
+      JOIN schedules s ON se.schedule_id = s.id
+      WHERE se.user_id = ?
+      ORDER BY se.started_at DESC
+      LIMIT ?
+    `);
+    return stmt.all(userId, limit);
+  }
+
+  /**
+   * Get currently running executions for a user
+   */
+  getRunningExecutions(userId: number): any[] {
+    const stmt = this.db.prepare(`
+      SELECT se.*, s.schedule_type, s.frequency
+      FROM schedule_executions se
+      JOIN schedules s ON se.schedule_id = s.id
+      WHERE se.user_id = ? AND se.status = 'running'
+      ORDER BY se.started_at DESC
+    `);
+    return stmt.all(userId);
   }
 
   // ==================== Missing Tracks Operations ====================

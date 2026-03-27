@@ -245,3 +245,24 @@ CREATE INDEX IF NOT EXISTS idx_mix_templates_user_id ON mix_templates(user_id);
 CREATE INDEX IF NOT EXISTS idx_mix_templates_mix_type ON mix_templates(mix_type);
 -- Composite index for sorting by last_used_at and updated_at (performance optimization)
 CREATE INDEX IF NOT EXISTS idx_mix_templates_user_usage ON mix_templates(user_id, last_used_at DESC, updated_at DESC);
+
+-- Schedule executions table
+-- Stores execution history for schedules
+CREATE TABLE IF NOT EXISTS schedule_executions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  status TEXT NOT NULL,           -- 'running', 'success', 'failed'
+  started_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  tracks_matched INTEGER DEFAULT 0,
+  tracks_unmatched INTEGER DEFAULT 0,
+  error_message TEXT,
+  playlist_name TEXT,
+  FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_executions_schedule_id ON schedule_executions(schedule_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_executions_user_id ON schedule_executions(user_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_executions_started_at ON schedule_executions(started_at DESC);
