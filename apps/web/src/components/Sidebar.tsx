@@ -60,16 +60,22 @@ export const Sidebar: FC = () => {
       });
       
       if (res.ok) {
-        // Show success message briefly before server restarts
-        alert('Update started! The application will restart in a few seconds.');
+        // Update successful - server will restart soon
+        // Keep showing "Updating..." until page reloads or connection drops
       } else {
         const data = await res.json();
         alert(`Update failed: ${data.error || 'Unknown error'}`);
         setIsUpdating(false);
       }
     } catch (err) {
-      alert(`Update failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      setIsUpdating(false);
+      // Network error is expected when server restarts
+      // Keep showing "Updating..." - this is normal behavior
+      if (err instanceof Error && err.message.includes('Failed to fetch')) {
+        // Server is restarting - this is expected, keep updating state
+      } else {
+        alert(`Update failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        setIsUpdating(false);
+      }
     }
   };
 

@@ -478,23 +478,27 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
                   file.on('finish', (): void => {
                     file.close();
                     
-                    // Launch installer
-                    const installer = spawn(installerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
-                      detached: true,
-                      stdio: 'ignore'
-                    });
-                    
-                    installer.unref();
-                    
+                    // Send response FIRST before launching installer
                     res.json({ 
                       success: true, 
                       message: 'Update installer launched. The application will restart automatically.' 
                     });
                     
-                    // Exit after a delay to allow installer to start
-                    setTimeout((): void => {
-                      process.exit(0);
-                    }, 3000);
+                    // Wait for response to be sent, then launch installer and exit
+                    res.on('finish', (): void => {
+                      // Launch installer
+                      const installer = spawn(installerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
+                        detached: true,
+                        stdio: 'ignore'
+                      });
+                      
+                      installer.unref();
+                      
+                      // Exit after a delay to allow installer to start
+                      setTimeout((): void => {
+                        process.exit(0);
+                      }, 3000);
+                    });
                   });
                 });
                 return;
@@ -505,23 +509,27 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
               file.on('finish', (): void => {
                 file.close();
                 
-                // Launch installer
-                const installer = spawn(installerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
-                  detached: true,
-                  stdio: 'ignore'
-                });
-                
-                installer.unref();
-                
+                // Send response FIRST before launching installer
                 res.json({ 
                   success: true, 
                   message: 'Update installer launched. The application will restart automatically.' 
                 });
                 
-                // Exit after a delay to allow installer to start
-                setTimeout((): void => {
-                  process.exit(0);
-                }, 3000);
+                // Wait for response to be sent, then launch installer and exit
+                res.on('finish', (): void => {
+                  // Launch installer
+                  const installer = spawn(installerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
+                    detached: true,
+                    stdio: 'ignore'
+                  });
+                  
+                  installer.unref();
+                  
+                  // Exit after a delay to allow installer to start
+                  setTimeout((): void => {
+                    process.exit(0);
+                  }, 3000);
+                });
               });
             });
             return; // Explicit return after async operation
