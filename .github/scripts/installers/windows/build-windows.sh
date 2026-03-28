@@ -16,10 +16,11 @@ if [ -z "$APP_VERSION" ] || [ "$APP_VERSION" = "undefined" ]; then
     APP_VERSION=$(node -e "const fs = require('fs'); const pkg = JSON.parse(fs.readFileSync('./apps/server/package.json', 'utf8')); console.log(pkg.version);" 2>&1)
 fi
 
-# Final fallback: use default version
+# FAIL if version cannot be read - don't use hardcoded fallback
 if [ -z "$APP_VERSION" ] || [ "$APP_VERSION" = "undefined" ]; then
-    echo "Warning: Could not read version from package.json, using default"
-    APP_VERSION="1.1.5"
+    echo "ERROR: Could not read version from apps/server/package.json"
+    echo "Build cannot continue without a valid version number"
+    exit 1
 fi
 
 echo "Building version: $APP_VERSION"

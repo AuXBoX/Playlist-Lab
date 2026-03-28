@@ -5,9 +5,10 @@
   #define MyAppSourceDir "..\..\..\.."
 #endif
 
-; Version will be passed as a command-line parameter /DMyAppVersion=x.x.x
+; Version MUST be passed as a command-line parameter /DMyAppVersion=x.x.x
+; If not provided, the build will fail
 #ifndef MyAppVersion
-  #define MyAppVersion "1.1.5"
+  #error "MyAppVersion must be defined! Pass /DMyAppVersion=x.x.x to the compiler"
 #endif
 
 #define MyAppName "Playlist Lab Server"

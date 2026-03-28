@@ -403,9 +403,23 @@ function startTray(SysTray) {
   log(`Icon paths: green=${iconGreen}, red=${iconRed}`);
 
   // Read version from package.json
-  let currentVersion = '1.1.5'; // fallback
+  let currentVersion = null;
   try {
     const packageJsonPath = path.join(installDir, 'server', 'package.json');
+    if (fs.existsSync(packageJsonPath)) {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+      currentVersion = packageJson.version;
+    }
+  } catch (error) {
+    console.error('Failed to read version from package.json:', error.message);
+  }
+  
+  // FAIL if version cannot be read - don't use hardcoded fallback
+  if (!currentVersion) {
+    console.error('ERROR: Could not determine current version from package.json');
+    console.error('Cannot check for updates without a valid version number');
+    return; // Skip update check rather than using wrong version
+  }
     if (fs.existsSync(packageJsonPath)) {
       const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
       currentVersion = packageJson.version;
