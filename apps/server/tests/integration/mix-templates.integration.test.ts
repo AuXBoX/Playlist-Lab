@@ -1,427 +1,588 @@
 /**
- * Integration Tests for Mix Generation
+ * Integration Tests for Mix Templates Workflows
  * 
- * Tests the complete mix generation workflow with mocked Plex data:
- * - Weekly Mix generation with play history
- * - Daily Mix generation with recent plays and rediscoveries
- * - Time Capsule generation with artist diversity
- * - New Music Mix generation with recently added albums
- * - Mix settings application
+ * Tests complete end-to-end workflows for saved mix templates:
+ * - Save template workflow
+ * - Load template workflow
+ * - Edit template workflow
+ * - Delete template workflow
+ * - Quick generate workflow
+ * - Templates with missing Plex items
  */
 
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { MixService, MixSettings } from '../../src/services/mixes';
-import { PlexClient } from '../../src/services/plex';
+import Database from 'better-sqlite3';
+import { initializeDatabase } from '../../src/database/init';
+import { DatabaseService } from '../../src/database/database';
+import path from 'path';
+import fs from 'fs';
+import os from 'os';
 
-// Mock PlexClient
-jest.mock('../../src/services/plex');
+/**
+ * Create a temporary test database
+ */
+function createTestDatabase(): Database.Database {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'playlist-lab-integration-'));
+  const dbPath = path.join(tempDir, 'test.db');
+  return initializeDatabase(dbPath);
+}
 
-describe('Mix Generation Integration Tests', () => {
-  let mixService: MixService;
-  const mockServerUrl = 'http://localhost:32400';
-  const mockToken = 'test-token';
-  const mockLibraryId = '1';
+/**
+ * Clean up test database
+ */
+function cleanupTestDatabase(db: Database.Database): void {
+  const dbPath = db.name;
+  db.close();
+  
+  if (dbPath && dbPath !== ':memory:') {
+    try {
+      fs.unlinkSync(dbPath);
+      fs.rmdirSync(path.dirname(dbPath));
+    } catch (error) {
+      // Ignore cleanup errors
+    }
+  }
+}
+
+describe('Mix Templates Integration Tests', () => {
+  let db: Database.Database;
+  let dbService: DatabaseService;
+  let userId: number;
 
   beforeEach(() => {
-    mixService = new MixService();
-    jest.clearAllMocks();
+    // Create test database
+    db = createTestDatabase();
+    dbService = new DatabaseService(db);
+
+    // Create test user
+    const user = dbService.createUser(
+      'test-plex-user-id',
+      'testuser',
+      'test-token',
+      'https://example.com/thumb.jpg'
+    );
+    userId = user.id;
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    cleanupTestDatabase(db);
   });
 
-  /**
-   * Test Weekly Mix generation with realistic play history
-   */
-  test('should generate Weekly Mix from play history', async () => {
-    const settings: MixSettings['weeklyMix'] = {
-      topArtists: 3,
-      tracksPerArtist: 5
-    };
+  describe('Save Template Workflow', () => {
+    it('should save a custom mix template with all parameters', () => {
+      const configuration = {
+        mixType: 'custom',
+        trackCount: 50,
+        sortBy: 'random',
+        sortDirection: 'desc',
+        customRules: {
+          includeGenres: ['Rock', 'Alternative'],
+          excludeGenres: ['Country'],
+          minRating: 7,
+          yearRange: { min: 2000, max: 2020 },
+          includeUnplayed: true
+        }
+      };
 
-    // Mock play history with multiple artists
-    const recentTracks = [
-      { ratingKey: '1', grandparentTitle: 'The Beatles', title: 'Hey Jude' },
-      { ratingKey: '2', grandparentTitle: 'The Beatles', title: 'Let It Be' },
-      { ratingKey: '3', grandparentTitle: 'The Beatles', title: 'Yesterday' },
-      { ratingKey: '4', grandparentTitle: 'Pink Floyd', title: 'Comfortably Numb' },
-      { ratingKey: '5', grandparentTitle: 'Pink Floyd', title: 'Wish You Were Here' },
-      { ratingKey: '6', grandparentTitle: 'Led Zeppelin', title: 'Stairway to Heaven' },
-      { ratingKey: '7', grandparentTitle: 'Led Zeppelin', title: 'Kashmir' },
-      { ratingKey: '8', grandparentTitle: 'Queen', title: 'Bohemian Rhapsody' }
-    ];
+      const template = dbService.createMixTemplate(
+        userId,
+        'My Custom Mix',
+        'A mix of rock and alternative from 2000-2020',
+        'custom',
+        configuration
+      );
 
-    const mockGetRecentTracks = jest.fn().mockResolvedValue(recentTracks);
-    const mockSearchArtist = jest.fn().mockImplementation((_libraryId, artistName) => {
-      return Promise.resolve({ ratingKey: `artist-${artistName}` });
-    });
-    const mockGetArtistPopularTracks = jest.fn().mockImplementation((_libraryId, artistKey) => {
-      const artistName = artistKey.replace('artist-', '');
-      return Promise.resolve([
-        { ratingKey: `${artistKey}-track-1`, title: `${artistName} Track 1` },
-        { ratingKey: `${artistKey}-track-2`, title: `${artistName} Track 2` },
-        { ratingKey: `${artistKey}-track-3`, title: `${artistName} Track 3` },
-        { ratingKey: `${artistKey}-track-4`, title: `${artistName} Track 4` },
-        { ratingKey: `${artistKey}-track-5`, title: `${artistName} Track 5` }
-      ]);
+      expect(template.id).toBeDefined();
+      expect(template.name).toBe('My Custom Mix');
+      expect(template.description).toBe('A mix of rock and alternative from 2000-2020');
+      expect(template.mix_type).toBe('custom');
+      expect(template.configuration).toEqual(configuration);
+      expect(template.use_count).toBe(0);
+      expect(template.created_at).toBeDefined();
+      expect(template.updated_at).toBeDefined();
     });
 
-    (PlexClient as jest.MockedClass<typeof PlexClient>).mockImplementation(() => ({
-      getRecentTracks: mockGetRecentTracks,
-      searchArtist: mockSearchArtist,
-      getArtistPopularTracks: mockGetArtistPopularTracks
-    } as any));
+    it('should save an artist mix template', () => {
+      const configuration = {
+        mixType: 'artist',
+        trackCount: 30,
+        artistIds: ['artist-1', 'artist-2', 'artist-3'],
+        maxTracksPerArtist: 10,
+        allowDuplicateArtists: false,
+        sortBy: 'random'
+      };
 
-    const result = await mixService.generateWeeklyMix(
-      mockServerUrl,
-      mockToken,
-      mockLibraryId,
-      settings
-    );
+      const template = dbService.createMixTemplate(
+        userId,
+        'Favorite Artists Mix',
+        null,
+        'artist',
+        configuration
+      );
 
-    // Verify play history was fetched
-    expect(mockGetRecentTracks).toHaveBeenCalled();
-
-    // Verify top artists were searched (The Beatles, Pink Floyd, Led Zeppelin)
-    expect(mockSearchArtist).toHaveBeenCalledTimes(3);
-
-    // Verify popular tracks were fetched for each artist
-    expect(mockGetArtistPopularTracks).toHaveBeenCalledTimes(3);
-
-    // Verify result contains tracks
-    expect(result.trackCount).toBeGreaterThan(0);
-    expect(result.trackKeys.length).toBe(result.trackCount);
-    expect(result.trackKeys.length).toBeLessThanOrEqual(settings.topArtists * settings.tracksPerArtist);
-  });
-
-  /**
-   * Test Daily Mix generation with all three components
-   */
-  test('should generate Daily Mix with recent, related, and rediscovery tracks', async () => {
-    const settings: MixSettings['dailyMix'] = {
-      recentTracks: 5,
-      relatedTracks: 5,
-      rediscoveryTracks: 5,
-      rediscoveryDays: 30
-    };
-
-    const recentTracks = [
-      { ratingKey: 'recent-1', grandparentTitle: 'Artist A', title: 'Recent 1' },
-      { ratingKey: 'recent-2', grandparentTitle: 'Artist B', title: 'Recent 2' },
-      { ratingKey: 'recent-3', grandparentTitle: 'Artist C', title: 'Recent 3' },
-      { ratingKey: 'recent-4', grandparentTitle: 'Artist D', title: 'Recent 4' },
-      { ratingKey: 'recent-5', grandparentTitle: 'Artist E', title: 'Recent 5' }
-    ];
-
-    const relatedTracks = [
-      { ratingKey: 'related-1', title: 'Related 1' },
-      { ratingKey: 'related-2', title: 'Related 2' }
-    ];
-
-    const staleTracksData = [
-      { ratingKey: 'stale-1', title: 'Stale 1' },
-      { ratingKey: 'stale-2', title: 'Stale 2' },
-      { ratingKey: 'stale-3', title: 'Stale 3' }
-    ];
-
-    const mockGetRecentTracks = jest.fn().mockResolvedValue(recentTracks);
-    const mockGetSimilarTracks = jest.fn().mockResolvedValue(relatedTracks);
-    const mockGetStalePlayedTracks = jest.fn().mockResolvedValue(staleTracksData);
-
-    (PlexClient as jest.MockedClass<typeof PlexClient>).mockImplementation(() => ({
-      getRecentTracks: mockGetRecentTracks,
-      getSimilarTracks: mockGetSimilarTracks,
-      getStalePlayedTracks: mockGetStalePlayedTracks
-    } as any));
-
-    const result = await mixService.generateDailyMix(
-      mockServerUrl,
-      mockToken,
-      mockLibraryId,
-      settings
-    );
-
-    // Verify all three data sources were used
-    expect(mockGetRecentTracks).toHaveBeenCalled();
-    expect(mockGetSimilarTracks).toHaveBeenCalled();
-    expect(mockGetStalePlayedTracks).toHaveBeenCalled();
-
-    // Verify result contains tracks from all categories
-    expect(result.trackCount).toBeGreaterThan(0);
-    expect(result.trackKeys.some(key => key.startsWith('recent-'))).toBe(true);
-    expect(result.trackKeys.some(key => key.startsWith('related-'))).toBe(true);
-    expect(result.trackKeys.some(key => key.startsWith('stale-'))).toBe(true);
-  });
-
-  /**
-   * Test Time Capsule generation with artist diversity
-   */
-  test('should generate Time Capsule with artist diversity', async () => {
-    const settings: MixSettings['timeCapsule'] = {
-      trackCount: 20,
-      daysAgo: 90,
-      maxPerArtist: 3
-    };
-
-    // Create tracks from multiple artists
-    const staleTracksData = [
-      ...Array.from({ length: 10 }, (_, i) => ({
-        ratingKey: `artist-a-${i}`,
-        grandparentTitle: 'Artist A',
-        title: `Track ${i}`
-      })),
-      ...Array.from({ length: 10 }, (_, i) => ({
-        ratingKey: `artist-b-${i}`,
-        grandparentTitle: 'Artist B',
-        title: `Track ${i}`
-      })),
-      ...Array.from({ length: 10 }, (_, i) => ({
-        ratingKey: `artist-c-${i}`,
-        grandparentTitle: 'Artist C',
-        title: `Track ${i}`
-      }))
-    ];
-
-    const mockGetStalePlayedTracks = jest.fn().mockResolvedValue(staleTracksData);
-
-    (PlexClient as jest.MockedClass<typeof PlexClient>).mockImplementation(() => ({
-      getStalePlayedTracks: mockGetStalePlayedTracks
-    } as any));
-
-    const result = await mixService.generateTimeCapsule(
-      mockServerUrl,
-      mockToken,
-      mockLibraryId,
-      settings
-    );
-
-    // Verify stale tracks were fetched
-    expect(mockGetStalePlayedTracks).toHaveBeenCalledWith(
-      mockLibraryId,
-      settings.daysAgo,
-      expect.any(Number)
-    );
-
-    // Verify result respects track count
-    expect(result.trackCount).toBeLessThanOrEqual(settings.trackCount);
-
-    // Count tracks per artist
-    const artistCounts = new Map<string, number>();
-    for (const key of result.trackKeys) {
-      const artist = key.split('-')[0] + '-' + key.split('-')[1]; // "artist-a"
-      artistCounts.set(artist, (artistCounts.get(artist) || 0) + 1);
-    }
-
-    // Verify no artist exceeds maxPerArtist
-    for (const count of artistCounts.values()) {
-      expect(count).toBeLessThanOrEqual(settings.maxPerArtist);
-    }
-  });
-
-  /**
-   * Test New Music Mix generation with recently added albums
-   */
-  test('should generate New Music Mix from recently added albums', async () => {
-    const settings: MixSettings['newMusic'] = {
-      albumCount: 5,
-      tracksPerAlbum: 3
-    };
-
-    const recentAlbums = [
-      { ratingKey: 'album-1', title: 'Album 1' },
-      { ratingKey: 'album-2', title: 'Album 2' },
-      { ratingKey: 'album-3', title: 'Album 3' },
-      { ratingKey: 'album-4', title: 'Album 4' },
-      { ratingKey: 'album-5', title: 'Album 5' }
-    ];
-
-    const mockGetRecentlyAddedAlbums = jest.fn().mockResolvedValue(recentAlbums);
-    const mockGetAlbumTracks = jest.fn().mockImplementation((albumKey) => {
-      return Promise.resolve([
-        { ratingKey: `${albumKey}-track-1`, title: 'Track 1' },
-        { ratingKey: `${albumKey}-track-2`, title: 'Track 2' },
-        { ratingKey: `${albumKey}-track-3`, title: 'Track 3' },
-        { ratingKey: `${albumKey}-track-4`, title: 'Track 4' },
-        { ratingKey: `${albumKey}-track-5`, title: 'Track 5' }
-      ]);
+      expect(template.id).toBeDefined();
+      expect(template.mix_type).toBe('artist');
+      expect(template.configuration.artistIds).toHaveLength(3);
+      expect(template.configuration.maxTracksPerArtist).toBe(10);
     });
 
-    (PlexClient as jest.MockedClass<typeof PlexClient>).mockImplementation(() => ({
-      getRecentlyAddedAlbums: mockGetRecentlyAddedAlbums,
-      getAlbumTracks: mockGetAlbumTracks
-    } as any));
+    it('should save an album mix template', () => {
+      const configuration = {
+        mixType: 'album',
+        trackCount: 40,
+        albumIds: ['album-1', 'album-2'],
+        maxTracksPerAlbum: 20,
+        sortBy: 'random'
+      };
 
-    const result = await mixService.generateNewMusicMix(
-      mockServerUrl,
-      mockToken,
-      mockLibraryId,
-      settings
-    );
+      const template = dbService.createMixTemplate(
+        userId,
+        'Best Albums Mix',
+        'My favorite albums',
+        'album',
+        configuration
+      );
 
-    // Verify recently added albums were fetched
-    expect(mockGetRecentlyAddedAlbums).toHaveBeenCalledWith(
-      mockLibraryId,
-      settings.albumCount
-    );
+      expect(template.id).toBeDefined();
+      expect(template.mix_type).toBe('album');
+      expect(template.configuration.albumIds).toHaveLength(2);
+    });
 
-    // Verify tracks were fetched from each album
-    expect(mockGetAlbumTracks).toHaveBeenCalledTimes(settings.albumCount);
+    it('should save a genre mix template', () => {
+      const configuration = {
+        mixType: 'genre',
+        trackCount: 50,
+        genres: ['Jazz', 'Blues', 'Soul'],
+        sortBy: 'random'
+      };
 
-    // Verify result contains tracks
-    expect(result.trackCount).toBeGreaterThan(0);
-    expect(result.trackKeys.length).toBe(result.trackCount);
+      const template = dbService.createMixTemplate(
+        userId,
+        'Jazz & Blues Mix',
+        null,
+        'genre',
+        configuration
+      );
 
-    // Verify tracks are from the albums
-    for (const trackKey of result.trackKeys) {
-      const albumKey = trackKey.split('-track-')[0];
-      expect(recentAlbums.some(album => album.ratingKey === albumKey)).toBe(true);
-    }
+      expect(template.id).toBeDefined();
+      expect(template.mix_type).toBe('genre');
+      expect(template.configuration.genres).toHaveLength(3);
+    });
+
+    it('should save a mood mix template', () => {
+      const configuration = {
+        mixType: 'mood',
+        trackCount: 30,
+        moods: ['Chill', 'Relaxing', 'Ambient'],
+        sortBy: 'random'
+      };
+
+      const template = dbService.createMixTemplate(
+        userId,
+        'Chill Evening Mix',
+        'Perfect for relaxing',
+        'mood',
+        configuration
+      );
+
+      expect(template.id).toBeDefined();
+      expect(template.mix_type).toBe('mood');
+      expect(template.configuration.moods).toHaveLength(3);
+    });
+
+    it('should save a decade mix template', () => {
+      const configuration = {
+        mixType: 'decade',
+        trackCount: 50,
+        decades: [1980, 1990, 2000],
+        sortBy: 'random'
+      };
+
+      const template = dbService.createMixTemplate(
+        userId,
+        '80s-00s Mix',
+        'Three decades of great music',
+        'decade',
+        configuration
+      );
+
+      expect(template.id).toBeDefined();
+      expect(template.mix_type).toBe('decade');
+      expect(template.configuration.decades).toHaveLength(3);
+    });
   });
 
-  /**
-   * Test mix settings application
-   */
-  test('should apply custom mix settings correctly', async () => {
-    const customSettings: MixSettings['weeklyMix'] = {
-      topArtists: 2,
-      tracksPerArtist: 3
-    };
+  describe('Load Template Workflow', () => {
+    it('should retrieve a saved template by ID', () => {
+      const configuration = {
+        mixType: 'custom',
+        trackCount: 50,
+        customRules: { includeGenres: ['Rock'] }
+      };
 
-    const recentTracks = [
-      { ratingKey: '1', grandparentTitle: 'Artist 1', title: 'Track 1' },
-      { ratingKey: '2', grandparentTitle: 'Artist 1', title: 'Track 2' },
-      { ratingKey: '3', grandparentTitle: 'Artist 2', title: 'Track 3' },
-      { ratingKey: '4', grandparentTitle: 'Artist 3', title: 'Track 4' }
-    ];
+      const saved = dbService.createMixTemplate(
+        userId,
+        'Test Template',
+        'Test description',
+        'custom',
+        configuration
+      );
 
-    const mockGetRecentTracks = jest.fn().mockResolvedValue(recentTracks);
-    const mockSearchArtist = jest.fn().mockResolvedValue({ ratingKey: 'artist-key' });
-    const mockGetArtistPopularTracks = jest.fn().mockResolvedValue([
-      { ratingKey: 'track-1', title: 'Popular 1' },
-      { ratingKey: 'track-2', title: 'Popular 2' },
-      { ratingKey: 'track-3', title: 'Popular 3' }
-    ]);
+      const loaded = dbService.getMixTemplateById(saved.id);
 
-    (PlexClient as jest.MockedClass<typeof PlexClient>).mockImplementation(() => ({
-      getRecentTracks: mockGetRecentTracks,
-      searchArtist: mockSearchArtist,
-      getArtistPopularTracks: mockGetArtistPopularTracks
-    } as any));
+      expect(loaded).not.toBeNull();
+      expect(loaded!.id).toBe(saved.id);
+      expect(loaded!.name).toBe('Test Template');
+      expect(loaded!.description).toBe('Test description');
+      expect(loaded!.configuration).toEqual(configuration);
+    });
 
-    const result = await mixService.generateWeeklyMix(
-      mockServerUrl,
-      mockToken,
-      mockLibraryId,
-      customSettings
-    );
+    it('should retrieve all templates for a user', () => {
+      // Create multiple templates
+      dbService.createMixTemplate(userId, 'Template 1', null, 'custom', { trackCount: 50 });
+      dbService.createMixTemplate(userId, 'Template 2', null, 'artist', { trackCount: 30, artistIds: ['1'] });
+      dbService.createMixTemplate(userId, 'Template 3', null, 'genre', { trackCount: 40, genres: ['Rock'] });
 
-    // Verify only top 2 artists were searched
-    expect(mockSearchArtist).toHaveBeenCalledTimes(2);
+      const templates = dbService.getMixTemplates(userId);
 
-    // Verify popular tracks were fetched with correct limit
-    expect(mockGetArtistPopularTracks).toHaveBeenCalledWith(
-      mockLibraryId,
-      expect.any(String),
-      customSettings.tracksPerArtist
-    );
+      expect(templates).toHaveLength(3);
+      expect(templates.map(t => t.name)).toContain('Template 1');
+      expect(templates.map(t => t.name)).toContain('Template 2');
+      expect(templates.map(t => t.name)).toContain('Template 3');
+    });
 
-    // Verify result respects settings
-    expect(result.trackCount).toBeLessThanOrEqual(
-      customSettings.topArtists * customSettings.tracksPerArtist
-    );
+    it('should only retrieve templates owned by the user', () => {
+      // Create another user
+      const otherUser = dbService.createUser(
+        'other-plex-user-id',
+        'otheruser',
+        'other-token',
+        'https://example.com/other-thumb.jpg'
+      );
+
+      // Create templates for both users
+      dbService.createMixTemplate(userId, 'My Template', null, 'custom', { trackCount: 50 });
+      dbService.createMixTemplate(otherUser.id, 'Other Template', null, 'custom', { trackCount: 50 });
+
+      const myTemplates = dbService.getMixTemplates(userId);
+      const otherTemplates = dbService.getMixTemplates(otherUser.id);
+
+      expect(myTemplates).toHaveLength(1);
+      expect(myTemplates[0].name).toBe('My Template');
+      expect(otherTemplates).toHaveLength(1);
+      expect(otherTemplates[0].name).toBe('Other Template');
+    });
   });
 
-  /**
-   * Test empty result handling
-   */
-  test('should handle empty play history gracefully', async () => {
-    const settings: MixSettings['weeklyMix'] = {
-      topArtists: 5,
-      tracksPerArtist: 10
-    };
+  describe('Edit Template Workflow', () => {
+    it('should update template name', () => {
+      const template = dbService.createMixTemplate(
+        userId,
+        'Original Name',
+        'Original description',
+        'custom',
+        { trackCount: 50 }
+      );
 
-    const mockGetRecentTracks = jest.fn().mockResolvedValue([]);
+      dbService.updateMixTemplate(template.id, {
+        name: 'Updated Name'
+      });
 
-    (PlexClient as jest.MockedClass<typeof PlexClient>).mockImplementation(() => ({
-      getRecentTracks: mockGetRecentTracks
-    } as any));
+      const updated = dbService.getMixTemplateById(template.id);
+      expect(updated!.name).toBe('Updated Name');
+      expect(updated!.description).toBe('Original description'); // Unchanged
+      expect(updated!.updated_at).toBeGreaterThan(template.updated_at);
+    });
 
-    const result = await mixService.generateWeeklyMix(
-      mockServerUrl,
-      mockToken,
-      mockLibraryId,
-      settings
-    );
+    it('should update template description', () => {
+      const template = dbService.createMixTemplate(
+        userId,
+        'Test Template',
+        'Original description',
+        'custom',
+        { trackCount: 50 }
+      );
 
-    expect(result.trackCount).toBe(0);
-    expect(result.trackKeys).toEqual([]);
+      dbService.updateMixTemplate(template.id, {
+        description: 'Updated description'
+      });
+
+      const updated = dbService.getMixTemplateById(template.id);
+      expect(updated!.description).toBe('Updated description');
+      expect(updated!.name).toBe('Test Template'); // Unchanged
+    });
+
+    it('should update template configuration', () => {
+      const originalConfig = {
+        mixType: 'custom',
+        trackCount: 50,
+        customRules: { includeGenres: ['Rock'] }
+      };
+
+      const template = dbService.createMixTemplate(
+        userId,
+        'Test Template',
+        null,
+        'custom',
+        originalConfig
+      );
+
+      const newConfig = {
+        mixType: 'custom',
+        trackCount: 100,
+        customRules: { includeGenres: ['Rock', 'Alternative'], minRating: 8 }
+      };
+
+      dbService.updateMixTemplate(template.id, {
+        configuration: newConfig
+      });
+
+      const updated = dbService.getMixTemplateById(template.id);
+      expect(updated!.configuration.trackCount).toBe(100);
+      expect(updated!.configuration.customRules.includeGenres).toHaveLength(2);
+      expect(updated!.configuration.customRules.minRating).toBe(8);
+    });
+
+    it('should update multiple fields at once', () => {
+      const template = dbService.createMixTemplate(
+        userId,
+        'Original Name',
+        'Original description',
+        'custom',
+        { trackCount: 50 }
+      );
+
+      dbService.updateMixTemplate(template.id, {
+        name: 'New Name',
+        description: 'New description',
+        configuration: { trackCount: 75, customRules: {} }
+      });
+
+      const updated = dbService.getMixTemplateById(template.id);
+      expect(updated!.name).toBe('New Name');
+      expect(updated!.description).toBe('New description');
+      expect(updated!.configuration.trackCount).toBe(75);
+    });
   });
 
-  /**
-   * Test generateAllMixes
-   */
-  test('should generate all mix types at once', async () => {
-    const settings: MixSettings = {
-      weeklyMix: { topArtists: 2, tracksPerArtist: 5 },
-      dailyMix: { recentTracks: 5, relatedTracks: 5, rediscoveryTracks: 5, rediscoveryDays: 30 },
-      timeCapsule: { trackCount: 20, daysAgo: 90, maxPerArtist: 3 },
-      newMusic: { albumCount: 5, tracksPerAlbum: 3 }
-    };
+  describe('Delete Template Workflow', () => {
+    it('should delete a template', () => {
+      const template = dbService.createMixTemplate(
+        userId,
+        'Template to Delete',
+        null,
+        'custom',
+        { trackCount: 50 }
+      );
 
-    // Mock all required methods
-    const mockGetRecentTracks = jest.fn().mockResolvedValue([
-      { ratingKey: '1', grandparentTitle: 'Artist A', title: 'Track 1' },
-      { ratingKey: '2', grandparentTitle: 'Artist B', title: 'Track 2' }
-    ]);
-    const mockSearchArtist = jest.fn().mockResolvedValue({ ratingKey: 'artist-key' });
-    const mockGetArtistPopularTracks = jest.fn().mockResolvedValue([
-      { ratingKey: 'popular-1', title: 'Popular 1' }
-    ]);
-    const mockGetSimilarTracks = jest.fn().mockResolvedValue([
-      { ratingKey: 'similar-1', title: 'Similar 1' }
-    ]);
-    const mockGetStalePlayedTracks = jest.fn().mockResolvedValue([
-      { ratingKey: 'stale-1', grandparentTitle: 'Artist C', title: 'Stale 1' }
-    ]);
-    const mockGetRecentlyAddedAlbums = jest.fn().mockResolvedValue([
-      { ratingKey: 'album-1', title: 'Album 1' }
-    ]);
-    const mockGetAlbumTracks = jest.fn().mockResolvedValue([
-      { ratingKey: 'album-1-track-1', title: 'Track 1' }
-    ]);
+      dbService.deleteMixTemplate(template.id);
 
-    (PlexClient as jest.MockedClass<typeof PlexClient>).mockImplementation(() => ({
-      getRecentTracks: mockGetRecentTracks,
-      searchArtist: mockSearchArtist,
-      getArtistPopularTracks: mockGetArtistPopularTracks,
-      getSimilarTracks: mockGetSimilarTracks,
-      getStalePlayedTracks: mockGetStalePlayedTracks,
-      getRecentlyAddedAlbums: mockGetRecentlyAddedAlbums,
-      getAlbumTracks: mockGetAlbumTracks
-    } as any));
+      const deleted = dbService.getMixTemplateById(template.id);
+      expect(deleted).toBeNull();
+    });
 
-    const results = await mixService.generateAllMixes(
-      mockServerUrl,
-      mockToken,
-      mockLibraryId,
-      settings
-    );
+    it('should not affect other templates when deleting one', () => {
+      const template1 = dbService.createMixTemplate(userId, 'Template 1', null, 'custom', { trackCount: 50 });
+      const template2 = dbService.createMixTemplate(userId, 'Template 2', null, 'custom', { trackCount: 50 });
+      const template3 = dbService.createMixTemplate(userId, 'Template 3', null, 'custom', { trackCount: 50 });
 
-    // Verify all mix types were generated
-    expect(results).toHaveProperty('weekly');
-    expect(results).toHaveProperty('daily');
-    expect(results).toHaveProperty('timeCapsule');
-    expect(results).toHaveProperty('newMusic');
+      dbService.deleteMixTemplate(template2.id);
 
-    // Verify each result has the correct structure
-    expect(results.weekly).toHaveProperty('trackKeys');
-    expect(results.weekly).toHaveProperty('trackCount');
-    expect(results.daily).toHaveProperty('trackKeys');
-    expect(results.daily).toHaveProperty('trackCount');
-    expect(results.timeCapsule).toHaveProperty('trackKeys');
-    expect(results.timeCapsule).toHaveProperty('trackCount');
-    expect(results.newMusic).toHaveProperty('trackKeys');
-    expect(results.newMusic).toHaveProperty('trackCount');
+      const remaining = dbService.getMixTemplates(userId);
+      expect(remaining).toHaveLength(2);
+      expect(remaining.map(t => t.id)).toContain(template1.id);
+      expect(remaining.map(t => t.id)).toContain(template3.id);
+      expect(remaining.map(t => t.id)).not.toContain(template2.id);
+    });
+  });
+
+  describe('Quick Generate Workflow', () => {
+    it('should update template usage statistics after generation', () => {
+      const template = dbService.createMixTemplate(
+        userId,
+        'Test Mix',
+        null,
+        'custom',
+        { trackCount: 50 }
+      );
+
+      expect(template.use_count).toBe(0);
+      expect(template.last_used_at).toBeUndefined();
+
+      // Simulate usage
+      dbService.updateMixTemplateUsage(template.id);
+
+      const updated = dbService.getMixTemplateById(template.id);
+      expect(updated!.use_count).toBe(1);
+      expect(updated!.last_used_at).toBeDefined();
+      expect(updated!.last_used_at).toBeGreaterThan(0);
+    });
+
+    it('should increment use count on multiple generations', () => {
+      const template = dbService.createMixTemplate(
+        userId,
+        'Test Mix',
+        null,
+        'custom',
+        { trackCount: 50 }
+      );
+
+      dbService.updateMixTemplateUsage(template.id);
+      dbService.updateMixTemplateUsage(template.id);
+      dbService.updateMixTemplateUsage(template.id);
+
+      const updated = dbService.getMixTemplateById(template.id);
+      expect(updated!.use_count).toBe(3);
+    });
+  });
+
+  describe('Templates with Missing Plex Items', () => {
+    it('should preserve template even when all items are missing', () => {
+      const configuration = {
+        mixType: 'artist',
+        trackCount: 50,
+        artistIds: ['missing-1', 'missing-2', 'missing-3']
+      };
+
+      const template = dbService.createMixTemplate(
+        userId,
+        'All Missing Artists',
+        'This template has artists that no longer exist',
+        'artist',
+        configuration
+      );
+
+      // Template should still be saved
+      const saved = dbService.getMixTemplateById(template.id);
+      expect(saved).not.toBeNull();
+      expect(saved!.configuration.artistIds).toHaveLength(3);
+    });
+
+    it('should handle genre template with non-existent genres', () => {
+      const configuration = {
+        mixType: 'genre',
+        trackCount: 50,
+        genres: ['Rock', 'NonExistentGenre', 'Jazz']
+      };
+
+      const template = dbService.createMixTemplate(
+        userId,
+        'Genre Mix',
+        null,
+        'genre',
+        configuration
+      );
+
+      // Verify template was saved with all genres
+      const saved = dbService.getMixTemplateById(template.id);
+      expect(saved!.configuration.genres).toHaveLength(3);
+      expect(saved!.configuration.genres).toContain('NonExistentGenre');
+    });
+  });
+
+  describe('Template Persistence', () => {
+    it('should persist templates across database sessions', () => {
+      const configuration = {
+        mixType: 'custom',
+        trackCount: 50,
+        customRules: { includeGenres: ['Rock'] }
+      };
+
+      const template = dbService.createMixTemplate(
+        userId,
+        'Persistent Template',
+        'Should survive database restart',
+        'custom',
+        configuration
+      );
+
+      // Create new database service instance (simulating restart)
+      const newDbService = new DatabaseService(db);
+      const loaded = newDbService.getMixTemplateById(template.id);
+
+      expect(loaded).not.toBeNull();
+      expect(loaded!.name).toBe('Persistent Template');
+      expect(loaded!.configuration).toEqual(configuration);
+    });
+
+    it('should maintain template relationships after user operations', () => {
+      const template1 = dbService.createMixTemplate(userId, 'Template 1', null, 'custom', { trackCount: 50 });
+      const template2 = dbService.createMixTemplate(userId, 'Template 2', null, 'custom', { trackCount: 50 });
+
+      // Update one template
+      dbService.updateMixTemplate(template1.id, { name: 'Updated Template 1' });
+
+      // Both templates should still exist
+      const templates = dbService.getMixTemplates(userId);
+      expect(templates).toHaveLength(2);
+      expect(templates.find(t => t.id === template1.id)!.name).toBe('Updated Template 1');
+      expect(templates.find(t => t.id === template2.id)!.name).toBe('Template 2');
+    });
+  });
+
+  describe('Complex Configuration Scenarios', () => {
+    it('should handle custom mix with all filter types', () => {
+      const configuration = {
+        mixType: 'custom',
+        trackCount: 100,
+        sortBy: 'rating',
+        sortDirection: 'desc',
+        customRules: {
+          playedInLastDays: 7,
+          notPlayedInLastDays: 30,
+          addedInLastDays: 90,
+          yearRange: { min: 1990, max: 2020 },
+          includeGenres: ['Rock', 'Alternative', 'Indie'],
+          excludeGenres: ['Country', 'Pop'],
+          minRating: 8,
+          maxRating: 10,
+          includeUnplayed: false
+        }
+      };
+
+      const template = dbService.createMixTemplate(
+        userId,
+        'Complex Custom Mix',
+        'Uses all available filters',
+        'custom',
+        configuration
+      );
+
+      const saved = dbService.getMixTemplateById(template.id);
+      expect(saved!.configuration.customRules.playedInLastDays).toBe(7);
+      expect(saved!.configuration.customRules.notPlayedInLastDays).toBe(30);
+      expect(saved!.configuration.customRules.addedInLastDays).toBe(90);
+      expect(saved!.configuration.customRules.yearRange).toEqual({ min: 1990, max: 2020 });
+      expect(saved!.configuration.customRules.includeGenres).toHaveLength(3);
+      expect(saved!.configuration.customRules.excludeGenres).toHaveLength(2);
+      expect(saved!.configuration.customRules.minRating).toBe(8);
+      expect(saved!.configuration.customRules.maxRating).toBe(10);
+      expect(saved!.configuration.customRules.includeUnplayed).toBe(false);
+    });
+
+    it('should handle artist mix with advanced options', () => {
+      const configuration = {
+        mixType: 'artist',
+        trackCount: 60,
+        artistIds: ['artist-1', 'artist-2', 'artist-3', 'artist-4', 'artist-5'],
+        maxTracksPerArtist: 12,
+        allowDuplicateArtists: true,
+        sortBy: 'playCount',
+        sortDirection: 'desc'
+      };
+
+      const template = dbService.createMixTemplate(
+        userId,
+        'Top Artists Mix',
+        'Most played tracks from favorite artists',
+        'artist',
+        configuration
+      );
+
+      const saved = dbService.getMixTemplateById(template.id);
+      expect(saved!.configuration.artistIds).toHaveLength(5);
+      expect(saved!.configuration.maxTracksPerArtist).toBe(12);
+      expect(saved!.configuration.allowDuplicateArtists).toBe(true);
+      expect(saved!.configuration.sortBy).toBe('playCount');
+    });
   });
 });

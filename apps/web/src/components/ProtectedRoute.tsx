@@ -16,12 +16,17 @@ export const ProtectedRoute: FC<ProtectedRouteProps> = ({ children }) => {
     return (
       <div style={{
         display: 'flex',
+        flexDirection: 'column',
         justifyContent: 'center',
         alignItems: 'center',
         minHeight: '100vh',
         color: 'var(--text-secondary)',
+        gap: '1rem',
       }}>
-        Loading...
+        <div>Loading...</div>
+        <div style={{ fontSize: '0.875rem', opacity: 0.7 }}>
+          {isLoading ? 'Checking authentication...' : 'Loading app data...'}
+        </div>
       </div>
     );
   }
