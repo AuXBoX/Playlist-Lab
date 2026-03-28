@@ -151,7 +151,41 @@ router.post('/retry', requireAuth, async (req: Request, res: Response, next: Nex
               continue;
             }
           } else {
+            // Add track to playlist (will be added at the end)
             await plexService.addToPlaylist(playlist.plex_playlist_id, [trackUri]);
+            
+            // If we have position information, move the track to its original position
+            if (original.after_track_key) {
+              try {
+                // Get the playlist tracks to find the newly added track's playlistItemID
+                const playlistTracks = await plexService.getPlaylistTracks(playlist.plex_playlist_id);
+                
+                // Find the newly added track (it will be at the end)
+                const newTrack = playlistTracks.find(t => t.ratingKey === matched.plexRatingKey);
+                
+                if (newTrack && newTrack.playlistItemID) {
+                  // Move the track to its original position (after the specified track)
+                  await plexService.movePlaylistItem(
+                    playlist.plex_playlist_id,
+                    newTrack.playlistItemID.toString(),
+                    original.after_track_key
+                  );
+                  
+                  logger.info('Moved track to original position', {
+                    playlistId: playlist.plex_playlist_id,
+                    trackTitle: original.title,
+                    afterTrackKey: original.after_track_key
+                  });
+                }
+              } catch (moveErr: any) {
+                // Non-fatal - track is still in playlist, just not at original position
+                logger.warn('Failed to move track to original position', {
+                  error: moveErr.message,
+                  trackTitle: original.title,
+                  playlistId: playlist.plex_playlist_id
+                });
+              }
+            }
           }
 
           // Remove from missing tracks
