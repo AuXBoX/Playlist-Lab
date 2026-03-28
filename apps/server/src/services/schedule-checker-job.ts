@@ -148,47 +148,86 @@ async function executePlaylistRefreshSchedules(db: DatabaseService): Promise<{ e
       }
 
       // Create new playlist with refreshed tracks
-      const trackUris = result.matched.filter((t: any) => t.matched).map((t: any) => t.plexRatingKey!);
+      // Filter out tracks without valid plexRatingKey and build proper URIs
+      const matchedWithKeys = result.matched.filter((t: any) => t.matched && t.plexRatingKey);
+      
+      // Get server client ID for building track URIs
+      const serverClientId = server.server_client_id || 'playlist-lab-server';
+      const trackUris = matchedWithKeys.map((t: any) => 
+        `server://${serverClientId}/com.plexapp.plugins.library/library/metadata/${t.plexRatingKey}`
+      );
+      
+      logger.info('Creating playlist with matched tracks', {
+        scheduleId: schedule.id,
+        totalMatched: result.matched.filter((t: any) => t.matched).length,
+        validTrackUris: trackUris.length,
+        playlistName,
+        sampleUri: trackUris[0]
+      });
+      
       const newPlaylist = await plex.createPlaylist(
         playlistName,
         server.library_id || '',
         trackUris
       );
 
-      // Update playlist record if this is a regular playlist refresh
-      if (schedule.playlist_id) {
-        db.updatePlaylist(schedule.playlist_id, {
+      // Get or create playlist record in database
+      let playlistDbId = schedule.playlist_id;
+      
+      if (playlistDbId) {
+        // Update existing playlist record
+        db.updatePlaylist(playlistDbId, {
           plex_playlist_id: newPlaylist.ratingKey,
           updated_at: Math.floor(Date.now() / 1000)
         });
+      } else {
+        // For chart imports or new playlists, create a database record
+        const existingPlaylist = db.getPlaylistByPlexId(newPlaylist.ratingKey);
+        if (existingPlaylist) {
+          playlistDbId = existingPlaylist.id;
+        } else {
+          // Create new playlist record
+          const createdPlaylist = db.createPlaylist(
+            schedule.user_id,
+            newPlaylist.ratingKey,
+            playlistName,
+            isChartImport ? config.chartSource : 'plex',
+            isChartImport ? config.chartUrl : undefined
+          );
+          playlistDbId = createdPlaylist.id;
+          
+          logger.info('Created playlist record for scheduled import', {
+            scheduleId: schedule.id,
+            playlistId: playlistDbId,
+            playlistName,
+            isChartImport
+          });
+        }
       }
 
       // Save any unmatched tracks to missing_tracks
-      if (result.unmatched && result.unmatched.length > 0) {
-        const playlistDbId = schedule.playlist_id || db.getPlaylistByPlexId(newPlaylist.ratingKey)?.id;
-        if (playlistDbId) {
-          const runDate = new Date().toLocaleDateString('en-GB');
-          const missingSource = `Scheduled import – ${runDate}`;
+      if (result.unmatched && result.unmatched.length > 0 && playlistDbId) {
+        const runDate = new Date().toLocaleDateString('en-GB');
+        const missingSource = `Scheduled import – ${runDate}`;
 
-          // Clear old missing tracks for this playlist before adding new ones
-          db.clearPlaylistMissingTracks(playlistDbId);
+        // Clear old missing tracks for this playlist before adding new ones
+        db.clearPlaylistMissingTracks(playlistDbId);
 
-          const missingTracks = result.unmatched.map((t: any, i: number) => ({
-            title: t.title || 'Unknown',
-            artist: t.artist || 'Unknown',
-            album: t.album,
-            position: i + 1,
-            source: missingSource,
-          }));
+        const missingTracks = result.unmatched.map((t: any, i: number) => ({
+          title: t.title || 'Unknown',
+          artist: t.artist || 'Unknown',
+          album: t.album,
+          position: i + 1,
+          source: missingSource,
+        }));
 
-          db.addMissingTracks(schedule.user_id, playlistDbId, missingTracks);
+        db.addMissingTracks(schedule.user_id, playlistDbId, missingTracks);
 
-          logger.info('Saved missing tracks from scheduled import', {
-            scheduleId: schedule.id,
-            playlistId: playlistDbId,
-            missingCount: missingTracks.length,
-          });
-        }
+        logger.info('Saved missing tracks from scheduled import', {
+          scheduleId: schedule.id,
+          playlistId: playlistDbId,
+          missingCount: missingTracks.length,
+        });
       }
 
       // Update schedule last_run

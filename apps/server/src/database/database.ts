@@ -444,54 +444,79 @@ export class DatabaseService {
     return allSchedules.filter(schedule => {
       const config = schedule.config ? JSON.parse(schedule.config as any) : {};
       
-      // Check if we're at the scheduled time (if specified)
-      if (config.run_time) {
-        const [scheduleHour, scheduleMinute] = (config.run_time as string).split(':').map(Number);
-        
-        // Only run if we're within the scheduled hour and haven't run in the last 50 minutes
-        // This prevents multiple runs within the same hour
-        if (currentHour !== scheduleHour) {
-          return false;
-        }
-        
-        // If we have a specific minute, check if we're within 10 minutes of it
-        if (scheduleMinute !== undefined) {
-          const minuteDiff = Math.abs(currentMinute - scheduleMinute);
-          if (minuteDiff > 10) {
-            return false;
-          }
-        }
-        
-        // Check if we already ran in the last 50 minutes
-        if (schedule.last_run && (now - schedule.last_run) < 3000) {
-          return false;
-        }
-      }
-      
       // If no last_run, check if we've passed the start date
       if (!schedule.last_run) {
         const startDate = new Date(schedule.start_date + 'T00:00:00');
         if (currentDate < startDate) {
           return false; // Not yet time to start
         }
-        return true; // First run
+        // First run - check if we're at or past the scheduled time
+        if (config.run_time) {
+          const [scheduleHour, scheduleMinute] = (config.run_time as string).split(':').map(Number);
+          const scheduledTimeToday = new Date(currentDate);
+          scheduledTimeToday.setHours(scheduleHour, scheduleMinute, 0, 0);
+          
+          if (currentDate >= scheduledTimeToday) {
+            return true; // First run, and we're past the scheduled time today
+          }
+          return false; // First run, but not yet time today
+        }
+        return true; // First run, no specific time set
       }
       
       // Check if enough time has passed based on frequency
       const timeSinceLastRun = now - schedule.last_run;
+      let frequencyMet = false;
       
       switch (schedule.frequency) {
         case 'daily':
-          return timeSinceLastRun >= 86400; // 24 hours
+          frequencyMet = timeSinceLastRun >= 86400; // 24 hours
+          break;
         case 'weekly':
-          return timeSinceLastRun >= 604800; // 7 days
+          frequencyMet = timeSinceLastRun >= 604800; // 7 days
+          break;
         case 'fortnightly':
-          return timeSinceLastRun >= 1209600; // 14 days
+          frequencyMet = timeSinceLastRun >= 1209600; // 14 days
+          break;
         case 'monthly':
-          return timeSinceLastRun >= 2592000; // 30 days
+          frequencyMet = timeSinceLastRun >= 2592000; // 30 days
+          break;
         default:
           return false;
       }
+      
+      // If frequency requirement not met, don't run
+      if (!frequencyMet) {
+        return false;
+      }
+      
+      // Frequency requirement is met, now check if we're at the scheduled time (if specified)
+      if (config.run_time) {
+        const [scheduleHour, scheduleMinute] = (config.run_time as string).split(':').map(Number);
+        
+        // Check if we're at or past the scheduled time today
+        const lastRunDate = new Date(schedule.last_run * 1000);
+        const scheduledTimeToday = new Date(currentDate);
+        scheduledTimeToday.setHours(scheduleHour, scheduleMinute, 0, 0);
+        
+        // If last run was before today's scheduled time, and we're now at or past it, run
+        if (lastRunDate < scheduledTimeToday && currentDate >= scheduledTimeToday) {
+          return true;
+        }
+        
+        // Also check if we're within the scheduled hour and close to the minute (for real-time execution)
+        if (currentHour === scheduleHour) {
+          const minuteDiff = Math.abs(currentMinute - scheduleMinute);
+          if (minuteDiff <= 10) {
+            return true;
+          }
+        }
+        
+        return false; // Frequency met but not at scheduled time yet
+      }
+      
+      // No specific time set, just run based on frequency
+      return true;
     });
   }
 

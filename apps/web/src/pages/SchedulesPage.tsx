@@ -14,7 +14,13 @@ export const SchedulesPage: FC = () => {
   const [formData, setFormData] = useState({
     scheduleType: 'playlist_refresh' as 'playlist_refresh' | 'mix_generation',
     frequency: 'weekly' as 'daily' | 'weekly' | 'fortnightly' | 'monthly',
-    startDate: new Date().toISOString().split('T')[0],
+    startDate: (() => {
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      const day = String(today.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    })(),
     runTime: '',
     playlistId: '',
     config: {} as any,
@@ -24,6 +30,7 @@ export const SchedulesPage: FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [recentExecutions, setRecentExecutions] = useState<any[]>([]);
   const [isLoadingExecutions, setIsLoadingExecutions] = useState(false);
+  const [previousRunningCount, setPreviousRunningCount] = useState(0);
 
   // Load recent executions on mount
   useEffect(() => {
@@ -42,12 +49,31 @@ export const SchedulesPage: FC = () => {
     fetchRecentExecutions();
   }, [apiClient]);
 
-  // Poll for running executions
+  // Poll for running executions and trigger refresh on state changes
   useEffect(() => {
     const fetchRunningExecutions = async () => {
       try {
         const response = await apiClient.getRunningExecutions();
-        setRunningExecutions(response.executions || []);
+        const currentRunning = response.executions || [];
+        setRunningExecutions(currentRunning);
+        
+        const currentCount = currentRunning.length;
+        
+        // Trigger refresh when:
+        // 1. A schedule starts (count increases)
+        // 2. A schedule completes (count decreases)
+        if (previousRunningCount !== currentCount) {
+          console.log(`Running executions changed: ${previousRunningCount} -> ${currentCount}`);
+          
+          // Refresh schedules to update last_run times
+          await refreshSchedules();
+          
+          // Refresh recent executions to show completed runs
+          const execResponse = await apiClient.getRecentExecutions(20);
+          setRecentExecutions(execResponse.executions || []);
+          
+          setPreviousRunningCount(currentCount);
+        }
       } catch (err) {
         console.error('Failed to fetch running executions:', err);
       }
@@ -57,7 +83,7 @@ export const SchedulesPage: FC = () => {
     const interval = setInterval(fetchRunningExecutions, 10000); // Poll every 10 seconds
 
     return () => clearInterval(interval);
-  }, [apiClient]);
+  }, [apiClient, refreshSchedules, previousRunningCount]);
 
   // Handle URL parameters for pre-selecting playlist or mix type
   useEffect(() => {
@@ -215,10 +241,16 @@ export const SchedulesPage: FC = () => {
   };
 
   const resetForm = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
+    
     setFormData({
       scheduleType: 'playlist_refresh',
       frequency: 'weekly',
-      startDate: new Date().toISOString().split('T')[0],
+      startDate: todayStr,
       runTime: '',
       playlistId: '',
       config: {} as any,
@@ -497,8 +529,7 @@ export const SchedulesPage: FC = () => {
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
                   Run Time (optional)
                 </label>
-                <input
-                  type="time"
+                <select
                   value={formData.runTime}
                   onChange={(e) => setFormData({ ...formData, runTime: e.target.value })}
                   style={{
@@ -509,9 +540,17 @@ export const SchedulesPage: FC = () => {
                     backgroundColor: 'var(--surface)',
                     color: 'var(--text-primary)',
                   }}
-                />
+                >
+                  <option value="">Any time (next 10-minute check)</option>
+                  {Array.from({ length: 144 }, (_, i) => {
+                    const hour = Math.floor(i / 6);
+                    const minute = (i % 6) * 10;
+                    const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                    return <option key={timeStr} value={timeStr}>{timeStr}</option>;
+                  })}
+                </select>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                  Leave blank to run at the next hourly check
+                  Schedules are checked every 10 minutes
                 </div>
               </div>
             </div>

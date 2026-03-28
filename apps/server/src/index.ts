@@ -334,6 +334,18 @@ app.get('/api/version', (_req: Request, res: Response) => {
   res.json({ version: APP_VERSION });
 });
 
+// Debug endpoint to check job status
+app.get('/api/debug/jobs', (_req: Request, res: Response) => {
+  const jobsEnabled = NODE_ENV === 'production' || process.env.ENABLE_JOBS === 'true';
+  res.json({
+    nodeEnv: NODE_ENV,
+    enableJobsEnv: process.env.ENABLE_JOBS,
+    jobsEnabled,
+    jobsRunning: jobsEnabled,
+    scheduleCheckerEnabled: process.env.ENABLE_SCHEDULE_CHECKER !== 'false',
+  });
+});
+
 // Check for updates endpoint
 app.get('/api/update/check', async (_req: Request, res: Response): Promise<void> => {
   try {
@@ -646,7 +658,7 @@ jobScheduler.registerJob({
 
 jobScheduler.registerJob({
   name: 'schedule-checker',
-  schedule: '0 * * * *', // Every hour
+  schedule: '0,10,20,30,40,50 * * * *', // At :00, :10, :20, :30, :40, :50 of every hour
   handler: async () => {
     await runScheduleCheckerJob(dbService);
   },

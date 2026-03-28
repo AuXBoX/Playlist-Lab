@@ -36,7 +36,13 @@ export const GenerateMixesPage: FC = () => {
   const [templateListKey, setTemplateListKey] = useState(0);
   const [scheduleTemplate, setScheduleTemplate] = useState<MixTemplate | null>(null);
   const [scheduleFrequency, setScheduleFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
-  const [scheduleStartDate, setScheduleStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [scheduleStartDate, setScheduleStartDate] = useState<string>(() => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
   const [scheduleRunTime, setScheduleRunTime] = useState<string>('09:00');
   const [isCreatingSchedule, setIsCreatingSchedule] = useState(false);
   const [scheduleQuickMix, setScheduleQuickMix] = useState<{ mixType: QuickMixType; settings: any } | null>(null);
@@ -945,8 +951,7 @@ export const GenerateMixesPage: FC = () => {
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
                 Run Time
               </label>
-              <input
-                type="time"
+              <select
                 value={scheduleRunTime}
                 onChange={(e) => setScheduleRunTime(e.target.value)}
                 style={{
@@ -958,9 +963,16 @@ export const GenerateMixesPage: FC = () => {
                   color: 'var(--text-primary)',
                   fontSize: '1rem',
                 }}
-              />
+              >
+                {Array.from({ length: 144 }, (_, i) => {
+                  const hour = Math.floor(i / 6);
+                  const minute = (i % 6) * 10;
+                  const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                  return <option key={timeStr} value={timeStr}>{timeStr}</option>;
+                })}
+              </select>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                Time of day to run the schedule
+                Schedules are checked every 10 minutes
               </div>
             </div>
 
@@ -1089,8 +1101,7 @@ export const GenerateMixesPage: FC = () => {
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
                 Run Time
               </label>
-              <input
-                type="time"
+              <select
                 value={scheduleRunTime}
                 onChange={(e) => setScheduleRunTime(e.target.value)}
                 style={{
@@ -1102,9 +1113,16 @@ export const GenerateMixesPage: FC = () => {
                   color: 'var(--text-primary)',
                   fontSize: '1rem',
                 }}
-              />
+              >
+                {Array.from({ length: 144 }, (_, i) => {
+                  const hour = Math.floor(i / 6);
+                  const minute = (i % 6) * 10;
+                  const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                  return <option key={timeStr} value={timeStr}>{timeStr}</option>;
+                })}
+              </select>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                Time of day to run the schedule
+                Schedules are checked every 10 minutes
               </div>
             </div>
 

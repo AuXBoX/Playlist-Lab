@@ -143,7 +143,7 @@ export const MissingTracksPage: FC = () => {
     const csv = [
       ['Playlist', 'Title', 'Artist', 'Album', 'Source', 'Added At'],
       ...missingTracks.map(track => [
-        `Playlist ${track.playlistId}`,
+        (track as any).playlistName || `Playlist ${track.playlistId}`,
         track.title,
         track.artist,
         track.album || '',

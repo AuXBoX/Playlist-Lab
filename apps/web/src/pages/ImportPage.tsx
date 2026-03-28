@@ -43,7 +43,13 @@ export const ImportPage: FC = () => {
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [schedulePlaylist, setSchedulePlaylist] = useState<PopularPlaylist | null>(null);
   const [scheduleFrequency, setScheduleFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly' | 'custom'>('daily');
-  const [scheduleStartDate, setScheduleStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [scheduleStartDate, setScheduleStartDate] = useState<string>(() => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
   const [schedulePlaylistName, setSchedulePlaylistName] = useState<string>('');
   const [scheduleOverwriteExisting, setScheduleOverwriteExisting] = useState<boolean>(false);
   const [scheduleOverwriteCover, setScheduleOverwriteCover] = useState<boolean>(false);
@@ -1209,7 +1215,6 @@ export const ImportPage: FC = () => {
           schedule_type: 'playlist_refresh',
           frequency: scheduleFrequency,
           start_date: scheduleStartDate,
-          run_time: scheduleRunTime,
           config: {
             chartName: schedulePlaylist.name,
             chartSource: activeSource,
@@ -1218,6 +1223,7 @@ export const ImportPage: FC = () => {
             playlistName: schedulePlaylistName || schedulePlaylist.name,
             overwriteExisting: scheduleOverwriteExisting,
             overwriteCover: scheduleOverwriteCover,
+            run_time: scheduleRunTime,
           },
         }),
       });
@@ -3573,8 +3579,7 @@ export const ImportPage: FC = () => {
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
                 Run Time
               </label>
-              <input
-                type="time"
+              <select
                 value={scheduleRunTime}
                 onChange={(e) => setScheduleRunTime(e.target.value)}
                 style={{
@@ -3586,9 +3591,16 @@ export const ImportPage: FC = () => {
                   color: 'var(--text-primary)',
                   fontSize: '1rem',
                 }}
-              />
+              >
+                {Array.from({ length: 144 }, (_, i) => {
+                  const hour = Math.floor(i / 6);
+                  const minute = (i % 6) * 10;
+                  const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                  return <option key={timeStr} value={timeStr}>{timeStr}</option>;
+                })}
+              </select>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                Time of day to run the schedule
+                Schedules are checked every 10 minutes
               </div>
             </div>
 
