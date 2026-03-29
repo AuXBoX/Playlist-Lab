@@ -9,6 +9,8 @@
  */
 
 import { PlexClient, PlexTrack } from './plex';
+import { LastFmService } from './lastfm';
+import { logger } from '../utils/logger';
 
 export interface MixSettings {
   weeklyMix: {
@@ -318,7 +320,9 @@ export class MixService {
       minPlayCount?: number;
       maxPlayCount?: number;
       popularTracksOnly?: boolean; // Only include tracks from Plex's "Popular Tracks" section
+      popularTracksPerArtist?: number; // Number of popular tracks to fetch per artist
       popularArtistsOnly?: boolean; // Only include tracks from popular/well-known artists
+      maxPopularArtists?: number; // Maximum number of popular artists to include (default: 20)
       
       // Track characteristics
       minDuration?: number; // in seconds
@@ -365,43 +369,151 @@ export class MixService {
 
     let tracks: PlexTrack[] = [];
 
-    // If popularTracksOnly is requested, get popular tracks from all artists
-    if (settings.popularTracksOnly) {
+    // Auto-enable popular tracks optimization if year filter is present
+    // This prevents timeouts on large libraries when filtering by year
+    const hasYearFilter = settings.releasedAfterYear || settings.releasedBeforeYear;
+    const hasArtistFilter = settings.artistNames && settings.artistNames.length > 0;
+    const shouldUsePopularTracksOptimization = settings.popularTracksOnly || (hasYearFilter && !settings.popularTracksOnly);
+    
+    if (shouldUsePopularTracksOptimization) {
+      // Log if we're auto-enabling the optimization
+      if (hasYearFilter && !settings.popularTracksOnly) {
+        console.log('[Auto-Optimization] Year filter detected, using Last.fm + popular tracks approach to avoid timeout');
+      }
+    }
+
+    // If user specified specific artists, use those instead of Last.fm popular artists
+    // Artist filtering should always take precedence
+    if (hasArtistFilter && shouldUsePopularTracksOptimization) {
       progressEmitter?.emit('progress', {
         type: 'progress',
         stage: 'fetching_artists',
-        message: 'Fetching artists from library...',
+        message: `Fetching tracks from ${settings.artistNames!.length} specified artists...`,
         progress: 10
       });
       
-      // Get all artists from the library
-      const allArtists = await plex.getTracksWithAdvancedFilters(libraryId, {
-        sortBy: 'random',
-        sortDirection: 'desc',
-        limit: 1000 // Get a large sample
-      });
-
-      // Extract unique artists
-      const artistKeys = new Set<string>();
-      allArtists.forEach(track => {
-        if (track.grandparentRatingKey) {
-          artistKeys.add(track.grandparentRatingKey);
+      const allPopularTracks: PlexTrack[] = [];
+      const popularTracksPerArtist = settings.popularTracksPerArtist || Math.max(3, Math.ceil(settings.trackCount / settings.artistNames!.length));
+      
+      let processed = 0;
+      for (const artistName of settings.artistNames!) {
+        try {
+          // Search for the artist in Plex
+          const plexArtist = await plex.searchArtist(libraryId, artistName);
+          if (!plexArtist) {
+            logger.warn('[Artist Filter] Artist not found in library', { artistName });
+            continue;
+          }
+          
+          // Get popular tracks from this artist
+          const popularTracks = await plex.getArtistPopularTracks(
+            libraryId,
+            plexArtist.ratingKey,
+            popularTracksPerArtist
+          );
+          allPopularTracks.push(...popularTracks);
+          
+          processed++;
+          progressEmitter?.emit('progress', {
+            type: 'progress',
+            stage: 'fetching_artists',
+            message: `Processed ${processed}/${settings.artistNames!.length} artists...`,
+            progress: 10 + (processed / settings.artistNames!.length) * 70
+          });
+        } catch (error) {
+          logger.warn('[Artist Filter] Failed to fetch tracks for artist', { artistName, error });
+          continue;
         }
+      }
+      
+      tracks = allPopularTracks;
+      logger.info('[Artist Filter] Fetched tracks from specified artists', {
+        artistCount: settings.artistNames!.length,
+        trackCount: tracks.length
       });
+    }
+    // If popularTracksOnly is requested OR year filter is present, use Last.fm to get popular artists
+    // This is much faster than querying Plex directly
+    else if (shouldUsePopularTracksOptimization) {
+      progressEmitter?.emit('progress', {
+        type: 'progress',
+        stage: 'fetching_artists',
+        message: 'Fetching popular artists from Last.fm...',
+        progress: 10
+      });
+      
+      // Use Last.fm to get popular artists (much faster than Plex)
+      const lastfm = new LastFmService();
+      const maxArtists = settings.maxPopularArtists || 20;
+      
+      logger.info('[Last.fm] Fetching top artists', { maxArtists });
+      const lastfmArtists = await lastfm.getTopArtists(maxArtists * 2); // Get more to account for missing matches
+      
+      if (lastfmArtists.length === 0) {
+        logger.warn('[Last.fm] No artists returned from Last.fm API');
+        throw new Error('Failed to fetch popular artists from Last.fm. Please try again.');
+      }
+      
+      logger.info('[Last.fm] Found artists', { count: lastfmArtists.length });
+      
+      progressEmitter?.emit('progress', {
+        type: 'progress',
+        stage: 'matching_artists',
+        message: `Matching ${lastfmArtists.length} popular artists in your library...`,
+        progress: 20
+      });
+      
+      // Match Last.fm artists to Plex library
+      const matchedArtistKeys = new Set<string>();
+      let matchedCount = 0;
+      
+      for (const lastfmArtist of lastfmArtists) {
+        if (matchedArtistKeys.size >= maxArtists) break;
+        
+        try {
+          const plexArtist = await plex.searchArtist(libraryId, lastfmArtist.name);
+          if (plexArtist) {
+            matchedArtistKeys.add(plexArtist.ratingKey);
+            matchedCount++;
+            
+            if (matchedCount % 5 === 0) {
+              progressEmitter?.emit('progress', {
+                type: 'progress',
+                stage: 'matching_artists',
+                message: `Matched ${matchedCount}/${lastfmArtists.length} artists...`,
+                progress: 20 + (matchedCount / lastfmArtists.length) * 20
+              });
+            }
+          }
+        } catch (error) {
+          // Skip artists that fail to match
+          continue;
+        }
+      }
+      
+      logger.info('[Last.fm] Matched artists in library', { 
+        requested: maxArtists,
+        matched: matchedArtistKeys.size,
+        total: lastfmArtists.length 
+      });
+      
+      if (matchedArtistKeys.size === 0) {
+        throw new Error('None of the popular artists from Last.fm were found in your library. Try expanding your library or adjusting filters.');
+      }
 
       progressEmitter?.emit('progress', {
         type: 'progress',
         stage: 'fetching_popular',
-        message: `Fetching popular tracks from ${artistKeys.size} artists...`,
-        progress: 30
+        message: `Fetching popular tracks from ${matchedArtistKeys.size} artists...`,
+        progress: 40
       });
 
-      // Get popular tracks from each artist
-      const popularTracksPerArtist = Math.max(3, Math.ceil(settings.trackCount / artistKeys.size));
+      // Get popular tracks from each matched artist
+      const popularTracksPerArtist = settings.popularTracksPerArtist || Math.max(3, Math.ceil(settings.trackCount / matchedArtistKeys.size));
       const allPopularTracks: PlexTrack[] = [];
 
       let processed = 0;
-      for (const artistKey of Array.from(artistKeys)) {
+      for (const artistKey of Array.from(matchedArtistKeys)) {
         try {
           const popularTracks = await plex.getArtistPopularTracks(
             libraryId,
@@ -415,8 +527,8 @@ export class MixService {
             progressEmitter?.emit('progress', {
               type: 'progress',
               stage: 'fetching_popular',
-              message: `Processed ${processed}/${artistKeys.size} artists...`,
-              progress: 30 + (processed / artistKeys.size) * 40
+              message: `Processed ${processed}/${matchedArtistKeys.size} artists...`,
+              progress: 40 + (processed / matchedArtistKeys.size) * 40
             });
           }
         } catch (error) {
@@ -426,6 +538,139 @@ export class MixService {
       }
 
       tracks = allPopularTracks;
+      
+      progressEmitter?.emit('progress', {
+        type: 'progress',
+        stage: 'applying_filters',
+        message: 'Applying additional filters...',
+        progress: 80
+      });
+      
+      // Apply additional filters to the popular tracks
+      // We can't use getTracksWithAdvancedFilters here because it would query the entire library
+      // which is what we're trying to avoid with the popular tracks optimization
+      
+      const beforeFilters = tracks.length;
+      
+      // Apply filters that aren't already handled
+      if (settings.playedInLastDays || settings.notPlayedInLastDays || settings.addedInLastDays ||
+          settings.minDuration || settings.maxDuration || settings.minTrackNumber || settings.maxTrackNumber ||
+          settings.discNumber || settings.minRating || settings.maxRating || settings.minPlayCount || 
+          settings.maxPlayCount || settings.genres || settings.excludeGenres || settings.moods || 
+          settings.excludeMoods || settings.styles || settings.excludeStyles || settings.collections || 
+          settings.labels || settings.minBitrate || settings.audioCodec || settings.minSampleRate || 
+          settings.losslessOnly) {
+        
+        const now = Math.floor(Date.now() / 1000);
+        
+        tracks = tracks.filter(track => {
+          // Time filters
+          if (settings.playedInLastDays) {
+            const daysAgo = now - (settings.playedInLastDays * 24 * 60 * 60);
+            if (!track.lastViewedAt || track.lastViewedAt < daysAgo) return false;
+          }
+          
+          if (settings.notPlayedInLastDays) {
+            const daysAgo = now - (settings.notPlayedInLastDays * 24 * 60 * 60);
+            if (track.lastViewedAt && track.lastViewedAt >= daysAgo) return false;
+          }
+          
+          if (settings.addedInLastDays) {
+            const daysAgo = now - (settings.addedInLastDays * 24 * 60 * 60);
+            if (!track.addedAt || track.addedAt < daysAgo) return false;
+          }
+          
+          // Duration filters
+          if (settings.minDuration && track.duration < settings.minDuration * 1000) return false;
+          if (settings.maxDuration && track.duration > settings.maxDuration * 1000) return false;
+          
+          // Track number filters
+          if (settings.minTrackNumber && track.index < settings.minTrackNumber) return false;
+          if (settings.maxTrackNumber && track.index > settings.maxTrackNumber) return false;
+          if (settings.discNumber && track.parentIndex !== settings.discNumber) return false;
+          
+          // Rating filters
+          if (settings.minRating && (!track.userRating || track.userRating < settings.minRating)) return false;
+          if (settings.maxRating && track.userRating && track.userRating > settings.maxRating) return false;
+          
+          // Play count filters
+          if (settings.minPlayCount && (!track.viewCount || track.viewCount < settings.minPlayCount)) return false;
+          if (settings.maxPlayCount && track.viewCount && track.viewCount > settings.maxPlayCount) return false;
+          
+          // Genre filters
+          if (settings.genres && settings.genres.length > 0) {
+            const trackGenres = track.Genre?.map((g: any) => g.tag.toLowerCase()) || [];
+            if (!settings.genres.some(g => trackGenres.includes(g.toLowerCase()))) return false;
+          }
+          
+          if (settings.excludeGenres && settings.excludeGenres.length > 0) {
+            const trackGenres = track.Genre?.map((g: any) => g.tag.toLowerCase()) || [];
+            if (settings.excludeGenres.some(g => trackGenres.includes(g.toLowerCase()))) return false;
+          }
+          
+          // Mood filters
+          if (settings.moods && settings.moods.length > 0) {
+            const trackMoods = (track as any).Mood?.map((m: any) => m.tag.toLowerCase()) || [];
+            if (!settings.moods.some(m => trackMoods.includes(m.toLowerCase()))) return false;
+          }
+          
+          if (settings.excludeMoods && settings.excludeMoods.length > 0) {
+            const trackMoods = (track as any).Mood?.map((m: any) => m.tag.toLowerCase()) || [];
+            if (settings.excludeMoods.some(m => trackMoods.includes(m.toLowerCase()))) return false;
+          }
+          
+          // Style filters
+          if (settings.styles && settings.styles.length > 0) {
+            const trackStyles = (track as any).Style?.map((s: any) => s.tag.toLowerCase()) || [];
+            if (!settings.styles.some(s => trackStyles.includes(s.toLowerCase()))) return false;
+          }
+          
+          if (settings.excludeStyles && settings.excludeStyles.length > 0) {
+            const trackStyles = (track as any).Style?.map((s: any) => s.tag.toLowerCase()) || [];
+            if (settings.excludeStyles.some(s => trackStyles.includes(s.toLowerCase()))) return false;
+          }
+          
+          // Collection filters
+          if (settings.collections && settings.collections.length > 0) {
+            const trackCollections = (track as any).Collection?.map((c: any) => c.tag.toLowerCase()) || [];
+            if (!settings.collections.some(c => trackCollections.includes(c.toLowerCase()))) return false;
+          }
+          
+          // Label filters
+          if (settings.labels && settings.labels.length > 0) {
+            const trackLabels = (track as any).Label?.map((l: any) => l.tag.toLowerCase()) || [];
+            if (!settings.labels.some(l => trackLabels.includes(l.toLowerCase()))) return false;
+          }
+          
+          // Quality filters
+          if (track.Media && track.Media.length > 0) {
+            const media = track.Media[0];
+            
+            if (settings.minBitrate && (!media.bitrate || media.bitrate < settings.minBitrate)) return false;
+            
+            if (settings.audioCodec && settings.audioCodec.length > 0) {
+              const codec = media.audioCodec?.toLowerCase() || '';
+              if (!settings.audioCodec.some(c => codec.includes(c.toLowerCase()))) return false;
+            }
+            
+            if (settings.minSampleRate && (!media.audioSampleRate || media.audioSampleRate < settings.minSampleRate)) return false;
+            
+            if (settings.losslessOnly) {
+              const codec = media.audioCodec?.toLowerCase() || '';
+              if (!['flac', 'alac', 'ape', 'wav'].some(lc => codec.includes(lc))) return false;
+            }
+          } else if (settings.minBitrate || settings.audioCodec || settings.minSampleRate || settings.losslessOnly) {
+            return false;
+          }
+          
+          return true;
+        });
+        
+        logger.info('[Filter Application] Applied filters to popular tracks', {
+          before: beforeFilters,
+          after: tracks.length
+        });
+      }
     }
     // If sonic analysis is requested, use that as the primary source
     else if (settings.sonicSeedTrackKey || settings.sonicSeedArtistKey) {
@@ -515,10 +760,13 @@ export class MixService {
     });
 
     // Apply additional filters if specified (even for sonic results)
-    if (settings.genres || settings.excludeGenres || settings.minRating || settings.minPlayCount || settings.popularArtistsOnly) {
+    // Note: If popularArtistsOnly was already handled above with popularTracksOnly, skip it here
+    const needsPopularArtistFilter = settings.popularArtistsOnly && !settings.popularTracksOnly;
+    
+    if (settings.genres || settings.excludeGenres || settings.minRating || settings.minPlayCount || needsPopularArtistFilter) {
       
-      // If popularArtistsOnly is enabled, we need to check artist popularity first
-      if (settings.popularArtistsOnly) {
+      // If popularArtistsOnly is enabled (and popularTracksOnly was not), filter by popular artists
+      if (needsPopularArtistFilter) {
         progressEmitter?.emit('progress', {
           type: 'progress',
           stage: 'filtering_artists',
@@ -616,6 +864,12 @@ export class MixService {
       message: 'Finalizing track selection...',
       progress: 85
     });
+
+    // Shuffle tracks if sortBy is random
+    if (settings.sortBy === 'random') {
+      tracks = this.shuffle(tracks);
+      logger.info('[Shuffle] Randomized track order', { trackCount: tracks.length });
+    }
 
     // Limit to requested track count
     const selectedTracks = tracks.slice(0, settings.trackCount);

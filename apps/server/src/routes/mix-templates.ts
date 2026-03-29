@@ -448,7 +448,35 @@ async function generateMixFromTemplate(
               releasedBeforeYear: config.customRules?.yearRange?.max,
               genres: config.customRules?.includeGenres,
               excludeGenres: config.customRules?.excludeGenres,
+              moods: config.customRules?.includeMoods,
+              excludeMoods: config.customRules?.excludeMoods,
+              styles: config.customRules?.includeStyles,
+              excludeStyles: config.customRules?.excludeStyles,
+              collections: config.customRules?.includeCollections,
+              labels: config.customRules?.includeLabels,
               minRating: config.customRules?.minRating,
+              maxRating: config.customRules?.maxRating,
+              minPlayCount: config.customRules?.minPlayCount,
+              maxPlayCount: config.customRules?.maxPlayCount,
+              minDuration: config.customRules?.minDuration,
+              maxDuration: config.customRules?.maxDuration,
+              minTrackNumber: config.customRules?.minTrackNumber,
+              maxTrackNumber: config.customRules?.maxTrackNumber,
+              discNumber: config.customRules?.discNumber,
+              minBitrate: config.customRules?.minBitrate,
+              audioCodec: config.customRules?.audioCodec,
+              minSampleRate: config.customRules?.minSampleRate,
+              losslessOnly: config.customRules?.losslessOnly,
+              popularTracksOnly: config.customRules?.popularTracksOnly,
+              popularTracksPerArtist: config.customRules?.popularTracksPerArtist,
+              popularArtistsOnly: config.customRules?.popularArtistsOnly,
+              maxPopularArtists: config.customRules?.maxPopularArtists,
+              sonicSeedTrackKey: config.customRules?.sonicSeedTrackKey,
+              sonicSeedArtistKey: config.customRules?.sonicSeedArtistKey,
+              sonicMaxDistance: config.customRules?.sonicMaxDistance,
+              sonicIncludeSameArtist: config.customRules?.sonicIncludeSameArtist,
+              sonicIncludeSimilarArtists: config.customRules?.sonicIncludeSimilarArtists,
+              sonicUsePopularTracks: config.customRules?.sonicUsePopularTracks,
               sortBy: config.sortBy || 'random',
               sortDirection: config.sortDirection || 'desc'
             },
@@ -1157,7 +1185,7 @@ router.post('/:id/generate', async (req: Request, res: Response, next: NextFunct
     }
 
     // Generate playlist name if not provided
-    const finalPlaylistName = playlistName || `${template.name} - ${new Date().toLocaleDateString()}`;
+    const finalPlaylistName = playlistName || template.name;
 
     // Generate mix based on template type
     const result = await generateMixFromTemplate(

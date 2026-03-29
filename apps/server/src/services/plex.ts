@@ -59,10 +59,15 @@ export interface PlexTrack {
   addedAt: number;
   updatedAt: number;
   year?: number;
+  parentYear?: number; // Album release year
   viewCount?: number;
   lastViewedAt?: number;
   userRating?: number;
   Genre?: Array<{ tag: string }>;
+  Mood?: Array<{ tag: string }>;
+  Style?: Array<{ tag: string }>;
+  Collection?: Array<{ tag: string }>;
+  Label?: Array<{ tag: string }>;
   playlistItemID?: number; // Present when track is part of a playlist
   librarySectionID?: number;
   librarySectionTitle?: string;
@@ -73,6 +78,7 @@ export interface PlexTrack {
     bitrate: number;
     audioChannels: number;
     audioCodec: string;
+    audioSampleRate?: number;
     container: string;
     Part: Array<{
       id: number;
@@ -170,7 +176,7 @@ export class PlexClient {
         'X-Plex-Platform': 'Node.js',
         'X-Plex-Container-Size': '50' // Default page size, prevents future 400 errors
       },
-      timeout: 30000 // 30 second timeout
+      timeout: 60000 // 60 second timeout for large libraries
     });
 
     // Interceptor: log outgoing URL and prevent axios from re-encoding server:// URIs
@@ -1333,12 +1339,14 @@ export class PlexClient {
       }
 
       // Release date filters
+      // Note: Year is typically stored at the album level (parentYear) not track level
+      // Use >>= and <<= operators to ensure the field exists before comparing
       if (options.releasedAfterYear) {
-        filters.push(`year>=${options.releasedAfterYear}`);
+        filters.push(`parentYear>>=${options.releasedAfterYear}`);
       }
 
       if (options.releasedBeforeYear) {
-        filters.push(`year<=${options.releasedBeforeYear}`);
+        filters.push(`parentYear<<=${options.releasedBeforeYear}`);
       }
 
       // Rating filters

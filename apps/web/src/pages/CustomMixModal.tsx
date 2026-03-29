@@ -30,7 +30,9 @@ export interface CustomMixSettings {
   minPlayCount?: number;
   maxPlayCount?: number;
   popularTracksOnly?: boolean; // Only include tracks from Plex's "Popular Tracks" section
+  popularTracksPerArtist?: number; // Number of popular tracks to fetch per artist (default: 5)
   popularArtistsOnly?: boolean; // Only include tracks from popular/well-known artists (Last.fm data)
+  maxPopularArtists?: number; // Maximum number of popular artists to include (default: 20)
   
   // Track characteristics
   minDuration?: number; // in seconds
@@ -471,6 +473,24 @@ export const CustomMixModal: FC<CustomMixModalProps> = ({ onClose, onGenerate, o
               <p className="form-hint">
                 Uses external popularity data (Last.fm, MusicBrainz) to select only the most popular tracks from each artist.
               </p>
+              {settings.popularTracksOnly && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <label className="form-label">Popular tracks per artist</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    value={settings.popularTracksPerArtist || 5}
+                    onChange={(e) => updateSetting('popularTracksPerArtist', parseInt(e.target.value) || 5)}
+                    min="1"
+                    max="50"
+                    disabled={isGenerating}
+                    placeholder="e.g., 5"
+                  />
+                  <p className="form-hint">
+                    Number of popular tracks to fetch from each artist (default: 5)
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="form-group">
@@ -487,6 +507,24 @@ export const CustomMixModal: FC<CustomMixModalProps> = ({ onClose, onGenerate, o
                 Filters to only include tracks from well-known artists based on Last.fm popularity data. 
                 Note: Plex must have fetched Last.fm metadata for your artists (requires Last.fm agent enabled in Plex settings).
               </p>
+              {settings.popularArtistsOnly && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <label className="form-label">Maximum number of popular artists</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    value={settings.maxPopularArtists || 20}
+                    onChange={(e) => updateSetting('maxPopularArtists', parseInt(e.target.value) || 20)}
+                    min="1"
+                    max="500"
+                    disabled={isGenerating}
+                    placeholder="e.g., 20"
+                  />
+                  <p className="form-hint">
+                    Maximum number of popular artists to include (default: 20)
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

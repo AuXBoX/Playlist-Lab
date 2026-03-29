@@ -546,8 +546,8 @@ export const GenerateMixesPage: FC = () => {
     };
 
     try {
-      // Generate playlist name with timestamp
-      const playlistName = `${template.name} - ${new Date().toLocaleDateString()}`;
+      // Use template name as playlist name
+      const playlistName = template.name;
       
       // Use the template generation endpoint which handles all mix types
       // and automatically updates usage statistics
