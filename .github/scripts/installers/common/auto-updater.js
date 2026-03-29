@@ -265,8 +265,13 @@ class AutoUpdater {
     }
 
     return new Promise((resolve, reject) => {
-      // Run installer with silent flag
-      const installer = spawn(installerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
+      // Run installer with silent flag and restart applications
+      const installer = spawn(installerPath, [
+        '/SILENT',
+        '/CLOSEAPPLICATIONS',
+        '/RESTARTAPPLICATIONS',
+        '/TASKS=launchnow' // Auto-launch after install
+      ], {
         detached: true,
         stdio: 'ignore'
       });

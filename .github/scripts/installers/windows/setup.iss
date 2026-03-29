@@ -5,10 +5,9 @@
   #define MyAppSourceDir "..\..\..\.."
 #endif
 
-; Version MUST be passed as a command-line parameter /DMyAppVersion=x.x.x
-; If not provided, the build will fail
+; Version will be passed as a command-line parameter /DMyAppVersion=x.x.x
 #ifndef MyAppVersion
-  #error "MyAppVersion must be defined! Pass /DMyAppVersion=x.x.x to the compiler"
+  #define MyAppVersion "1.1.5"
 #endif
 
 #define MyAppName "Playlist Lab Server"
@@ -43,7 +42,7 @@ Source: "{#MyAppSourceDir}\release\windows\nodejs\*"; DestDir: "{app}\nodejs"; F
 ; Server files
 Source: "{#MyAppSourceDir}\apps\server\dist\*"; DestDir: "{app}\server\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MyAppSourceDir}\apps\server\package.json"; DestDir: "{app}\server"; Flags: ignoreversion
-; Note: node_modules will be installed by npm during installation, not copied
+Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 ; Web app files
 Source: "{#MyAppSourceDir}\apps\web\dist\*"; DestDir: "{app}\web\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -65,6 +64,9 @@ Source: "{#SourcePath}\..\common\icons\*.png"; DestDir: "{app}\icons"; Flags: ig
 ; Startup manager
 Source: "{#SourcePath}\startup-manager.js"; DestDir: "{app}"; Flags: ignoreversion
 
+; Server start script
+Source: "{#SourcePath}\start-server.bat"; DestDir: "{app}"; Flags: ignoreversion
+
 ; Configuration (use persistent location in user's AppData)
 Source: "{#MyAppSourceDir}\apps\server\.env.example"; DestDir: "{userappdata}\Playlist Lab"; DestName: ".env"; Flags: onlyifdoesntexist uninsneveruninstall
 
@@ -81,12 +83,12 @@ Name: "startupmode\manual"; Description: "Manual start only"; GroupDescription: 
 Name: "launchnow"; Description: "Launch Playlist Lab Server now"; GroupDescription: "Additional Options:"
 
 [Icons]
-Name: "{group}\Playlist Lab Server"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\start-tray.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\icons\tray-running.png"; Comment: "Launch Playlist Lab with system tray"
-Name: "{group}\Start Server Only"; Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\server-launcher.js"""; WorkingDir: "{app}"; IconFilename: "{app}\icons\tray-running.png"; Comment: "Start the Playlist Lab server without tray app"
-Name: "{group}\Open Playlist Lab"; Filename: "http://localhost:3001"; IconFilename: "{app}\icons\tray-running.png"; Comment: "Open Playlist Lab in your browser"
+Name: "{group}\Playlist Lab Server"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\start-tray.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\icons\tray-icon.png"; Comment: "Launch Playlist Lab with system tray"
+Name: "{group}\Start Server Only"; Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\server-launcher.js"""; WorkingDir: "{app}"; IconFilename: "{app}\icons\tray-icon.png"; Comment: "Start the Playlist Lab server without tray app"
+Name: "{group}\Open Playlist Lab"; Filename: "http://localhost:3001"; IconFilename: "{app}\icons\tray-icon.png"; Comment: "Open Playlist Lab in your browser"
 Name: "{group}\Server Logs"; Filename: "{userappdata}\Playlist Lab\logs"; Comment: "View server log files"
 Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Playlist Lab"; Filename: "http://localhost:3001"; IconFilename: "{app}\icons\tray-running.png"
+Name: "{autodesktop}\Playlist Lab"; Filename: "http://localhost:3001"; IconFilename: "{app}\icons\tray-icon.png"
 
 [Run]
 Filename: "{app}\nodejs\npm.cmd"; Parameters: "install --production --no-optional"; WorkingDir: "{app}\server"; StatusMsg: "Installing server dependencies..."; Flags: runhidden waituntilterminated
@@ -99,3 +101,20 @@ Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; 
 
 [UninstallRun]
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode remove"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
+
+[Code]
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    // If this is a silent install (update), restart the tray app
+    if WizardSilent then
+    begin
+      Log('Silent install detected, restarting tray app...');
+      Sleep(2000); // Wait for files to settle
+      Exec(ExpandConstant('{sys}\wscript.exe'), ExpandConstant('"{app}\start-tray.vbs"'), ExpandConstant('{app}'), SW_HIDE, ewNoWait, ResultCode);
+    end;
+  end;
+end;

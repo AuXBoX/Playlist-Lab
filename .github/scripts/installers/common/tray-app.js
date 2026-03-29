@@ -409,26 +409,19 @@ function startTray(SysTray) {
     if (fs.existsSync(packageJsonPath)) {
       const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
       currentVersion = packageJson.version;
+      log(`Version from package.json: ${currentVersion}`);
+    } else {
+      log(`ERROR: package.json not found at ${packageJsonPath}`);
     }
-  } catch (error) {
-    console.error('Failed to read version from package.json:', error.message);
+  } catch (err) {
+    log(`ERROR: Failed to read version from package.json: ${err.message}`);
   }
   
   // FAIL if version cannot be read - don't use hardcoded fallback
   if (!currentVersion) {
-    console.error('ERROR: Could not determine current version from package.json');
-    console.error('Cannot check for updates without a valid version number');
+    log('ERROR: Could not determine current version from package.json');
+    log('Cannot check for updates without a valid version number');
     return; // Skip update check rather than using wrong version
-  }
-    if (fs.existsSync(packageJsonPath)) {
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-      currentVersion = packageJson.version;
-      log(`Version from package.json: ${currentVersion}`);
-    } else {
-      log(`package.json not found at ${packageJsonPath}, using fallback version`);
-    }
-  } catch (err) {
-    log(`Failed to read version from package.json: ${err.message}`);
   }
 
   // Initialize auto-updater
@@ -580,20 +573,23 @@ function startTray(SysTray) {
         exec(`powershell -Command "${ps}"`, async (err, stdout) => {
           if (stdout.trim() === 'Yes') {
             log('User confirmed installation');
-            notify('Installing Update', 'Starting installer...');
+            notify('Installing Update', 'Stopping server and closing application...');
             
             // Stop server before installing
-            stopServer(async () => {
-              try {
-                await updater.installUpdate(installerPath);
-                // Installer will close this app
-                setTimeout(() => process.exit(0), 3000);
-              } catch (error) {
-                log(`Installation error: ${error.message}`);
-                notify('Installation Error', `Failed to start installer: ${error.message}`);
-                isDownloadingUpdate = false;
-                refreshTray();
-              }
+            stopServer(() => {
+              // Wait longer for server to fully stop
+              setTimeout(async () => {
+                try {
+                  await updater.installUpdate(installerPath);
+                  // Installer will close this app and restart it
+                  setTimeout(() => process.exit(0), 1000);
+                } catch (error) {
+                  log(`Installation error: ${error.message}`);
+                  notify('Installation Error', `Failed to start installer: ${error.message}`);
+                  isDownloadingUpdate = false;
+                  refreshTray();
+                }
+              }, 3000); // Wait 3 seconds for server to fully stop
             });
           } else {
             log('User cancelled installation');
