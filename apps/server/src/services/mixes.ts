@@ -553,7 +553,8 @@ export class MixService {
       const beforeFilters = tracks.length;
       
       // Apply filters that aren't already handled
-      if (settings.playedInLastDays || settings.notPlayedInLastDays || settings.addedInLastDays ||
+      if (settings.releasedAfterYear || settings.releasedBeforeYear ||
+          settings.playedInLastDays || settings.notPlayedInLastDays || settings.addedInLastDays ||
           settings.minDuration || settings.maxDuration || settings.minTrackNumber || settings.maxTrackNumber ||
           settings.discNumber || settings.minRating || settings.maxRating || settings.minPlayCount || 
           settings.maxPlayCount || settings.genres || settings.excludeGenres || settings.moods || 
@@ -564,6 +565,11 @@ export class MixService {
         const now = Math.floor(Date.now() / 1000);
         
         tracks = tracks.filter(track => {
+          // Year filters - check both track year and album year (parentYear)
+          const trackYear = track.year || (track as any).parentYear;
+          if (settings.releasedAfterYear && (!trackYear || trackYear < settings.releasedAfterYear)) return false;
+          if (settings.releasedBeforeYear && (!trackYear || trackYear > settings.releasedBeforeYear)) return false;
+          
           // Time filters
           if (settings.playedInLastDays) {
             const daysAgo = now - (settings.playedInLastDays * 24 * 60 * 60);
