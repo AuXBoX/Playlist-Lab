@@ -196,11 +196,11 @@ function killByPort(port, cb) {
     `;
     exec(`powershell -Command "${ps.replace(/\n/g, ' ')}"`, (err, stdout) => {
       log(stdout.trim());
-      if (cb) setTimeout(cb, 500); // Small delay to ensure process is killed
+      if (cb) setTimeout(cb, 1000); // Increased delay to ensure process is fully killed
     });
   } else {
     exec(`lsof -ti tcp:${port} | xargs kill -9 2>/dev/null || true`, () => {
-      if (cb) setTimeout(cb, 500);
+      if (cb) setTimeout(cb, 1000);
     });
   }
 }
@@ -577,18 +577,26 @@ function startTray(SysTray) {
             
             // Stop server before installing
             stopServer(() => {
-              // Wait longer for server to fully stop
+              // Wait longer for server to fully stop, then kill all related processes
               setTimeout(async () => {
-                try {
-                  await updater.installUpdate(installerPath);
-                  // Installer will close this app and restart it
-                  setTimeout(() => process.exit(0), 1000);
-                } catch (error) {
-                  log(`Installation error: ${error.message}`);
-                  notify('Installation Error', `Failed to start installer: ${error.message}`);
-                  isDownloadingUpdate = false;
-                  refreshTray();
-                }
+                // Kill any remaining node.exe and wscript.exe processes to ensure clean install
+                log('Ensuring all processes are stopped...');
+                exec('taskkill /F /IM node.exe /T >nul 2>&1 & taskkill /F /IM wscript.exe /T >nul 2>&1', () => {
+                  // Wait a bit more after force killing
+                  setTimeout(async () => {
+                    try {
+                      log('Launching installer...');
+                      await updater.installUpdate(installerPath);
+                      // Installer will close this app and restart it
+                      setTimeout(() => process.exit(0), 1000);
+                    } catch (error) {
+                      log(`Installation error: ${error.message}`);
+                      notify('Installation Error', `Failed to start installer: ${error.message}`);
+                      isDownloadingUpdate = false;
+                      refreshTray();
+                    }
+                  }, 2000); // Wait 2 more seconds after force kill
+                });
               }, 3000); // Wait 3 seconds for server to fully stop
             });
           } else {
