@@ -722,7 +722,27 @@ export const SchedulesPage: FC = () => {
       {/* Recent Executions Section */}
       {!showCreateForm && (
         <div style={{ marginTop: '3rem' }}>
-          <h2 style={{ marginBottom: '1.5rem', fontSize: '1.25rem' }}>Recent Executions</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Recent Executions</h2>
+            {recentExecutions.length > 0 && (
+              <button
+                className="btn btn-secondary btn-small"
+                onClick={async () => {
+                  if (confirm('Are you sure you want to clear all execution history?')) {
+                    try {
+                      await apiClient.clearAllExecutions();
+                      setRecentExecutions([]);
+                    } catch (err) {
+                      console.error('Failed to clear executions:', err);
+                      setError('Failed to clear execution history');
+                    }
+                  }
+                }}
+              >
+                Clear All
+              </button>
+            )}
+          </div>
           
           {isLoadingExecutions ? (
             <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
@@ -799,6 +819,24 @@ export const SchedulesPage: FC = () => {
                            execution.status === 'success' ? 'Success' :
                            'Failed'}
                         </span>
+                        {execution.status !== 'running' && (
+                          <button
+                            className="btn btn-secondary btn-small"
+                            onClick={async () => {
+                              try {
+                                await apiClient.deleteExecution(execution.id);
+                                setRecentExecutions(prev => prev.filter(e => e.id !== execution.id));
+                              } catch (err) {
+                                console.error('Failed to delete execution:', err);
+                                setError('Failed to delete execution');
+                              }
+                            }}
+                            title="Clear this execution"
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                          >
+                            Clear
+                          </button>
+                        )}
                       </div>
                     </div>
                     {execution.status === 'failed' && execution.errorMessage && (

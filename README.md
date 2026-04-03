@@ -152,6 +152,33 @@ The Windows/macOS/Linux server installers include a system tray application for 
 
 **Access**: After installation, open your browser to `http://localhost:3001` or use the tray app to open the interface.
 
+## Documentation
+
+### User Guides
+- [User Guide](docs/USER_GUIDE.md) - Complete user documentation
+- [API Documentation](docs/API.md) - REST API reference
+- [Deployment Guide](docs/DEPLOYMENT_ANYWHERE.md) - Deploy to VPS, cloud, or local network
+
+### Developer Guides
+- [Developer Guide](docs/DEVELOPER_GUIDE.md) - Development setup and workflow
+- [Monorepo Guide](docs/MONOREPO_GUIDE.md) - Project structure and organization
+- [Testing Setup](docs/TESTING_SETUP.md) - Running tests
+
+### Installation & Build
+- [Windows Installer Guide](docs/WINDOWS_INSTALLER_GUIDE.md) - Building Windows installers
+- [Linux Installer Guide](docs/LINUX_INSTALLER_GUIDE.md) - Building Linux packages
+- [macOS Installer Guide](docs/MACOS_INSTALLER_GUIDE.md) - Building macOS installers
+- [Docker Setup](docs/DOCKER_SETUP.md) - Docker deployment
+
+### Customization
+- [Icon System](docs/ICON_SYSTEM.md) - Customizing application icons
+- [Icon Quick Start](scripts/ICON_QUICK_START.txt) - Quick reference for icon generation
+
+### Troubleshooting
+- [Quick Fix Guide](docs/QUICK_FIX_GUIDE.md) - Common issues and solutions
+- [Network Access Fix](docs/NETWORK_ACCESS_FIX.md) - Fixing network access issues
+- [Tray Icon Guide](docs/TRAY_ICON_GUIDE.md) - Tray icon troubleshooting
+
 ## License
 
 See LICENSE file for details.

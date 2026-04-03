@@ -675,6 +675,25 @@ export class APIClient {
     return this.request('/api/schedules/executions/running');
   }
 
+  async deleteExecution(executionId: number): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    return this.request(`/api/schedules/executions/${executionId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async clearAllExecutions(): Promise<{
+    success: boolean;
+    message: string;
+    deletedCount: number;
+  }> {
+    return this.request('/api/schedules/executions', {
+      method: 'DELETE'
+    });
+  }
+
   // Missing tracks methods
   async getMissingTracks(): Promise<{
     missingTracks: Array<{

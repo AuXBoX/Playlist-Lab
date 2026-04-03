@@ -641,6 +641,40 @@ export class DatabaseService {
     return stmt.all(userId);
   }
 
+  /**
+   * Get a single execution by ID
+   */
+  getExecutionById(executionId: number): any {
+    const stmt = this.db.prepare(`
+      SELECT * FROM schedule_executions
+      WHERE id = ?
+    `);
+    return stmt.get(executionId);
+  }
+
+  /**
+   * Delete a single execution record
+   */
+  deleteExecution(executionId: number): void {
+    const stmt = this.db.prepare(`
+      DELETE FROM schedule_executions
+      WHERE id = ?
+    `);
+    stmt.run(executionId);
+  }
+
+  /**
+   * Clear all execution history for a user
+   */
+  clearUserExecutions(userId: number): number {
+    const stmt = this.db.prepare(`
+      DELETE FROM schedule_executions
+      WHERE user_id = ?
+    `);
+    const result = stmt.run(userId);
+    return result.changes;
+  }
+
   // ==================== Missing Tracks Operations ====================
 
   /**

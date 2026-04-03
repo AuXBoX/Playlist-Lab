@@ -406,4 +406,83 @@ router.get('/executions/running', async (req: Request, res: Response, next: Next
   }
 });
 
+/**
+ * DELETE /api/schedules/executions/:id
+ * Delete a single execution record
+ */
+router.delete('/executions/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const executionId = parseInt(req.params.id, 10);
+
+    if (isNaN(executionId)) {
+      return next(createValidationError('Invalid execution ID'));
+    }
+
+    // Verify execution exists and belongs to user's schedule
+    const execution = db.getExecutionById(executionId);
+    if (!execution) {
+      return res.status(404).json({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Execution not found',
+          statusCode: 404
+        }
+      });
+    }
+
+    const schedule = db.getScheduleById(execution.schedule_id);
+    if (!schedule || schedule.user_id !== userId) {
+      return res.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'You do not have permission to delete this execution',
+          statusCode: 403
+        }
+      });
+    }
+
+    logger.info('Deleting execution', { executionId, userId });
+
+    db.deleteExecution(executionId);
+
+    logger.info('Execution deleted', { executionId });
+
+    res.json({
+      success: true,
+      message: 'Execution deleted successfully'
+    });
+  } catch (error: any) {
+    logger.error('Failed to delete execution', { error: error.message });
+    next(createInternalError(error.message || 'Failed to delete execution'));
+  }
+});
+
+/**
+ * DELETE /api/schedules/executions
+ * Clear all execution history for the user
+ */
+router.delete('/executions', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+
+    logger.info('Clearing all executions for user', { userId });
+
+    const deletedCount = db.clearUserExecutions(userId);
+
+    logger.info('Executions cleared', { userId, deletedCount });
+
+    res.json({
+      success: true,
+      message: `Cleared ${deletedCount} execution records`,
+      deletedCount
+    });
+  } catch (error: any) {
+    logger.error('Failed to clear executions', { error: error.message });
+    next(createInternalError(error.message || 'Failed to clear executions'));
+  }
+});
+
 export default router;

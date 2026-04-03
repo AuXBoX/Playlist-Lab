@@ -55,8 +55,9 @@ const db = getDatabase();
 const dbService = new DatabaseService(db);
 
 // Security middleware
+// Disable CSP in production when HTTPS is not enabled to avoid upgrade-insecure-requests issues
 app.use(helmet({
-  contentSecurityPolicy: NODE_ENV === 'production' ? {
+  contentSecurityPolicy: (NODE_ENV === 'production' && process.env.ENABLE_HTTPS === 'true') ? {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
@@ -692,7 +693,6 @@ if (NODE_ENV === 'production' || process.env.ENABLE_JOBS === 'true') {
 
 const HOST = process.env.HOST || '0.0.0.0';
 const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '3443', 10);
-const ENABLE_HTTPS = process.env.ENABLE_HTTPS === 'true'; // Disabled by default, enable explicitly
 
 // Function to generate self-signed certificate for localhost
 function generateSelfSignedCert(): { key: string; cert: string } | null {
@@ -755,7 +755,7 @@ const server = app.listen(PORT as number, HOST, () => {
 
 // Start HTTPS server if explicitly enabled
 let httpsServer: https.Server | null = null;
-if (ENABLE_HTTPS) {
+if (process.env.ENABLE_HTTPS === 'true') {
   const credentials = generateSelfSignedCert();
   if (credentials) {
     try {

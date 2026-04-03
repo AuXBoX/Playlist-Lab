@@ -335,17 +335,25 @@ function zlibDeflate(data) {
 }
 
 function getIconPath(color) {
-  // Try to use pre-generated icons with Playlist Lab logo
-  const iconsDir = path.join(installDir, 'icons');
   const iconName = color === 'green' ? 'tray-running.png' : 'tray-stopped.png';
-  const iconPath = path.join(iconsDir, iconName);
   
-  if (fs.existsSync(iconPath)) {
-    log(`Using icon: ${iconPath}`);
-    return iconPath;
+  // Try multiple possible locations for the icons
+  const possiblePaths = [
+    path.join(installDir, 'icons', iconName),
+    path.join(__dirname, 'icons', iconName),
+    path.join(__dirname, '..', 'icons', iconName),
+    path.join(process.cwd(), 'icons', iconName),
+  ];
+  
+  for (const iconPath of possiblePaths) {
+    if (fs.existsSync(iconPath)) {
+      log(`Using icon: ${iconPath}`);
+      return iconPath;
+    }
   }
   
-  log(`Icon not found at ${iconPath}, generating fallback`);
+  log(`Icon not found in any location, tried: ${possiblePaths.join(', ')}`);
+  log(`Generating fallback icon in temp directory`);
   
   // Fallback: generate simple colored icon in temp directory
   const tmpDir = os.tmpdir();
