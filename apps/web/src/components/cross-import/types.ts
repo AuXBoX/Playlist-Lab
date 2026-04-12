@@ -6,6 +6,8 @@ export interface MatchResult {
   targetTitle?: string;
   targetArtist?: string;
   targetAlbum?: string;
+  targetResolution?: string; // Video resolution (4K, HD, 720p, etc.)
+  isStaticImage?: boolean; // Whether the video is a static image (≤5 fps)
   confidence: number;
   matched: boolean;
   skipped: boolean;

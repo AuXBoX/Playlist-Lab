@@ -2,7 +2,8 @@
   background-color: var(--background);
   border-top: 1px solid var(--border);
   padding: 1.25rem 0;
-  margin-top: auto;
+  flex-shrink: 0;
+  z-index: 10;
 }
 
 .footer-content {

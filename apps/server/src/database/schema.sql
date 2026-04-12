@@ -212,10 +212,11 @@ CREATE INDEX IF NOT EXISTS idx_cross_import_jobs_created_at ON cross_import_jobs
 CREATE TABLE IF NOT EXISTS oauth_connections (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
-  service TEXT NOT NULL,         -- e.g. 'deezer', 'tidal'
+  service TEXT NOT NULL,         -- e.g. 'deezer', 'tidal', 'youtube'
   access_token TEXT NOT NULL,    -- encrypted
-  refresh_token TEXT,            -- encrypted, if provided
-  token_expires_at INTEGER,
+  refresh_token TEXT,            -- encrypted, if provided (NEW: for YouTube OAuth)
+  token_expires_at INTEGER,      -- token expiry timestamp in ms (NEW: for YouTube OAuth)
+  expires_at INTEGER,            -- alias for token_expires_at (for compatibility)
   scope TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,

@@ -1,20 +1,28 @@
 .layout {
   min-height: 100vh;
+  max-height: 100vh;
   display: flex;
   flex-direction: column;
   background-color: var(--background);
+  overflow: hidden;
 }
 
 .layout-body {
   display: flex;
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .layout-main {
   flex: 1;
   padding: 1.5rem;
   background: linear-gradient(180deg, var(--background) 0%, var(--background-elevated) 100%);
-  min-height: calc(100vh - var(--header-height));
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 @media (max-width: 768px) {

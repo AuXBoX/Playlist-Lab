@@ -44,18 +44,48 @@ export const TargetStep: FC<Props> = ({ onTargetSelected }) => {
   const handleCardClick = (target: TargetInfo) => {
     // If server-side credentials aren't configured, this service is unavailable
     if (target.configured === false) return;
+    
     // If target requires OAuth and isn't connected, show connect prompt
     if (target.requiresOAuth && !target.connected && !target.id.startsWith('plex')) {
       setConnectingTarget(target);
       setConnectError(null);
       return;
     }
-    // Advance immediately — same as SourceStep
+    
+    // If target is connected but requires OAuth (not Plex), allow reconnecting
+    if (target.requiresOAuth && target.connected && !target.id.startsWith('plex')) {
+      // Show reconnect prompt
+      setConnectingTarget(target);
+      setConnectError(null);
+      return;
+    }
+    
+    // Advance immediately for Plex or non-OAuth targets
     const config: TargetConfig = {};
     if (target.id.startsWith('plex')) {
       config.libraryId = target.libraries?.[0]?.id || '';
     }
     onTargetSelected(target, config);
+  };
+
+  const handleDisconnect = async (target: TargetInfo, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card click
+    if (!confirm(`Disconnect from ${target.name}? You'll need to reconnect to use it.`)) return;
+    
+    try {
+      const res = await fetch(`/api/cross-import/oauth/${target.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as any;
+        throw new Error(data.error || `Failed to disconnect (${res.status})`);
+      }
+      // Refresh targets list
+      await fetchTargets();
+    } catch (err: any) {
+      setError(err.message || 'Failed to disconnect');
+    }
   };
 
   const handleConnect = async () => {
@@ -147,17 +177,25 @@ export const TargetStep: FC<Props> = ({ onTargetSelected }) => {
 
   // Show connect prompt for OAuth-required targets
   if (connectingTarget) {
+    const isReconnecting = connectingTarget.connected;
+    
     return (
       <div style={{ maxWidth: '480px' }}>
-        <h2 className="step-section-title">Connect to {connectingTarget.name}</h2>
+        <h2 className="step-section-title">{isReconnecting ? 'Reconnect to' : 'Connect to'} {connectingTarget.name}</h2>
         {connectError && <div className="error-message" style={{ marginBottom: '1rem' }}>{connectError}</div>}
         <div className="progress-container" style={{ textAlign: 'center', padding: '2.5rem 2rem' }}>
           <div style={{ marginBottom: '1rem' }}>
             <ServiceIcon serviceId={connectingTarget.id} size={48} />
           </div>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', lineHeight: 1.6 }}>
-            You need to connect your {connectingTarget.name} account to import playlists into it.
-          </p>
+          {isReconnecting ? (
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', lineHeight: 1.6 }}>
+              Your {connectingTarget.name} connection may have expired. Click "Disconnect & Reconnect" to refresh your authentication.
+            </p>
+          ) : (
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', lineHeight: 1.6 }}>
+              You need to connect your {connectingTarget.name} account to import playlists into it.
+            </p>
+          )}
           {waitingForAuth ? (
             <div>
               <div className="loading-spinner" style={{ margin: '0 auto 1rem' }} />
@@ -177,12 +215,40 @@ export const TargetStep: FC<Props> = ({ onTargetSelected }) => {
               </button>
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button className="btn btn-secondary" onClick={() => setConnectingTarget(null)}>
                 Back
               </button>
+              {isReconnecting && (
+                <button 
+                  className="btn btn-secondary" 
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    setConnectError(null);
+                    try {
+                      const res = await fetch(`/api/cross-import/oauth/${connectingTarget.id}`, {
+                        method: 'DELETE',
+                        credentials: 'include',
+                      });
+                      if (!res.ok) {
+                        const data = await res.json().catch(() => ({})) as any;
+                        throw new Error(data.error || `Failed to disconnect (${res.status})`);
+                      }
+                      // Update local state to show as disconnected
+                      setTargets(prev => prev.map(t => 
+                        t.id === connectingTarget.id ? { ...t, connected: false } : t
+                      ));
+                      setConnectingTarget({ ...connectingTarget, connected: false });
+                    } catch (err: any) {
+                      setConnectError(err.message || 'Failed to disconnect');
+                    }
+                  }}
+                >
+                  Disconnect
+                </button>
+              )}
               <button className="btn btn-primary" onClick={handleConnect}>
-                Connect {connectingTarget.name}
+                {isReconnecting ? 'Reconnect' : `Connect ${connectingTarget.name}`}
               </button>
             </div>
           )}
@@ -197,22 +263,44 @@ export const TargetStep: FC<Props> = ({ onTargetSelected }) => {
 
       <div className="service-grid" style={{ marginBottom: '1.5rem' }}>
         {targets.map(target => (
-          <button
-            key={target.id}
-            className={`service-card ${target.configured === false ? 'unavailable' : ''}`}
-            onClick={() => handleCardClick(target)}
-            title={target.configured === false ? `${target.name} requires server-side API credentials (not configured)` : undefined}
-            style={target.configured === false ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-          >
-            <div
-              className={`service-card-badge ${target.connected ? 'connected' : 'disconnected'}`}
-              title={target.connected ? 'Connected' : 'Requires authentication'}
-            />
-            <ServiceIcon serviceId={target.id} size={90} />
-            {target.configured === false && (
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted, #666)' }}>Not available</span>
+          <div key={target.id} style={{ position: 'relative' }}>
+            <button
+              className={`service-card ${target.configured === false ? 'unavailable' : ''}`}
+              onClick={() => handleCardClick(target)}
+              title={target.configured === false ? `${target.name} requires server-side API credentials (not configured)` : undefined}
+              style={target.configured === false ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+            >
+              <div
+                className={`service-card-badge ${target.connected ? 'connected' : 'disconnected'}`}
+                title={target.connected ? 'Connected' : 'Requires authentication'}
+              />
+              <ServiceIcon serviceId={target.id} size={90} />
+              {target.configured === false && (
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted, #666)' }}>Not available</span>
+              )}
+            </button>
+            {target.connected && target.requiresOAuth && !target.id.startsWith('plex') && (
+              <button
+                onClick={(e) => handleDisconnect(target, e)}
+                style={{
+                  position: 'absolute',
+                  top: '8px',
+                  right: '8px',
+                  background: 'rgba(0, 0, 0, 0.6)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  borderRadius: '4px',
+                  color: '#fff',
+                  padding: '4px 8px',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  zIndex: 10,
+                }}
+                title="Disconnect and reconnect"
+              >
+                Reconnect
+              </button>
             )}
-          </button>
+          </div>
         ))}
       </div>
     </div>

@@ -51,7 +51,7 @@ export const qobuzTargetAdapter: TargetAdapter = {
     return true; // Uses public app_id, no registration needed
   },
 
-  async searchCatalog(query: string, userId: number, db: any): Promise<MatchResult[]> {
+  async searchCatalog(query: string, userId: number, db: any, _allowLive?: boolean, _allowStatic?: boolean): Promise<MatchResult[]> {
     const token = await getToken(userId, db);
     if (!token) throw new Error('Not connected to Qobuz. Please log in first.');
 

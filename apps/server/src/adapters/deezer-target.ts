@@ -65,7 +65,7 @@ export const deezerTargetAdapter: TargetAdapter = {
     return true; // No server-side credentials needed
   },
 
-  async searchCatalog(query: string, userId: number, db: any): Promise<MatchResult[]> {
+  async searchCatalog(query: string, userId: number, db: any, _allowLive?: boolean, _allowStatic?: boolean): Promise<MatchResult[]> {
     const arl = await getArl(userId, db);
     if (!arl) throw new Error('Not connected to Deezer. Please add your ARL token.');
 

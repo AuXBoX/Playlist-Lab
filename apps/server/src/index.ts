@@ -1,14 +1,52 @@
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+import os from 'os';
+
+// Load environment variables FIRST before any other imports
+// Try multiple locations for .env file (AppData for production, cwd for development)
+const possibleEnvPaths = [
+  // Production: AppData folder
+  path.join(os.homedir(), 'AppData', 'Roaming', 'Playlist Lab', '.env'),
+  // Development: current working directory
+  path.resolve(process.cwd(), '.env'),
+  // Alternative: parent directory
+  path.resolve(process.cwd(), '..', '.env'),
+];
+
+let envPath: string | null = null;
+for (const testPath of possibleEnvPaths) {
+  if (fs.existsSync(testPath)) {
+    envPath = testPath;
+    break;
+  }
+}
+
+if (envPath) {
+  console.log('[Startup] Loading .env from:', envPath);
+  const result = dotenv.config({ path: envPath });
+  if (result.error) {
+    console.error('[Startup] Error loading .env:', result.error);
+  } else {
+    console.log('[Startup] .env loaded successfully');
+    console.log('[Startup] YOUTUBE_CLIENT_ID:', process.env.YOUTUBE_CLIENT_ID?.substring(0, 20) + '...');
+  }
+} else {
+  console.log('[Startup] No .env file found in any of these locations:');
+  possibleEnvPaths.forEach(p => console.log('  -', p));
+}
+
+// NOW import adapters after env vars are loaded
+import './adapters'; // Register all source/target adapters
+
 import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
 // Force reload
 import rateLimit from 'express-rate-limit';
 import session from 'express-session';
-import path from 'path';
 import https from 'https';
-import fs from 'fs';
 import { logger } from './utils/logger';
 import { sessionStore } from './middleware/session-store';
 import { errorHandler } from './middleware/error-handler';
@@ -36,10 +74,8 @@ import chartsRoutes from './routes/charts';
 import plexSharingRoutes from './routes/plex-sharing';
 import crossImportRoutes from './routes/cross-import';
 import mixTemplatesRoutes from './routes/mix-templates';
-import './adapters'; // Register all source/target adapters
-
-// Load environment variables
-dotenv.config();
+import youtubeConfigRoutes from './routes/youtube-config';
+// DON'T import adapters here - they need env vars loaded first
 
 // Read version from package.json
 const packageJsonPath = path.join(__dirname, '..', 'package.json');
@@ -371,6 +407,8 @@ app.get('/api/update/check', async (_req: Request, res: Response): Promise<void>
       });
       
       response.on('end', (): void => {
+        if (res.headersSent) return; // Guard against multiple responses
+        
         if (response.statusCode === 200) {
           try {
             const release = JSON.parse(data);
@@ -404,16 +442,21 @@ app.get('/api/update/check', async (_req: Request, res: Response): Promise<void>
     });
 
     request.on('error', (err: Error): void => {
-      res.status(500).json({ error: err.message });
+      if (res.headersSent) return; // Guard against multiple responses
+      console.error('[Update Check] Request error:', err.message);
+      res.status(500).json({ error: 'Network error: ' + err.message });
     });
 
-    request.setTimeout(10000, (): void => {
+    request.setTimeout(30000, (): void => {
+      console.error('[Update Check] Request timeout after 30 seconds');
       request.destroy();
-      res.status(504).json({ error: 'Request timeout' });
+      if (res.headersSent) return; // Guard against multiple responses
+      res.status(504).json({ error: 'Update check timed out. Please check your internet connection.' });
     });
 
     request.end();
   } catch (error) {
+    if (res.headersSent) return; // Guard against multiple responses
     res.status(500).json({ error: 'Failed to check for updates' });
   }
 });
@@ -606,6 +649,7 @@ app.use('/api/charts', chartsRoutes);
 app.use('/api/plex', plexSharingRoutes);
 app.use('/api/cross-import', crossImportRoutes);
 app.use('/api/mix-templates', mixTemplatesRoutes);
+app.use('/api/youtube-config', youtubeConfigRoutes);
 
 // Serve static files from the web app (in production)
 if (NODE_ENV === 'production') {

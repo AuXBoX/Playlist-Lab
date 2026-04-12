@@ -18,6 +18,8 @@ export interface MatchResult {
   targetTitle?: string;
   targetArtist?: string;
   targetAlbum?: string;
+  targetResolution?: string;
+  isStaticImage?: boolean;
   confidence: number; // 0–100
   matched: boolean;
   skipped: boolean;
@@ -51,14 +53,16 @@ export interface SourceAdapter {
 
 export interface TargetAdapter {
   meta: ServiceMeta;
-  searchCatalog(query: string, userId: number, db: any): Promise<MatchResult[]>;
+  searchCatalog(query: string, userId: number, db: any, allowLive?: boolean, allowStatic?: boolean): Promise<MatchResult[]>;
   matchTracks(
     tracks: TrackInfo[],
     targetConfig: TargetConfig,
     userId: number,
     db: any,
     progressEmitter?: NodeJS.EventEmitter,
-    isCancelled?: () => boolean
+    isCancelled?: () => boolean,
+    allowLive?: boolean,
+    allowStatic?: boolean
   ): Promise<MatchResult[]>;
   createPlaylist(
     name: string,

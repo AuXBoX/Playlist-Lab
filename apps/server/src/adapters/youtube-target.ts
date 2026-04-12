@@ -109,7 +109,7 @@ export const youtubeTargetAdapter: TargetAdapter = {
     return true; // Cookie-based auth, no server credentials needed
   },
 
-  async searchCatalog(query: string, userId: number, db: any): Promise<MatchResult[]> {
+  async searchCatalog(query: string, userId: number, db: any, _allowLive?: boolean, _allowStatic?: boolean): Promise<MatchResult[]> {
     const cookie = await getCookie(userId, db);
     if (!cookie) throw new Error('Not connected to YouTube Music. Please add your browser cookie.');
 

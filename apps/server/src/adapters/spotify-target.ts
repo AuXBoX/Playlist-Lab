@@ -56,7 +56,7 @@ export const spotifyTargetAdapter: TargetAdapter = {
    * Search Spotify's catalog for a track by query string.
    * Returns up to 10 results as MatchResult entries.
    */
-  async searchCatalog(query: string, userId: number, db: any): Promise<MatchResult[]> {
+  async searchCatalog(query: string, userId: number, db: any, _allowLive?: boolean, _allowStatic?: boolean): Promise<MatchResult[]> {
     const token = await getSpotifyToken(userId, db);
     if (!token) {
       throw new Error('Not connected to Spotify. Please authenticate first.');

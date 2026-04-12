@@ -1,9 +1,26 @@
 /**
- * YouTube Target Adapter
+ * @deprecated This adapter is deprecated and will be removed in a future version.
+ * Use youtube-oauth-target.ts instead.
+ * 
+ * YouTube Target Adapter (Cookie-based - DEPRECATED)
  *
- * Creates playlists on youtube.com using browser-captured cookies.
- * The user logs in via a real browser window (Puppeteer, non-headless).
- * No Google API credentials required.
+ * This adapter uses browser-captured cookies for authentication.
+ * 
+ * LIMITATIONS:
+ * - Works for READ operations (search) but FAILS for WRITE operations (playlist creation) with 401 errors
+ * - Requires manual cookie copying from browser DevTools (poor UX)
+ * - Cookies expire frequently, requiring repeated manual updates
+ * - No automatic token refresh mechanism
+ * - Cannot extract video resolution information
+ * 
+ * REPLACEMENT: apps/server/src/adapters/youtube-oauth-target.ts
+ * - Uses OAuth 2.0 for reliable authentication
+ * - Automatic token refresh
+ * - Works for all operations (read and write)
+ * - Extracts video resolution information
+ * - Better user experience
+ * 
+ * See docs/YOUTUBE_OAUTH_SETUP.md for migration instructions.
  */
 
 import { TargetAdapter, TargetConfig, TrackInfo, MatchResult, ServiceMeta } from './types';
@@ -20,12 +37,43 @@ const YT_CLIENT_NAME_ID = '1';
 // Active login sessions: sessionId -> { browser, page, status, cookie }
 const loginSessions = new Map<string, { browser: any; status: 'pending' | 'done' | 'error'; cookie?: string; error?: string }>();
 
+function cleanTrackTitle(title: string): string {
+  // Remove anything in parentheses (including the parentheses)
+  let cleaned = title.replace(/\([^)]*\)/g, '');
+  // Remove "remastered" (case insensitive)
+  cleaned = cleaned.replace(/\bremastered?\b/gi, '');
+  // Clean up extra whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned;
+}
+
 function similarity(a: string, b: string): number {
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
   const na = normalize(a);
   const nb = normalize(b);
   if (na === nb) return 100;
   if (!na || !nb) return 0;
+  
+  // Check if all words from the shorter string appear in the longer string
+  const wordsA = na.split(/\s+/);
+  const wordsB = nb.split(/\s+/);
+  const shorterWords = wordsA.length <= wordsB.length ? wordsA : wordsB;
+  const longerWords = wordsA.length <= wordsB.length ? wordsB : wordsA;
+  
+  let matchedWords = 0;
+  for (const word of shorterWords) {
+    if (longerWords.some(w => w.includes(word) || word.includes(w))) {
+      matchedWords++;
+    }
+  }
+  
+  // If most words match, give high score regardless of order
+  const wordMatchRatio = matchedWords / shorterWords.length;
+  if (wordMatchRatio >= 0.8) {
+    return Math.round(wordMatchRatio * 100);
+  }
+  
+  // Fall back to character-based matching
   const longer = na.length > nb.length ? na : nb;
   const shorter = na.length > nb.length ? nb : na;
   let matches = 0, pos = 0;
@@ -62,6 +110,8 @@ async function ytApi(endpoint: string, body: object, cookie: string): Promise<an
     ...body,
   });
 
+  logger.debug('[YouTubePlainTargetAdapter] Making YouTube API request', { endpoint });
+
   return new Promise((resolve, reject) => {
     const https = require('https');
     const options = {
@@ -88,18 +138,21 @@ async function ytApi(endpoint: string, body: object, cookie: string): Promise<an
 
     const timer = setTimeout(() => {
       req.destroy();
-      done(() => reject(new Error('YouTube API request timed out')));
-    }, 12_000);
+      logger.error('[YouTubePlainTargetAdapter] YouTube API request timed out', { endpoint, timeout: '15s' });
+      done(() => reject(new Error('YouTube API request timed out after 15 seconds. This may be caused by firewall/antivirus blocking YouTube requests.')));
+    }, 15_000); // Increased to 15s for slower connections/firewalls
 
     const req = https.request(options, (res: any) => {
       if (res.statusCode === 401 || res.statusCode === 403) {
         res.resume();
         clearTimeout(timer);
+        logger.warn('[YouTubePlainTargetAdapter] YouTube API auth error', { statusCode: res.statusCode });
         return done(() => reject(new Error(`YouTube API error: ${res.statusCode}`)));
       }
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
         clearTimeout(timer);
+        logger.warn('[YouTubePlainTargetAdapter] YouTube API HTTP error', { statusCode: res.statusCode });
         return done(() => reject(new Error(`YouTube API error: ${res.statusCode}`)));
       }
       const chunks: Buffer[] = [];
@@ -109,10 +162,13 @@ async function ytApi(endpoint: string, body: object, cookie: string): Promise<an
         try {
           const data = JSON.parse(Buffer.concat(chunks).toString());
           if (data?.error?.code === 401 || data?.error?.code === 403) {
+            logger.warn('[YouTubePlainTargetAdapter] YouTube API returned auth error', { errorCode: data.error.code });
             return done(() => reject(new Error(`YouTube API error: ${data.error.code}`)));
           }
+          logger.debug('[YouTubePlainTargetAdapter] YouTube API request successful', { endpoint });
           done(() => resolve(data));
         } catch (e) {
+          logger.error('[YouTubePlainTargetAdapter] Failed to parse YouTube API response', { error: e });
           done(() => reject(new Error('YouTube API: invalid JSON response')));
         }
       });
@@ -120,6 +176,7 @@ async function ytApi(endpoint: string, body: object, cookie: string): Promise<an
 
     req.on('error', (err: Error) => {
       clearTimeout(timer);
+      logger.error('[YouTubePlainTargetAdapter] YouTube API request error', { error: err.message, endpoint });
       done(() => reject(err));
     });
 
@@ -136,8 +193,10 @@ function extractTrack(item: any): { videoId: string; title: string; artist: stri
     if (!videoId) return null;
     const title = renderer.title?.runs?.[0]?.text ?? renderer.title?.simpleText ?? '';
     const artist = renderer.ownerText?.runs?.[0]?.text ?? renderer.shortBylineText?.runs?.[0]?.text ?? '';
+    
     return { videoId, title, artist };
-  } catch {
+  } catch (err) {
+    logger.error('[YouTubePlainTargetAdapter] Error extracting track', { error: err });
     return null;
   }
 }
@@ -285,7 +344,7 @@ export const youtubePlainTargetAdapter: TargetAdapter = {
     return true; // Browser-based auth, no server credentials needed
   },
 
-  async searchCatalog(query: string, userId: number, db: any): Promise<MatchResult[]> {
+  async searchCatalog(query: string, userId: number, db: any, _allowLive?: boolean, _allowStatic?: boolean): Promise<MatchResult[]> {
     const cookie = await getCookie(userId, db);
     if (!cookie) throw new Error('Not connected to YouTube. Please authenticate first.');
 
@@ -294,19 +353,43 @@ export const youtubePlainTargetAdapter: TargetAdapter = {
 
     const items: any[] = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents ?? [];
 
-    return items.flatMap(item => {
+    const results = items.flatMap(item => {
       const track = extractTrack(item);
       if (!track) return [];
+      
+      let confidence = similarity(query, track.title);
+      
+      // Boost confidence for "Official" videos
+      const isOfficial = /official/i.test(track.title);
+      if (isOfficial) {
+        confidence = Math.min(100, confidence + 15);
+      }
+      
+      // Penalize live, lyrics, and acoustic versions
+      const titleLower = track.title.toLowerCase();
+      if (titleLower.includes('live')) {
+        confidence = Math.max(0, confidence - 20);
+      }
+      if (/\blyrics?\b/i.test(track.title)) {
+        confidence = Math.max(0, confidence - 20);
+      }
+      if (titleLower.includes('acoustic')) {
+        confidence = Math.max(0, confidence - 20);
+      }
+      
       return [{
         sourceTrack,
         targetTrackId: track.videoId,
         targetTitle: track.title,
         targetArtist: track.artist,
-        confidence: similarity(query, track.title),
+        confidence,
         matched: true,
         skipped: false,
       }];
     });
+    
+    // Sort by confidence
+    return results.sort((a, b) => b.confidence - a.confidence);
   },
 
   async matchTracks(
@@ -325,37 +408,52 @@ export const youtubePlainTargetAdapter: TargetAdapter = {
     // Quick sanity check — if cookie has no auth tokens, fail immediately without network call
     const hasAuthCookie = /(?:__Secure-3PSID|SAPISID|__Secure-3PAPISID)=/.test(cookie);
     if (!hasAuthCookie) {
-      logger.warn('[YouTubePlainTargetAdapter] Cookie missing auth tokens, clearing', { userId });
+      logger.error('[YouTubePlainTargetAdapter] Cookie missing required auth tokens', { 
+        userId, 
+        cookieLength: cookie.length,
+        hasSID: /SID=/.test(cookie),
+        hasSecure3PSID: /__Secure-3PSID=/.test(cookie),
+        hasSAPISID: /SAPISID=/.test(cookie),
+        hasSecure3PAPISID: /__Secure-3PAPISID=/.test(cookie)
+      });
       db.prepare('DELETE FROM oauth_connections WHERE user_id = ? AND service = ?').run(userId, 'youtube');
-      throw new Error('YouTube session expired. Please reconnect your YouTube account.');
+      throw new Error('YouTube cookies are incomplete or expired. Please reconnect and paste the FULL cookie string from your browser (it should be very long, 2000+ characters).');
     }
 
     // Validate cookie with a quick test search before processing all tracks
+    logger.info('[YouTubePlainTargetAdapter] Validating cookie with test search', { userId });
     try {
       const testData = await ytApi('search', { query: 'test', params: 'EgIQAQ%3D%3D' }, cookie);
+      logger.info('[YouTubePlainTargetAdapter] Cookie validation successful', { userId, hasContents: !!testData?.contents });
       if (!testData?.contents) {
         throw new Error('YouTube session expired. Please reconnect your YouTube account.');
       }
     } catch (err: any) {
       const msg = err.message ?? '';
-      if (msg.includes('401') || msg.includes('403') || msg.includes('session expired') || msg.includes('sign in') || msg.includes('timed out')) {
-        logger.warn('[YouTubePlainTargetAdapter] Cookie validation failed, clearing stored cookie', { userId, reason: msg });
+      logger.error('[YouTubePlainTargetAdapter] Cookie validation failed', { userId, error: msg });
+      if (msg.includes('401') || msg.includes('403') || msg.includes('session expired') || msg.includes('sign in') || msg.includes('timed out') || msg.includes('firewall') || msg.includes('antivirus')) {
+        logger.warn('[YouTubePlainTargetAdapter] Clearing stored cookie due to validation failure', { userId, reason: msg });
         db.prepare('DELETE FROM oauth_connections WHERE user_id = ? AND service = ?').run(userId, 'youtube');
-        throw new Error('YouTube session expired. Please reconnect your YouTube account.');
+        throw new Error(`YouTube connection failed: ${msg}. Please reconnect your YouTube account.`);
       }
       throw err;
     }
+
+    logger.info('[YouTubePlainTargetAdapter] Starting track matching loop', { trackCount: tracks.length, userId });
 
     const results: MatchResult[] = [];
     for (let i = 0; i < tracks.length; i++) {
       if (isCancelled?.()) break;
       const track = tracks[i];
-      const query = `${track.title} ${track.artist}`.trim();
+      // Clean the track title before searching (remove remastered, parentheses content)
+      const cleanedTitle = cleanTrackTitle(track.title);
+      const query = `${cleanedTitle} ${track.artist}`.trim();
       let matchResult: MatchResult = { sourceTrack: track, confidence: 0, matched: false, skipped: false };
 
       try {
-        logger.debug('[YouTubePlainTargetAdapter] Searching', { i: i + 1, total: tracks.length, query });
+        logger.info('[YouTubePlainTargetAdapter] Searching track', { i: i + 1, total: tracks.length, query, title: track.title, artist: track.artist });
         const data = await ytApi('search', { query, params: 'EgIQAQ%3D%3D' }, cookie);
+        logger.info('[YouTubePlainTargetAdapter] Search completed', { i: i + 1, total: tracks.length, hasData: !!data, hasContents: !!data?.contents });
         const items: any[] = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents ?? [];
 
         const candidates = items.flatMap(item => {
@@ -364,15 +462,41 @@ export const youtubePlainTargetAdapter: TargetAdapter = {
         });
 
         if (candidates.length > 0) {
-          const scored = candidates.map(c => ({
-            c,
-            score: Math.round(
-              similarity(track.title, c.title) * 0.6 +
-              similarity(track.artist, c.artist) * 0.4
-            ),
-          }));
+          const scored = candidates.map(c => {
+            // Use cleaned title for comparison
+            const titleSim = similarity(cleanedTitle, c.title);
+            const artistSim = similarity(track.artist, c.artist);
+            let baseScore = titleSim * 0.6 + artistSim * 0.4;
+            
+            // Boost score for "Official" videos
+            const isOfficial = /official/i.test(c.title);
+            if (isOfficial) {
+              baseScore = Math.min(100, baseScore + 15);
+            }
+            
+            // Penalize live, lyrics, and acoustic versions
+            const titleLower = c.title.toLowerCase();
+            if (titleLower.includes('live')) {
+              baseScore = Math.max(0, baseScore - 20);
+            }
+            if (/\blyrics?\b/i.test(c.title)) {
+              baseScore = Math.max(0, baseScore - 20);
+            }
+            if (titleLower.includes('acoustic')) {
+              baseScore = Math.max(0, baseScore - 20);
+            }
+            
+            return {
+              c,
+              score: Math.round(baseScore),
+              isOfficial,
+            };
+          });
+          
+          // Sort by score
           scored.sort((a, b) => b.score - a.score);
           const best = scored[0];
+          
           matchResult = {
             sourceTrack: track,
             targetTrackId: best.c.videoId,
@@ -386,17 +510,30 @@ export const youtubePlainTargetAdapter: TargetAdapter = {
       } catch (err: any) {
         // If we get auth errors mid-match, abort early
         const msg = err.message ?? '';
+        logger.error('[YouTubePlainTargetAdapter] Search error', { i: i + 1, total: tracks.length, track: track.title, error: msg });
         if (msg.includes('401') || msg.includes('403')) {
           logger.warn('[YouTubePlainTargetAdapter] Auth error during match, aborting', { userId, i });
           db.prepare('DELETE FROM oauth_connections WHERE user_id = ? AND service = ?').run(userId, 'youtube');
           throw new Error('YouTube session expired mid-match. Please reconnect your YouTube account.');
         }
-        logger.warn('[YouTubePlainTargetAdapter] Search failed', { track, err });
+        if (msg.includes('timed out')) {
+          logger.error('[YouTubePlainTargetAdapter] Timeout during match', { userId, i, track: track.title });
+          throw new Error(`YouTube API timed out while searching for "${track.title}". This may be caused by firewall/antivirus blocking requests.`);
+        }
+        logger.warn('[YouTubePlainTargetAdapter] Search failed, continuing', { track, err });
       }
 
       results.push(matchResult);
-      progressEmitter?.emit('progress', { type: 'progress', phase: 'matching', current: i + 1, total: tracks.length });
+      const progressData = { 
+        current: i + 1, 
+        total: tracks.length,
+        currentTrackName: track.title 
+      };
+      logger.info('[YouTubePlainTargetAdapter] Emitting progress', { userId, ...progressData });
+      progressEmitter?.emit('progress', progressData);
     }
+    
+    logger.info('[YouTubePlainTargetAdapter] Matching complete', { trackCount: tracks.length, userId, matchedCount: results.filter(r => r.matched).length });
     return results;
   },
 
@@ -428,9 +565,8 @@ export const youtubePlainTargetAdapter: TargetAdapter = {
   },
 
   async getOAuthUrl(userId: number, _db: any, redirectUri: string): Promise<string> {
-    // Use the cookie paste form — simpler and more reliable than Puppeteer
-    const host = redirectUri.replace(/\/api\/cross-import\/oauth\/youtube\/callback$/, '');
-    return `${host}/api/cross-import/oauth/youtube/form?state=${userId}`;
+    // Use the manual cookie paste form - more reliable than Puppeteer
+    return `${redirectUri.replace('/callback', '/form')}?state=${userId}`;
   },
 
   async handleOAuthCallback(code: string, userId: number, db: any, _redirectUri: string): Promise<void> {

@@ -1,13 +1,15 @@
 .cross-import-page {
-  flex: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 0 0 2rem 0;
+  padding: 0;
   width: 100%;
+  overflow: hidden;
 }
 
 .cross-import-header {
   margin-bottom: 0.75rem;
+  flex-shrink: 0;
 }
 
 .cross-import-header-row {
@@ -114,6 +116,9 @@
 .cross-import-flow {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Step indicator */
@@ -180,7 +185,11 @@
 
 /* Step content */
 .step-content {
-  min-height: 300px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* Service card grid (shared across steps) */
@@ -282,11 +291,10 @@
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
-  max-height: 55vh;
+  flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  margin-bottom: 1.5rem;
-  padding-bottom: 0.5rem;
+  min-height: 0;
 }
 
 .playlist-list-item {
@@ -396,8 +404,10 @@
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
-  max-height: 520px;
+  flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
 }
 
 .review-track-item {

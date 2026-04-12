@@ -336,20 +336,6 @@ export const ImportPage: FC = () => {
   useEffect(() => {
     if (activeSource === 'spotify') {
       checkSpotifyStatus();
-      
-      // Check for OAuth callback results
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('spotify_connected') === 'true') {
-        // Clear the query parameter
-        window.history.replaceState({}, '', window.location.pathname);
-        // Refresh status
-        checkSpotifyStatus();
-      } else if (params.get('spotify_error')) {
-        const errorCode = params.get('spotify_error');
-        setError(`Spotify connection failed: ${errorCode}. Please try again.`);
-        // Clear the query parameter
-        window.history.replaceState({}, '', window.location.pathname);
-      }
     }
   }, [activeSource]);
 
@@ -1256,7 +1242,44 @@ export const ImportPage: FC = () => {
         const loginData = await loginResponse.json();
         
         if (loginData.authUrl) {
-          window.location.href = loginData.authUrl;
+          // Open OAuth in popup window instead of full redirect
+          const popup = window.open(loginData.authUrl, 'spotify_auth_popup', 'width=600,height=700,scrollbars=yes');
+          if (!popup) {
+            setError('Popup blocked. Please allow popups and try again.');
+            setIsSavingSpotify(false);
+            return;
+          }
+
+          // Listen for OAuth completion message
+          const handleMessage = (event: MessageEvent) => {
+            if (event.data?.type === 'spotify_oauth' && event.data.status === 'connected') {
+              window.removeEventListener('message', handleMessage);
+              popup.close();
+              setSpotifyConnected(true);
+              setIsSavingSpotify(false);
+              setShowSpotifySetup(false);
+              setError(null);
+              // Refresh Spotify playlists
+              if (activeSource === 'spotify') {
+                fetchSpotifyPlaylists();
+              }
+            } else if (event.data?.type === 'spotify_oauth' && event.data.status === 'error') {
+              window.removeEventListener('message', handleMessage);
+              popup.close();
+              setError(`Spotify connection failed: ${event.data.detail || 'unknown error'}`);
+              setIsSavingSpotify(false);
+            }
+          };
+          window.addEventListener('message', handleMessage);
+
+          // Poll to detect if popup was closed manually
+          const pollInterval = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(pollInterval);
+              window.removeEventListener('message', handleMessage);
+              setIsSavingSpotify(false);
+            }
+          }, 500);
         } else if (loginData.error) {
           setError(loginData.error);
           setIsSavingSpotify(false);
@@ -1317,7 +1340,7 @@ export const ImportPage: FC = () => {
         throw new Error(saveData.error || 'Failed to save credentials');
       }
 
-      // Show success message briefly before redirecting
+      // Show success message briefly before opening popup
       setError(null);
       
       // Small delay to show the "Connecting..." state
@@ -1330,8 +1353,44 @@ export const ImportPage: FC = () => {
       const loginData = await loginResponse.json();
       
       if (loginData.authUrl) {
-        // Redirect to Spotify OAuth
-        window.location.href = loginData.authUrl;
+        // Open OAuth in popup window instead of full redirect
+        const popup = window.open(loginData.authUrl, 'spotify_auth_popup', 'width=600,height=700,scrollbars=yes');
+        if (!popup) {
+          setError('Popup blocked. Please allow popups and try again.');
+          setIsSavingSpotify(false);
+          return;
+        }
+
+        // Listen for OAuth completion message
+        const handleMessage = (event: MessageEvent) => {
+          if (event.data?.type === 'spotify_oauth' && event.data.status === 'connected') {
+            window.removeEventListener('message', handleMessage);
+            popup.close();
+            setSpotifyConnected(true);
+            setIsSavingSpotify(false);
+            setShowSpotifySetup(false);
+            setError(null);
+            // Refresh Spotify playlists
+            if (activeSource === 'spotify') {
+              fetchSpotifyPlaylists();
+            }
+          } else if (event.data?.type === 'spotify_oauth' && event.data.status === 'error') {
+            window.removeEventListener('message', handleMessage);
+            popup.close();
+            setError(`Spotify connection failed: ${event.data.detail || 'unknown error'}`);
+            setIsSavingSpotify(false);
+          }
+        };
+        window.addEventListener('message', handleMessage);
+
+        // Poll to detect if popup was closed manually
+        const pollInterval = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(pollInterval);
+            window.removeEventListener('message', handleMessage);
+            setIsSavingSpotify(false);
+          }
+        }, 500);
       } else if (loginData.error) {
         setError(loginData.error);
         setIsSavingSpotify(false);

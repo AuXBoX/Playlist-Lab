@@ -87,11 +87,29 @@ router.get('/login', requireAuth, (req: Request, res: Response) => {
  */
 router.get('/callback', async (req: Request, res: Response) => {
   const redirectToImport = (status: 'connected' | 'error', detail: string) => {
-    // Redirect back to Import page with status
-    const redirectUrl = status === 'connected' 
-      ? '/import?spotify_connected=true'
-      : `/import?spotify_error=${encodeURIComponent(detail)}`;
-    res.redirect(redirectUrl);
+    // Send HTML that posts message to opener window (for popup OAuth flow)
+    const message = status === 'connected' 
+      ? { type: 'spotify_oauth', status: 'connected' }
+      : { type: 'spotify_oauth', status: 'error', detail };
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Spotify Authentication</title></head>
+        <body>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage(${JSON.stringify(message)}, window.location.origin);
+              window.close();
+            } else {
+              // Fallback: redirect to import page (for non-popup flow)
+              window.location.href = '${status === 'connected' ? '/import?spotify_connected=true' : `/import?spotify_error=${encodeURIComponent(detail)}`}';
+            }
+          </script>
+          <p>${status === 'connected' ? 'Connected successfully! You can close this window.' : `Error: ${detail}`}</p>
+        </body>
+      </html>
+    `);
   };
 
   try {

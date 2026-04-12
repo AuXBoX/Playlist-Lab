@@ -29,6 +29,7 @@ function getRawDb(req: Request) {
 // GET /api/cross-import/sources
 // Returns all available sources enriched with Plex server/home-user entries
 // and OAuth connection status for external services.
+// FILTERED: Only returns Plex sources (no external services)
 // ---------------------------------------------------------------------------
 router.get('/sources', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -38,6 +39,7 @@ router.get('/sources', async (req: Request, res: Response, next: NextFunction) =
     const sources: any[] = [];
 
     for (const adapter of adapterRegistry.listSources()) {
+      // FILTER: Only allow Plex as source
       if (adapter.meta.id === 'plex') {
         // Expand Plex into one entry per configured server
         const servers = db.prepare('SELECT * FROM user_servers WHERE user_id = ?').all(userId);
@@ -56,34 +58,8 @@ router.get('/sources', async (req: Request, res: Response, next: NextFunction) =
 
           // Plex Home users intentionally excluded from cross-import sources
         }
-      } else {
-        // External service — check OAuth connection status
-        let connected = false;
-        try {
-          if (adapter.meta.id === 'spotify') {
-            const row = db.prepare(
-              'SELECT spotify_access_token, spotify_token_expires_at FROM users WHERE id = ?'
-            ).get(userId);
-            connected = !!(row?.spotify_access_token && row.spotify_token_expires_at > Date.now());
-          } else {
-            const row = db.prepare(
-              'SELECT id FROM oauth_connections WHERE user_id = ? AND service = ?'
-            ).get(userId, adapter.meta.id);
-            connected = !!row;
-          }
-        } catch {
-          connected = false;
-        }
-
-        sources.push({
-          id: adapter.meta.id,
-          name: adapter.meta.name,
-          icon: adapter.meta.icon,
-          isSourceOnly: adapter.meta.isSourceOnly,
-          connected: adapter.meta.id === 'youtube' ? true : connected,
-          type: 'external',
-        });
       }
+      // External services removed - only Plex allowed as source
     }
 
     res.json({ sources });
@@ -97,6 +73,7 @@ router.get('/sources', async (req: Request, res: Response, next: NextFunction) =
 // GET /api/cross-import/targets
 // Returns all write-capable targets enriched with Plex library info and
 // OAuth connection status. Marks the user's default Plex server.
+// FILTERED: Only returns YouTube target (no other services)
 // ---------------------------------------------------------------------------
 router.get('/targets', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -106,37 +83,15 @@ router.get('/targets', async (req: Request, res: Response, next: NextFunction) =
     const targets: any[] = [];
 
     for (const adapter of adapterRegistry.listTargets()) {
-      if (adapter.meta.id === 'plex') {
-        const servers = db.prepare('SELECT * FROM user_servers WHERE user_id = ?').all(userId);
-        const defaultServer = servers[0]; // first server is the default
-
-        for (const server of servers) {
-          targets.push({
-            id: `plex:${server.server_client_id}`,
-            name: server.server_name || 'Plex',
-            icon: 'plex',
-            connected: true,
-            libraries: server.library_id ? [{ id: String(server.library_id), name: 'Music' }] : [],
-            isDefault: defaultServer && server.id === defaultServer.id,
-            serverUrl: server.server_url,
-            libraryId: server.library_id,
-          });
-        }
-      } else {
-        // External service — check OAuth connection status
+      // FILTER: Only allow YouTube (plain) as target
+      if (adapter.meta.id === 'youtube') {
+        // Check OAuth connection status
         let connected = false;
         try {
-          if (adapter.meta.id === 'spotify') {
-            const row = db.prepare(
-              'SELECT spotify_access_token, spotify_token_expires_at FROM users WHERE id = ?'
-            ).get(userId);
-            connected = !!(row?.spotify_access_token && row.spotify_token_expires_at > Date.now());
-          } else {
-            const row = db.prepare(
-              'SELECT id FROM oauth_connections WHERE user_id = ? AND service = ?'
-            ).get(userId, adapter.meta.id);
-            connected = !!row;
-          }
+          const row = db.prepare(
+            'SELECT id FROM oauth_connections WHERE user_id = ? AND service = ?'
+          ).get(userId, adapter.meta.id);
+          connected = !!row;
         } catch {
           connected = false;
         }
@@ -150,6 +105,7 @@ router.get('/targets', async (req: Request, res: Response, next: NextFunction) =
           configured: adapter.isConfigured ? adapter.isConfigured() : true,
         });
       }
+      // All other targets removed - only YouTube allowed
     }
 
     res.json({ targets });
@@ -299,10 +255,12 @@ router.post('/sources/:sourceId/tracks', async (req: Request, res: Response, nex
 // ---------------------------------------------------------------------------
 router.post('/search', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { query, targetId } = req.body as {
+    const { query, targetId, allowLive, allowStatic } = req.body as {
       query: string;
       targetId: string;
       targetConfig?: TargetConfig;
+      allowLive?: boolean;
+      allowStatic?: boolean;
     };
 
     if (!query || !targetId) {
@@ -319,7 +277,7 @@ router.post('/search', async (req: Request, res: Response, next: NextFunction) =
       return res.status(404).json({ error: `Target adapter '${targetId}' not found` });
     }
 
-    const results = await adapter.searchCatalog(query, userId, db);
+    const results = await adapter.searchCatalog(query, userId, db, allowLive, allowStatic);
     res.json({ results });
     return;
   } catch (err: any) {
@@ -435,6 +393,7 @@ router.get('/history', (req: Request, res: Response, next: NextFunction) => {
 // ---------------------------------------------------------------------------
 router.get('/match/progress/:sessionId', (req: Request, res: Response) => {
   const { sessionId } = req.params;
+  logger.info('[CrossImport] SSE connection request received', { sessionId, url: req.url });
 
   const origin = req.headers.origin;
   if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
@@ -446,6 +405,7 @@ router.get('/match/progress/:sessionId', (req: Request, res: Response) => {
 
   res.write(': connected\n\n');
   if (typeof (res as any).flush === 'function') (res as any).flush();
+  logger.info('[CrossImport] SSE connection established', { sessionId });
 
   // Reuse the emitter pre-created by POST /match, or create a new one if connecting early
   const emitter = matchSessions.get(sessionId) ?? new EventEmitter();
@@ -468,8 +428,10 @@ router.get('/match/progress/:sessionId', (req: Request, res: Response) => {
   };
 
   emitter.on('progress', (data) => {
-    matchProgressState.set(sessionId, data);
-    sendEvent(data);
+    const payload = { type: 'progress', ...data };
+    matchProgressState.set(sessionId, payload);
+    logger.info('[CrossImport] SSE sending progress event', { sessionId, payload });
+    sendEvent(payload);
   });
   emitter.on('complete', (data) => {
     const payload = { type: 'complete', ...data };
@@ -514,17 +476,80 @@ router.get('/match/progress/:sessionId', (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/cross-import/match/status/:sessionId
+// Polling endpoint — returns current matching progress state.
+// ---------------------------------------------------------------------------
+router.get('/match/status/:sessionId', (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  
+  // Log ALL keys in the Map for debugging
+  const allKeys = Array.from(matchProgressState.keys());
+  const allEntries = Array.from(matchProgressState.entries()).map(([key, value]) => ({
+    key,
+    type: value?.type,
+    phase: value?.phase,
+    current: value?.current,
+    total: value?.total
+  }));
+  
+  logger.info('[CrossImport] Polling request received', { 
+    sessionId,
+    allSessionIds: allKeys,
+    allEntries,
+    hasProgress: matchProgressState.has(sessionId),
+    mapSize: matchProgressState.size
+  });
+  
+  // Return stored progress state or 'waiting' if nothing yet
+  const progress = matchProgressState.get(sessionId);
+  
+  logger.info('[CrossImport] Polling response', { 
+    sessionId, 
+    hasProgress: !!progress, 
+    progressType: progress?.type,
+    progressPhase: progress?.phase,
+    progressCurrent: progress?.current,
+    progressTotal: progress?.total,
+    progressMessage: progress?.message,
+    mapSize: matchProgressState.size
+  });
+  
+  if (progress) {
+    res.json(progress);
+    // Clean up terminal states after client reads them
+    if (progress.type === 'complete' || progress.type === 'error') {
+      logger.info('[CrossImport] Cleaning up terminal state', { sessionId, type: progress.type });
+      matchProgressState.delete(sessionId);
+      const emitter = matchSessions.get(sessionId);
+      if (emitter) {
+        emitter.removeAllListeners();
+        matchSessions.delete(sessionId);
+      }
+    }
+  } else {
+    logger.warn('[CrossImport] NO PROGRESS FOUND - returning waiting', { 
+      sessionId,
+      allKeys,
+      mapSize: matchProgressState.size
+    });
+    res.json({ type: 'waiting' });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/cross-import/match
 // Starts async matching; emits progress/complete/error on the SSE emitter.
 // ---------------------------------------------------------------------------
 router.post('/match', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { sourceId, playlistUrlOrId, targetId, targetConfig, sessionId } = req.body as {
+    const { sourceId, playlistUrlOrId, targetId, targetConfig, sessionId, allowLive, allowStatic } = req.body as {
       sourceId: string;
       playlistUrlOrId: string;
       targetId: string;
       targetConfig?: TargetConfig;
       sessionId: string;
+      allowLive?: boolean;
+      allowStatic?: boolean;
     };
 
     if (!sourceId || !playlistUrlOrId || !targetId || !sessionId) {
@@ -557,6 +582,24 @@ router.post('/match', async (req: Request, res: Response, next: NextFunction) =>
     const preEmitter = new EventEmitter();
     preEmitter.setMaxListeners(20);
     matchSessions.set(sessionId, preEmitter);
+    logger.info('[CrossImport] Pre-created emitter for session', { sessionId, hasEmitter: true });
+
+    // IMPORTANT: Store initial "fetching" state BEFORE responding so polling has something to return immediately
+    const fetchingState = { type: 'progress', phase: 'fetching', current: 0, total: 0 };
+    logger.info('[CrossImport] BEFORE storing initial fetching state', { 
+      sessionId,
+      mapSizeBefore: matchProgressState.size,
+      hasSessionBefore: matchProgressState.has(sessionId),
+      allKeysBefore: Array.from(matchProgressState.keys())
+    });
+    matchProgressState.set(sessionId, fetchingState);
+    logger.info('[CrossImport] AFTER storing initial fetching state', { 
+      sessionId,
+      mapSizeAfter: matchProgressState.size,
+      hasSessionAfter: matchProgressState.has(sessionId),
+      storedData: matchProgressState.get(sessionId),
+      allKeysAfter: Array.from(matchProgressState.keys())
+    });
 
     // Respond immediately so the client can start listening on the SSE stream
     res.json({ jobId, sessionId });
@@ -567,8 +610,13 @@ router.post('/match', async (req: Request, res: Response, next: NextFunction) =>
       const isCancelled = () => cancelledSessions.has(sessionId);
 
       try {
+        logger.info('[CrossImport] Async matching started', { sessionId, jobId, sourceId, targetId });
+        
         // Phase 1: fetch tracks
-        emitter?.emit('progress', { type: 'progress', phase: 'fetching', current: 0, total: 0 });
+        const fetchingProgress = { type: 'progress', phase: 'fetching', current: 0, total: 0 };
+        matchProgressState.set(sessionId, fetchingProgress);
+        logger.info('[CrossImport] Stored fetching progress', { sessionId, hasEmitter: !!emitter });
+        emitter?.emit('progress', fetchingProgress);
 
         const { playlist, tracks } = await sourceAdapter.fetchTracks(playlistUrlOrId, userId, db);
 
@@ -576,6 +624,17 @@ router.post('/match', async (req: Request, res: Response, next: NextFunction) =>
         rawDb.prepare(`
           UPDATE cross_import_jobs SET source_playlist_name = ?, total_count = ? WHERE id = ?
         `).run(playlist.name, tracks.length, jobId);
+
+        // Emit progress with playlist name and total
+        const fetchedProgress = { 
+          type: 'progress', 
+          phase: 'fetching', 
+          current: tracks.length, 
+          total: tracks.length,
+          playlistName: playlist.name,
+        };
+        matchProgressState.set(sessionId, fetchedProgress);
+        emitter?.emit('progress', fetchedProgress);
 
         if (isCancelled()) {
           rawDb.prepare('DELETE FROM cross_import_jobs WHERE id = ?').run(jobId);
@@ -586,13 +645,35 @@ router.post('/match', async (req: Request, res: Response, next: NextFunction) =>
         // Phase 2: match tracks
         const progressEmitter = new EventEmitter();
         progressEmitter.on('progress', (data: any) => {
-          emitter?.emit('progress', {
+          logger.info('[CrossImport] Progress event received from adapter', { 
+            sessionId, 
+            current: data.current, 
+            total: data.total, 
+            currentTrackName: data.currentTrackName 
+          });
+          const progressData = {
             type: 'progress',
             phase: 'matching',
             current: data.current,
             total: data.total,
             playlistName: playlist.name,
+            currentTrackName: data.currentTrackName,
+          };
+          // Store in state FIRST, then emit
+          logger.info('[CrossImport] BEFORE storing progress', { 
+            sessionId, 
+            mapSizeBefore: matchProgressState.size,
+            hasSessionBefore: matchProgressState.has(sessionId)
           });
+          matchProgressState.set(sessionId, progressData);
+          logger.info('[CrossImport] AFTER storing progress', { 
+            sessionId, 
+            mapSizeAfter: matchProgressState.size,
+            hasSessionAfter: matchProgressState.has(sessionId),
+            storedData: matchProgressState.get(sessionId),
+            allKeys: Array.from(matchProgressState.keys())
+          });
+          emitter?.emit('progress', progressData);
         });
 
         const results = await targetAdapter.matchTracks(
@@ -601,7 +682,9 @@ router.post('/match', async (req: Request, res: Response, next: NextFunction) =>
           userId,
           db,
           progressEmitter,
-          isCancelled
+          isCancelled,
+          allowLive,
+          allowStatic
         );
 
         if (isCancelled()) {
@@ -613,16 +696,30 @@ router.post('/match', async (req: Request, res: Response, next: NextFunction) =>
         // Update job status to 'review'
         rawDb.prepare(`UPDATE cross_import_jobs SET status = 'review' WHERE id = ?`).run(jobId);
 
-        emitter?.emit('complete', { results, jobId });
+        const completeData = { type: 'complete', results, jobId };
+        matchProgressState.set(sessionId, completeData);
+        emitter?.emit('complete', completeData);
       } catch (err: any) {
-        logger.error('[CrossImport] Async matching error', { error: err.message, jobId });
+        logger.error('[CrossImport] Async matching error', { error: err.message, stack: err.stack, jobId, sessionId, hasEmitter: !!emitter });
         try {
           rawDb.prepare(`UPDATE cross_import_jobs SET status = 'failed' WHERE id = ?`).run(jobId);
         } catch { /* ignore */ }
-        emitter?.emit('error', { message: err.message || 'Matching failed' });
+        
+        // Send detailed error message to UI
+        const errorMessage = err.message || 'Matching failed';
+        const errorData = { 
+          type: 'error',
+          message: errorMessage,
+          detail: err.stack ? err.stack.split('\n').slice(0, 3).join('\n') : undefined
+        };
+        matchProgressState.set(sessionId, errorData);
+        logger.info('[CrossImport] Stored error in matchProgressState', { sessionId, errorData });
+        emitter?.emit('error', errorData);
+        logger.info('[CrossImport] Emitted error event', { sessionId, hasEmitter: !!emitter });
       } finally {
         cancelledSessions.delete(sessionId);
-        matchSessions.delete(sessionId);
+        // Don't delete matchSessions here - let polling endpoint clean it up after client reads terminal state
+        logger.info('[CrossImport] Async matching finished', { sessionId, jobId });
       }
     });
 
@@ -630,31 +727,6 @@ router.post('/match', async (req: Request, res: Response, next: NextFunction) =>
   } catch (err: any) {
     logger.error('[CrossImport] POST /match error', { error: err.message });
     return next(err);
-  }
-});
-
-// ---------------------------------------------------------------------------
-// GET /api/cross-import/match/status/:sessionId
-// Polling fallback — returns last known progress for the session.
-// ---------------------------------------------------------------------------
-router.get('/match/status/:sessionId', (req: Request, res: Response) => {
-  const { sessionId } = req.params;
-  const progress = matchProgressState.get(sessionId);
-
-  if (progress) {
-    res.json(progress);
-    // Clean up terminal states after client reads them
-    if (progress.type === 'complete' || progress.type === 'error') {
-      matchProgressState.delete(sessionId);
-      const emitter = matchSessions.get(sessionId);
-      if (emitter) {
-        emitter.removeAllListeners();
-        matchSessions.delete(sessionId);
-      }
-      cancelledSessions.delete(sessionId);
-    }
-  } else {
-    res.json({ type: 'waiting' });
   }
 });
 
@@ -670,7 +742,14 @@ router.post('/match/cancel/:sessionId', (req: Request, res: Response) => {
 
   const emitter = matchSessions.get(sessionId);
   if (emitter) {
-    emitter.emit('error', { message: 'Cancelled' });
+    // Use setImmediate to avoid "Unhandled error" from emit
+    setImmediate(() => {
+      try {
+        emitter.emit('error', { message: 'Cancelled' });
+      } catch (err) {
+        // Ignore - emitter may have been removed
+      }
+    });
   }
 
   res.json({ success: true });
@@ -787,7 +866,7 @@ router.get('/oauth/:service/form', (req: Request, res: Response) => {
         label: 'Browser Cookie',
         type: 'textarea',
         placeholder: 'Paste your YouTube cookies here',
-        help: 'Open www.youtube.com, open DevTools (F12) → Network → any request → Request Headers → copy the full "cookie" header value.',
+        help: '1. Open www.youtube.com in your browser and make sure you\'re logged in. 2. Press F12 to open DevTools. 3. Click the "Network" tab. 4. Refresh the page (F5). 5. Click any request in the list. 6. In the "Headers" section on the right, scroll down to "Request Headers". 7. Find the "cookie:" line and copy EVERYTHING after "cookie: " (it\'s very long, that\'s normal). 8. Paste it here.',
       }],
     },
     apple: {

@@ -35,7 +35,7 @@ function AppRoutes() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="import" element={<ImportPage />} />
-        <Route path="cross-import" element={<CrossImportPage />} />
+        <Route path="youtube" element={<CrossImportPage />} />
         <Route path="generate" element={<GenerateMixesPage />} />
         <Route path="playlists" element={<PlaylistsPage />} />
         <Route path="playlists/edit" element={<EditPlaylistsPage />} />

@@ -23,7 +23,7 @@ export const amazonTargetAdapter: TargetAdapter = {
     return false; // Amazon Music has no public write API
   },
 
-  async searchCatalog(_query: string, _userId: number, _db: any): Promise<MatchResult[]> {
+  async searchCatalog(_query: string, _userId: number, _db: any, _allowLive?: boolean, _allowStatic?: boolean): Promise<MatchResult[]> {
     throw new Error('Amazon Music does not provide a public API for playlist creation. You can import FROM Amazon Music but not TO it.');
   },
 

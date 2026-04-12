@@ -53,7 +53,7 @@ export const listenbrainzTargetAdapter: TargetAdapter = {
     requiresOAuth: true,
   } satisfies ServiceMeta,
 
-  async searchCatalog(query: string, userId: number, db: any): Promise<MatchResult[]> {
+  async searchCatalog(query: string, userId: number, db: any, _allowLive?: boolean, _allowStatic?: boolean): Promise<MatchResult[]> {
     const token = await getToken(userId, db);
     if (!token) throw new Error('Not connected to ListenBrainz. Please add your user token first.');
 

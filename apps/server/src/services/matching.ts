@@ -475,7 +475,10 @@ function cleanArtistName(artist: string): string {
   
   if (currentMatchingSettings.ignoreFeaturedArtists) {
     for (const pattern of currentMatchingSettings.featuredArtistPatterns) {
-      const regex = new RegExp(`\\s+${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.?\\s+.+$`, 'gi');
+      // More flexible regex: handles "feat", "feat.", "featuring" with or without spaces/periods
+      // Matches: "feat Post Malone", "feat. Post Malone", "featuring Post Malone", etc.
+      const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\.$/,''); // Remove trailing period from pattern
+      const regex = new RegExp(`\\s+${escapedPattern}\\.?\\s+.+$`, 'gi');
       cleaned = cleaned.replace(regex, '');
     }
   }
@@ -487,6 +490,8 @@ function normalizeForComparison(str: string): string {
     .replace(/[\u2018\u2019\u201A\u201B\u0027\u0060\u00B4'`�]/g, '')
     .replace(/[\u201C\u201D\u201E\u201F"]/g, '')
     .replace(/\$/g, 's').replace(/\//g, '').replace(/\./g, '')
+    // Handle common apostrophe contractions: comin' -> coming, goin' -> going, etc.
+    .replace(/\b(\w+)in\b/g, '$1ing') // Convert "comin", "goin", "doin" to "coming", "going", "doing"
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/(\d)\s+([ap]m)\b/gi, '$1$2') // Normalize "9 PM" to "9pm", "3 AM" to "3am"
     .replace(/\s+/g, ' ').trim();

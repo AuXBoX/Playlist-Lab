@@ -11,7 +11,9 @@ interface TrackInfo {
 
 interface Props {
   source: SourceInfo;
-  onPlaylistSelected: (playlist: PlaylistInfo, urlOrId: string) => void;
+  onPlaylistSelected: (playlist: PlaylistInfo, urlOrId: string, allowLive: boolean, allowStatic: boolean) => void;
+  allowLive?: boolean;
+  allowStatic?: boolean;
 }
 
 const URL_PATTERN = /^https?:\/\//i;
@@ -162,7 +164,7 @@ const PreviewModal: FC<PreviewModalProps> = ({ sourceId, playlist, urlOrId, onSe
 // ---------------------------------------------------------------------------
 // PlaylistStep
 // ---------------------------------------------------------------------------
-export const PlaylistStep: FC<Props> = ({ source, onPlaylistSelected }) => {
+export const PlaylistStep: FC<Props> = ({ source, onPlaylistSelected, allowLive: initialAllowLive, allowStatic: initialAllowStatic }) => {
   const [allPlaylists, setAllPlaylists] = useState<PlaylistInfo[]>([]);
   const [searchResults, setSearchResults] = useState<PlaylistInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -172,6 +174,8 @@ export const PlaylistStep: FC<Props> = ({ source, onPlaylistSelected }) => {
   const [fetchingPreview, setFetchingPreview] = useState(false);
   const [preview, setPreview] = useState<PlaylistInfo | null>(null);
   const [previewModal, setPreviewModal] = useState<{ playlist: PlaylistInfo; urlOrId: string } | null>(null);
+  const [allowLive, setAllowLive] = useState(initialAllowLive ?? false);
+  const [allowStatic, setAllowStatic] = useState(initialAllowStatic ?? false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sourceBase = source.id.split(':')[0];
@@ -293,72 +297,97 @@ export const PlaylistStep: FC<Props> = ({ source, onPlaylistSelected }) => {
   const showEmptyAll = !isLoadingList && searchResults === null && supportsListing && !query.trim() && allPlaylists.length === 0;
 
   return (
-    <div>
-      <h2 className="step-section-title">Choose a playlist</h2>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <div style={{ flexShrink: 0 }}>
+        <h2 className="step-section-title">Choose a playlist</h2>
 
-      {/* Universal search / URL bar */}
-      <div style={{ marginBottom: '1.25rem' }}>
-        <div style={{ position: 'relative' }}>
-          <span style={{
-            position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)',
-            color: 'var(--text-muted, #666)', fontSize: '1rem', pointerEvents: 'none',
-          }}>
-            {isUrl ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            )}
-          </span>
-          <input
-            type="text"
-            className="input"
-            style={{ paddingLeft: '2.25rem', paddingRight: (fetchingPreview || searching) ? '2.5rem' : undefined }}
-            placeholder={getSearchPlaceholder(source.id)}
-            value={query}
-            onChange={e => handleQueryChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            autoFocus
-          />
-          {(fetchingPreview || searching) && (
-            <span style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)' }}>
-              <div className="loading-spinner" style={{ width: '16px', height: '16px', borderWidth: '2px' }} />
+        {/* Universal search / URL bar */}
+        <div style={{ marginBottom: '1.25rem' }}>
+          <div style={{ position: 'relative' }}>
+            <span style={{
+              position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)',
+              color: 'var(--text-muted, #666)', fontSize: '1rem', pointerEvents: 'none',
+            }}>
+              {isUrl ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              )}
             </span>
-          )}
-        </div>
-      </div>
-
-      {error && <div className="error-message" style={{ marginBottom: '1rem' }}>{error}</div>}
-
-      {/* URL preview result */}
-      {preview && (
-        <div className="playlist-list-item" style={{ marginBottom: '1.25rem', cursor: 'default', background: 'var(--bg-secondary)' }}>
-          {preview.coverUrl && (
-            <img
-              src={preview.coverUrl}
-              alt={preview.name}
-              style={{ width: 48, height: 48, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
+            <input
+              type="text"
+              className="input"
+              style={{ paddingLeft: '2.25rem', paddingRight: (fetchingPreview || searching) ? '2.5rem' : undefined }}
+              placeholder={getSearchPlaceholder(source.id)}
+              value={query}
+              onChange={e => handleQueryChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
             />
-          )}
-          <div className="playlist-list-item-info">
-            <div className="playlist-list-item-name">{preview.name}</div>
-            <div className="playlist-list-item-meta">
-              {preview.trackCount} tracks
-              {preview.durationMs ? ` · ${formatDuration(preview.durationMs)}` : ''}
+            {(fetchingPreview || searching) && (
+              <span style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)' }}>
+                <div className="loading-spinner" style={{ width: '16px', height: '16px', borderWidth: '2px' }} />
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* YouTube matching preferences */}
+        <div style={{ marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+            <input
+              type="checkbox"
+              checked={allowLive}
+              onChange={e => setAllowLive(e.target.checked)}
+            />
+            Include live performances
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+            <input
+              type="checkbox"
+              checked={allowStatic}
+              onChange={e => setAllowStatic(e.target.checked)}
+            />
+            Include static image videos
+          </label>
+        </div>
+
+        {error && <div className="error-message" style={{ marginBottom: '1rem' }}>{error}</div>}
+
+        {/* URL preview result */}
+        {preview && (
+          <div className="playlist-list-item" style={{ marginBottom: '1.25rem', cursor: 'default', background: 'var(--bg-secondary)' }}>
+            {preview.coverUrl && (
+              <img
+                src={preview.coverUrl}
+                alt={preview.name}
+                style={{ width: 48, height: 48, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
+              />
+            )}
+            <div className="playlist-list-item-info">
+              <div className="playlist-list-item-name">{preview.name}</div>
+              <div className="playlist-list-item-meta">
+                {preview.trackCount} tracks
+                {preview.durationMs ? ` · ${formatDuration(preview.durationMs)}` : ''}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+              <button
+                className="btn btn-secondary btn-small"
+                onClick={() => setPreviewModal({ playlist: preview, urlOrId: query.trim() })}
+              >
+                Preview
+              </button>
+              <button className="btn btn-primary btn-small" onClick={() => onPlaylistSelected(preview, query.trim(), allowLive, allowStatic)}>
+                Use this
+              </button>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
-            <button
-              className="btn btn-secondary btn-small"
-              onClick={() => setPreviewModal({ playlist: preview, urlOrId: query.trim() })}
-            >
-              Preview
-            </button>
-            <button className="btn btn-primary btn-small" onClick={() => onPlaylistSelected(preview, query.trim())}>
-              Use this
-            </button>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* Scrollable content area */}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
       {/* Loading spinner for list */}
       {isLoadingList && (
@@ -385,7 +414,7 @@ export const PlaylistStep: FC<Props> = ({ source, onPlaylistSelected }) => {
               <div
                 className="playlist-list-item-info"
                 style={{ cursor: 'pointer' }}
-                onClick={() => onPlaylistSelected(pl, pl.id)}
+                onClick={() => onPlaylistSelected(pl, pl.id, allowLive, allowStatic)}
               >
                 <div className="playlist-list-item-name">{pl.name}</div>
                 <div className="playlist-list-item-meta">
@@ -402,7 +431,7 @@ export const PlaylistStep: FC<Props> = ({ source, onPlaylistSelected }) => {
                 </button>
                 <button
                   className="btn btn-primary btn-small"
-                  onClick={() => onPlaylistSelected(pl, pl.id)}
+                  onClick={() => onPlaylistSelected(pl, pl.id, allowLive, allowStatic)}
                 >
                   Select
                 </button>
@@ -446,6 +475,7 @@ export const PlaylistStep: FC<Props> = ({ source, onPlaylistSelected }) => {
           </div>
         </div>
       )}
+      </div>
 
       {/* Preview modal */}
       {previewModal && (
@@ -454,7 +484,7 @@ export const PlaylistStep: FC<Props> = ({ source, onPlaylistSelected }) => {
           playlist={previewModal.playlist}
           urlOrId={previewModal.urlOrId}
           onSelect={() => {
-            onPlaylistSelected(previewModal.playlist, previewModal.urlOrId);
+            onPlaylistSelected(previewModal.playlist, previewModal.urlOrId, allowLive, allowStatic);
             setPreviewModal(null);
           }}
           onClose={() => setPreviewModal(null)}

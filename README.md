@@ -158,6 +158,7 @@ The Windows/macOS/Linux server installers include a system tray application for 
 - [User Guide](docs/USER_GUIDE.md) - Complete user documentation
 - [API Documentation](docs/API.md) - REST API reference
 - [Deployment Guide](docs/DEPLOYMENT_ANYWHERE.md) - Deploy to VPS, cloud, or local network
+- [YouTube OAuth Setup](docs/YOUTUBE_OAUTH_SETUP.md) - Configure YouTube playlist export
 
 ### Developer Guides
 - [Developer Guide](docs/DEVELOPER_GUIDE.md) - Development setup and workflow

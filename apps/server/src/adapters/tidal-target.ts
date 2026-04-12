@@ -84,7 +84,7 @@ export const tidalTargetAdapter: TargetAdapter = {
     return true; // Uses public client ID, no registration needed
   },
 
-  async searchCatalog(query: string, userId: number, db: any): Promise<MatchResult[]> {
+  async searchCatalog(query: string, userId: number, db: any, _allowLive?: boolean, _allowStatic?: boolean): Promise<MatchResult[]> {
     const auth = await getToken(userId, db);
     if (!auth) throw new Error('Not connected to Tidal. Please log in.');
 

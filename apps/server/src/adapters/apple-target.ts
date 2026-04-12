@@ -82,7 +82,7 @@ export const appleTargetAdapter: TargetAdapter = {
     requiresOAuth: true,
   } satisfies ServiceMeta,
 
-  async searchCatalog(query: string, userId: number, db: any): Promise<MatchResult[]> {
+  async searchCatalog(query: string, userId: number, db: any, _allowLive?: boolean, _allowStatic?: boolean): Promise<MatchResult[]> {
     const userToken = await getUserToken(userId, db);
     if (!userToken) throw new Error('Not connected to Apple Music. Please authenticate first.');
     const devToken = generateDeveloperToken();

@@ -82,6 +82,7 @@ export const Sidebar: FC = () => {
   const navItems = [
     { path: '/', label: 'Dashboard' },
     { path: '/import', label: 'Import' },
+    { path: '/youtube', label: 'YouTube' },
     { path: '/generate', label: 'Generate Mixes' },
     { path: '/schedules', label: 'Schedules' },
   ];
@@ -143,10 +144,8 @@ export const Sidebar: FC = () => {
           >
             <span className="sidebar-link-label">Settings</span>
           </NavLink>
-        </div>
 
-        {user?.isAdmin && (
-          <div className="sidebar-nav-bottom">
+          {user?.isAdmin && (
             <NavLink
               to="/admin"
               className={({ isActive }) =>
@@ -155,27 +154,27 @@ export const Sidebar: FC = () => {
             >
               <span className="sidebar-link-label">Admin</span>
             </NavLink>
+          )}
+        </div>
+
+        {version && (
+          <div className="sidebar-nav-bottom">
+            <div className="sidebar-version-inline">
+              <span className="sidebar-version-text">v{version}</span>
+              {updateAvailable && (
+                <button 
+                  className="sidebar-update-btn-inline"
+                  onClick={handleUpdate}
+                  disabled={isUpdating}
+                  title={`Update to v${updateInfo?.latestVersion}`}
+                >
+                  {isUpdating ? 'Updating...' : 'Update'}
+                </button>
+              )}
+            </div>
           </div>
         )}
       </nav>
-      
-      {version && (
-        <div className="sidebar-footer">
-          <div className="sidebar-version">
-            v{version}
-          </div>
-          {updateAvailable && (
-            <button 
-              className="sidebar-update-btn"
-              onClick={handleUpdate}
-              disabled={isUpdating}
-              title={`Update to v${updateInfo?.latestVersion}`}
-            >
-              {isUpdating ? 'Updating...' : 'Update Available'}
-            </button>
-          )}
-        </div>
-      )}
     </aside>
   );
 };
