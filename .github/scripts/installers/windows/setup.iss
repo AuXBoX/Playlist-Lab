@@ -74,10 +74,6 @@ Source: "{#MyAppSourceDir}\apps\server\.env.example"; DestDir: "{userappdata}\Pl
 ; Create persistent data directory in user's AppData (never deleted on uninstall)
 Name: "{userappdata}\Playlist Lab\data"; Flags: uninsneveruninstall
 Name: "{userappdata}\Playlist Lab\logs"; Flags: uninsneveruninstall
-; Create @playlist-lab directory for shared package
-Name: "{app}\server\node_modules\@playlist-lab"
-Name: "{app}\server\node_modules\@playlist-lab\shared"
-Name: "{app}\server\node_modules\@playlist-lab\shared\dist"
 
 [Tasks]
 Name: "startupmode"; Description: "Choose how to start Playlist Lab Server:"; GroupDescription: "Startup Configuration:"; Flags: exclusive
@@ -106,10 +102,33 @@ Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; 
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode remove"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
 
 [Code]
+procedure CreateNodeModulesDirectories();
+var
+  AppDir: String;
+begin
+  AppDir := ExpandConstant('{app}');
+  
+  // Create @playlist-lab directory structure
+  if not DirExists(AppDir + '\server\node_modules') then
+    CreateDir(AppDir + '\server\node_modules');
+  if not DirExists(AppDir + '\server\node_modules\@playlist-lab') then
+    CreateDir(AppDir + '\server\node_modules\@playlist-lab');
+  if not DirExists(AppDir + '\server\node_modules\@playlist-lab\shared') then
+    CreateDir(AppDir + '\server\node_modules\@playlist-lab\shared');
+  if not DirExists(AppDir + '\server\node_modules\@playlist-lab\shared\dist') then
+    CreateDir(AppDir + '\server\node_modules\@playlist-lab\shared\dist');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
 begin
+  if CurStep = ssInstall then
+  begin
+    // Create directories before file installation
+    CreateNodeModulesDirectories();
+  end;
+  
   if CurStep = ssPostInstall then
   begin
     // If this is a silent install (update), restart the tray app
