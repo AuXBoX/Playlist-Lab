@@ -102,33 +102,12 @@ Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; 
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode remove"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
 
 [Code]
-procedure FixPackageJsonForInstall();
-var
-  PackageJsonPath: String;
-  PackageJsonContent: AnsiString;
-begin
-  PackageJsonPath := ExpandConstant('{app}\server\package.json');
-  
-  // Read package.json
-  if LoadStringFromFile(PackageJsonPath, PackageJsonContent) then
-  begin
-    // Replace file: reference with relative path that works in installed location
-    StringChangeEx(PackageJsonContent, '"@playlist-lab/shared": "file:../../packages/shared"', '"@playlist-lab/shared": "file:../../packages/shared"', True);
-    
-    // Save modified package.json
-    SaveStringToFile(PackageJsonPath, PackageJsonContent, False);
-  end;
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
-    // Fix package.json before npm install
-    FixPackageJsonForInstall();
-    
     // If this is a silent install (update), restart the tray app
     if WizardSilent then
     begin
