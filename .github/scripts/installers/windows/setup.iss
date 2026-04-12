@@ -42,14 +42,14 @@ Source: "{#MyAppSourceDir}\release\windows\nodejs\*"; DestDir: "{app}\nodejs"; F
 ; Server files
 Source: "{#MyAppSourceDir}\apps\server\dist\*"; DestDir: "{app}\server\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MyAppSourceDir}\apps\server\package.json"; DestDir: "{app}\server"; Flags: ignoreversion
-Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Excludes: "@playlist-lab"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Web app files
 Source: "{#MyAppSourceDir}\apps\web\dist\*"; DestDir: "{app}\web\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Shared package
-Source: "{#MyAppSourceDir}\packages\shared\dist\*"; DestDir: "{app}\packages\shared\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#MyAppSourceDir}\packages\shared\package.json"; DestDir: "{app}\packages\shared"; Flags: ignoreversion
+; Shared package (install into server's node_modules)
+Source: "{#MyAppSourceDir}\packages\shared\dist\*"; DestDir: "{app}\server\node_modules\@playlist-lab\shared\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\packages\shared\package.json"; DestDir: "{app}\server\node_modules\@playlist-lab\shared"; Flags: ignoreversion
 
 ; Tray app
 Source: "{#SourcePath}\..\common\tray-app.js"; DestDir: "{app}"; Flags: ignoreversion
