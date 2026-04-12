@@ -48,7 +48,7 @@ Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\n
 Source: "{#MyAppSourceDir}\apps\web\dist\*"; DestDir: "{app}\web\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Shared package (install into server's node_modules)
-Source: "{#MyAppSourceDir}\packages\shared\dist\*"; DestDir: "{app}\server\node_modules\@playlist-lab\shared\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\packages\shared\dist\*"; DestDir: "{app}\server\node_modules\@playlist-lab\shared\dist"; BeforeInstall: CreateSharedPackageDirs; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MyAppSourceDir}\packages\shared\package.json"; DestDir: "{app}\server\node_modules\@playlist-lab\shared"; Flags: ignoreversion
 
 ; Tray app
@@ -102,6 +102,16 @@ Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; 
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode remove"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
 
 [Code]
+procedure CreateSharedPackageDirs();
+var
+  AppDir: String;
+begin
+  AppDir := ExpandConstant('{app}');
+  
+  // Create @playlist-lab directory structure before copying files
+  ForceDirectories(AppDir + '\server\node_modules\@playlist-lab\shared\dist');
+end;
+
 procedure CreateNodeModulesDirectories();
 var
   AppDir: String;
