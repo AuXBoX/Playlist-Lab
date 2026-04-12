@@ -42,14 +42,13 @@ Source: "{#MyAppSourceDir}\release\windows\nodejs\*"; DestDir: "{app}\nodejs"; F
 ; Server files
 Source: "{#MyAppSourceDir}\apps\server\dist\*"; DestDir: "{app}\server\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MyAppSourceDir}\apps\server\package.json"; DestDir: "{app}\server"; Flags: ignoreversion
-Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Excludes: "\@playlist-lab\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Web app files
 Source: "{#MyAppSourceDir}\apps\web\dist\*"; DestDir: "{app}\web\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Shared package (install into server's node_modules)
-Source: "{#MyAppSourceDir}\packages\shared\dist\*"; DestDir: "{app}\server\node_modules\@playlist-lab\shared\dist"; BeforeInstall: CreateSharedPackageDirs; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#MyAppSourceDir}\packages\shared\package.json"; DestDir: "{app}\server\node_modules\@playlist-lab\shared"; Flags: ignoreversion
+; Shared package (copy to a location npm can find)
+Source: "{#MyAppSourceDir}\packages\shared\dist\*"; DestDir: "{app}\packages\shared\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\packages\shared\package.json"; DestDir: "{app}\packages\shared"; Flags: ignoreversion
 
 ; Tray app
 Source: "{#SourcePath}\..\common\tray-app.js"; DestDir: "{app}"; Flags: ignoreversion
@@ -91,6 +90,7 @@ Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Playlist Lab"; Filename: "http://localhost:3001"; IconFilename: "{app}\icons\tray-icon.png"
 
 [Run]
+Filename: "{app}\nodejs\npm.cmd"; Parameters: "install --production --no-optional --legacy-peer-deps"; WorkingDir: "{app}\server"; StatusMsg: "Installing server dependencies..."; Flags: runhidden waituntilterminated
 Filename: "{app}\nodejs\npm.cmd"; Parameters: "install --production --no-optional"; WorkingDir: "{app}"; StatusMsg: "Installing tray app dependencies..."; Flags: runhidden waituntilterminated
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode autostart"; WorkingDir: "{app}"; StatusMsg: "Configuring startup..."; Flags: runhidden waituntilterminated; Tasks: startupmode\autostart
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode service"; WorkingDir: "{app}"; StatusMsg: "Configuring service..."; Flags: runhidden waituntilterminated; Tasks: startupmode\service
@@ -102,45 +102,33 @@ Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; 
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode remove"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
 
 [Code]
-procedure CreateSharedPackageDirs();
+procedure FixPackageJsonForInstall();
 var
-  AppDir: String;
+  PackageJsonPath: String;
+  PackageJsonContent: AnsiString;
 begin
-  AppDir := ExpandConstant('{app}');
+  PackageJsonPath := ExpandConstant('{app}\server\package.json');
   
-  // Create @playlist-lab directory structure before copying files
-  ForceDirectories(AppDir + '\server\node_modules\@playlist-lab\shared\dist');
-end;
-
-procedure CreateNodeModulesDirectories();
-var
-  AppDir: String;
-begin
-  AppDir := ExpandConstant('{app}');
-  
-  // Create @playlist-lab directory structure
-  if not DirExists(AppDir + '\server\node_modules') then
-    CreateDir(AppDir + '\server\node_modules');
-  if not DirExists(AppDir + '\server\node_modules\@playlist-lab') then
-    CreateDir(AppDir + '\server\node_modules\@playlist-lab');
-  if not DirExists(AppDir + '\server\node_modules\@playlist-lab\shared') then
-    CreateDir(AppDir + '\server\node_modules\@playlist-lab\shared');
-  if not DirExists(AppDir + '\server\node_modules\@playlist-lab\shared\dist') then
-    CreateDir(AppDir + '\server\node_modules\@playlist-lab\shared\dist');
+  // Read package.json
+  if LoadStringFromFile(PackageJsonPath, PackageJsonContent) then
+  begin
+    // Replace file: reference with relative path that works in installed location
+    StringChangeEx(PackageJsonContent, '"@playlist-lab/shared": "file:../../packages/shared"', '"@playlist-lab/shared": "file:../../packages/shared"', True);
+    
+    // Save modified package.json
+    SaveStringToFile(PackageJsonPath, PackageJsonContent, False);
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
 begin
-  if CurStep = ssInstall then
-  begin
-    // Create directories before file installation
-    CreateNodeModulesDirectories();
-  end;
-  
   if CurStep = ssPostInstall then
   begin
+    // Fix package.json before npm install
+    FixPackageJsonForInstall();
+    
     // If this is a silent install (update), restart the tray app
     if WizardSilent then
     begin
