@@ -42,7 +42,7 @@ Source: "{#MyAppSourceDir}\release\windows\nodejs\*"; DestDir: "{app}\nodejs"; F
 ; Server files
 Source: "{#MyAppSourceDir}\apps\server\dist\*"; DestDir: "{app}\server\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MyAppSourceDir}\apps\server\package.json"; DestDir: "{app}\server"; Flags: ignoreversion
-Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Excludes: "@playlist-lab"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Excludes: "\@playlist-lab\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Web app files
 Source: "{#MyAppSourceDir}\apps\web\dist\*"; DestDir: "{app}\web\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -74,6 +74,10 @@ Source: "{#MyAppSourceDir}\apps\server\.env.example"; DestDir: "{userappdata}\Pl
 ; Create persistent data directory in user's AppData (never deleted on uninstall)
 Name: "{userappdata}\Playlist Lab\data"; Flags: uninsneveruninstall
 Name: "{userappdata}\Playlist Lab\logs"; Flags: uninsneveruninstall
+; Create @playlist-lab directory for shared package
+Name: "{app}\server\node_modules\@playlist-lab"
+Name: "{app}\server\node_modules\@playlist-lab\shared"
+Name: "{app}\server\node_modules\@playlist-lab\shared\dist"
 
 [Tasks]
 Name: "startupmode"; Description: "Choose how to start Playlist Lab Server:"; GroupDescription: "Startup Configuration:"; Flags: exclusive
