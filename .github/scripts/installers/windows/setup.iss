@@ -106,6 +106,7 @@ var
   TempSharedDir: String;
   TargetDir: String;
   PlaylistLabDir: String;
+  ResultCode: Integer;
 begin
   TempSharedDir := ExpandConstant('{app}\temp-shared');
   PlaylistLabDir := ExpandConstant('{app}\server\node_modules\@playlist-lab');
@@ -122,11 +123,10 @@ begin
       CreateDir(TargetDir);
     
     // Copy files from temp to target
-    if Exec(ExpandConstant('{cmd}'), '/c xcopy "' + TempSharedDir + '" "' + TargetDir + '" /E /I /Y /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    begin
-      // Delete temp directory
-      DelTree(TempSharedDir, True, True, True);
-    end;
+    Exec(ExpandConstant('{cmd}'), '/c xcopy "' + TempSharedDir + '" "' + TargetDir + '" /E /I /Y /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    
+    // Delete temp directory
+    DelTree(TempSharedDir, True, True, True);
   end;
 end;
 
