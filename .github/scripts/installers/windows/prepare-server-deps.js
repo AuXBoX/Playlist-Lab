@@ -44,8 +44,17 @@ if (fs.existsSync(sharedInNodeModules)) {
 
 // Step 3: Copy the actual shared package files
 console.log('\n[3/3] Copying shared package as real directory...');
+
+// Ensure the @playlist-lab directory exists
 if (!fs.existsSync(playlistLabDir)) {
   fs.mkdirSync(playlistLabDir, { recursive: true });
+  console.log('✓ Created @playlist-lab directory');
+}
+
+// Ensure the shared directory exists
+if (!fs.existsSync(sharedInNodeModules)) {
+  fs.mkdirSync(sharedInNodeModules, { recursive: true });
+  console.log('✓ Created @playlist-lab/shared directory');
 }
 
 // Copy shared package dist and package.json
@@ -56,11 +65,9 @@ const sharedPkgDest = path.join(sharedInNodeModules, 'package.json');
 
 if (!fs.existsSync(sharedDistSrc)) {
   console.error('✗ Shared package dist not found. Did you build it?');
+  console.error('  Expected:', sharedDistSrc);
   process.exit(1);
 }
-
-// Create shared directory
-fs.mkdirSync(sharedInNodeModules, { recursive: true });
 
 // Copy dist directory
 copyRecursive(sharedDistSrc, sharedDistDest);
@@ -69,6 +76,13 @@ console.log('✓ Copied shared/dist');
 // Copy package.json
 fs.copyFileSync(sharedPkgSrc, sharedPkgDest);
 console.log('✓ Copied shared/package.json');
+
+// Verify the structure
+console.log('\nVerifying structure:');
+console.log('  @playlist-lab exists:', fs.existsSync(playlistLabDir));
+console.log('  @playlist-lab/shared exists:', fs.existsSync(sharedInNodeModules));
+console.log('  @playlist-lab/shared/dist exists:', fs.existsSync(sharedDistDest));
+console.log('  @playlist-lab/shared/package.json exists:', fs.existsSync(sharedPkgDest));
 
 console.log('\n✓ Server dependencies prepared successfully');
 console.log('✓ node_modules is ready for installer packaging');
