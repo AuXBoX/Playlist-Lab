@@ -42,13 +42,10 @@ Source: "{#MyAppSourceDir}\release\windows\nodejs\*"; DestDir: "{app}\nodejs"; F
 ; Server files
 Source: "{#MyAppSourceDir}\apps\server\dist\*"; DestDir: "{app}\server\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MyAppSourceDir}\apps\server\package.json"; DestDir: "{app}\server"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Web app files
 Source: "{#MyAppSourceDir}\apps\web\dist\*"; DestDir: "{app}\web\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-; Shared package (copy to a location npm can find)
-Source: "{#MyAppSourceDir}\packages\shared\dist\*"; DestDir: "{app}\packages\shared\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#MyAppSourceDir}\packages\shared\package.json"; DestDir: "{app}\packages\shared"; Flags: ignoreversion
 
 ; Tray app
 Source: "{#SourcePath}\..\common\tray-app.js"; DestDir: "{app}"; Flags: ignoreversion
@@ -90,7 +87,6 @@ Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Playlist Lab"; Filename: "http://localhost:3001"; IconFilename: "{app}\icons\tray-icon.png"
 
 [Run]
-Filename: "{app}\nodejs\npm.cmd"; Parameters: "install --production --no-optional --legacy-peer-deps"; WorkingDir: "{app}\server"; StatusMsg: "Installing server dependencies..."; Flags: runhidden waituntilterminated
 Filename: "{app}\nodejs\npm.cmd"; Parameters: "install --production --no-optional"; WorkingDir: "{app}"; StatusMsg: "Installing tray app dependencies..."; Flags: runhidden waituntilterminated
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode autostart"; WorkingDir: "{app}"; StatusMsg: "Configuring startup..."; Flags: runhidden waituntilterminated; Tasks: startupmode\autostart
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode service"; WorkingDir: "{app}"; StatusMsg: "Configuring service..."; Flags: runhidden waituntilterminated; Tasks: startupmode\service

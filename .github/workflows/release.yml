@@ -75,6 +75,12 @@ jobs:
           npm ci --legacy-peer-deps
           npm run build
       
+      # Windows-specific: Prepare server dependencies with node_modules
+      - name: Prepare server dependencies (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: node .github/scripts/installers/windows/prepare-server-deps.js
+      
       # Linux-specific build
       - name: Build Linux packages
         if: matrix.platform == 'linux'
