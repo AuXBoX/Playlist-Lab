@@ -1,49 +1,94 @@
 #!/usr/bin/env node
 /**
  * Prepare server dependencies for Windows installer
- * This script modifies package.json to use a published version of @playlist-lab/shared
- * instead of the workspace file: reference, then runs npm install
+ * This script ensures node_modules is properly set up with the shared package
+ * resolved as a real directory, not a symlink
  */
 
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const serverDir = path.join(__dirname, '../../../../apps/server');
-const packageJsonPath = path.join(serverDir, 'package.json');
-const packageJsonBackupPath = path.join(serverDir, 'package.json.backup');
+const projectRoot = path.join(__dirname, '../../../..');
+const serverDir = path.join(projectRoot, 'apps/server');
+const sharedDir = path.join(projectRoot, 'packages/shared');
+const serverNodeModules = path.join(serverDir, 'node_modules');
+const sharedInNodeModules = path.join(serverNodeModules, '@playlist-lab', 'shared');
 
 console.log('Preparing server dependencies for installer...');
+console.log('Project root:', projectRoot);
+console.log('Server dir:', serverDir);
+console.log('Shared dir:', sharedDir);
 
-// Backup original package.json
-fs.copyFileSync(packageJsonPath, packageJsonBackupPath);
-console.log('✓ Backed up package.json');
-
+// Step 1: Run npm install to get all dependencies
+console.log('\n[1/3] Installing server dependencies...');
 try {
-  // Read package.json
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-  
-  // Replace workspace dependency with local path that will work in installed location
-  // We'll copy the shared package to a location where npm can find it
-  packageJson.dependencies['@playlist-lab/shared'] = 'file:../../packages/shared';
-  
-  // Write modified package.json
-  fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
-  console.log('✓ Modified package.json');
-  
-  // Install dependencies
-  console.log('Installing dependencies...');
   execSync('npm install --production --no-optional --legacy-peer-deps', {
     cwd: serverDir,
     stdio: 'inherit'
   });
   console.log('✓ Dependencies installed');
-  
-} finally {
-  // Restore original package.json
-  fs.copyFileSync(packageJsonBackupPath, packageJsonPath);
-  fs.unlinkSync(packageJsonBackupPath);
-  console.log('✓ Restored original package.json');
+} catch (error) {
+  console.error('✗ Failed to install dependencies');
+  process.exit(1);
 }
 
-console.log('✓ Server dependencies prepared successfully');
+// Step 2: Remove the symlink/reference to @playlist-lab/shared
+console.log('\n[2/3] Removing workspace symlink...');
+const playlistLabDir = path.join(serverNodeModules, '@playlist-lab');
+if (fs.existsSync(sharedInNodeModules)) {
+  // Remove the symlink or directory
+  fs.rmSync(sharedInNodeModules, { recursive: true, force: true });
+  console.log('✓ Removed @playlist-lab/shared symlink');
+}
+
+// Step 3: Copy the actual shared package files
+console.log('\n[3/3] Copying shared package as real directory...');
+if (!fs.existsSync(playlistLabDir)) {
+  fs.mkdirSync(playlistLabDir, { recursive: true });
+}
+
+// Copy shared package dist and package.json
+const sharedDistSrc = path.join(sharedDir, 'dist');
+const sharedDistDest = path.join(sharedInNodeModules, 'dist');
+const sharedPkgSrc = path.join(sharedDir, 'package.json');
+const sharedPkgDest = path.join(sharedInNodeModules, 'package.json');
+
+if (!fs.existsSync(sharedDistSrc)) {
+  console.error('✗ Shared package dist not found. Did you build it?');
+  process.exit(1);
+}
+
+// Create shared directory
+fs.mkdirSync(sharedInNodeModules, { recursive: true });
+
+// Copy dist directory
+copyRecursive(sharedDistSrc, sharedDistDest);
+console.log('✓ Copied shared/dist');
+
+// Copy package.json
+fs.copyFileSync(sharedPkgSrc, sharedPkgDest);
+console.log('✓ Copied shared/package.json');
+
+console.log('\n✓ Server dependencies prepared successfully');
+console.log('✓ node_modules is ready for installer packaging');
+
+// Helper function to copy directories recursively
+function copyRecursive(src, dest) {
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(dest, { recursive: true });
+  }
+  
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    
+    if (entry.isDirectory()) {
+      copyRecursive(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
