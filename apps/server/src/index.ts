@@ -5,25 +5,38 @@ import fs from 'fs';
 import os from 'os';
 
 // Load environment variables FIRST before any other imports
-// Try multiple locations for .env file (AppData for production, cwd for development)
-const possibleEnvPaths = [
-  // Production: AppData folder
-  path.join(os.homedir(), 'AppData', 'Roaming', 'Playlist Lab', '.env'),
-  // Development: current working directory
-  path.resolve(process.cwd(), '.env'),
-  // Alternative: parent directory
-  path.resolve(process.cwd(), '..', '.env'),
-];
+// In production (installed), always use AppData location
+// In development, use current working directory
+const isProduction = process.cwd().includes('Program Files') || process.cwd().includes('Program Files (x86)');
+const appDataEnvPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Playlist Lab', '.env');
 
 let envPath: string | null = null;
-for (const testPath of possibleEnvPaths) {
-  if (fs.existsSync(testPath)) {
-    envPath = testPath;
-    break;
+
+if (isProduction) {
+  // Production: Only use AppData location
+  envPath = appDataEnvPath;
+  console.log('[Startup] Production mode detected');
+  console.log('[Startup] .env file path:', envPath);
+  console.log('[Startup] .env file exists:', fs.existsSync(envPath));
+} else {
+  // Development: Try multiple locations
+  const possibleEnvPaths = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '..', '.env'),
+    appDataEnvPath,
+  ];
+  
+  for (const testPath of possibleEnvPaths) {
+    if (fs.existsSync(testPath)) {
+      envPath = testPath;
+      break;
+    }
   }
+  console.log('[Startup] Development mode detected');
+  console.log('[Startup] .env file path:', envPath || 'not found');
 }
 
-if (envPath) {
+if (envPath && fs.existsSync(envPath)) {
   console.log('[Startup] Loading .env from:', envPath);
   const result = dotenv.config({ path: envPath });
   if (result.error) {
@@ -33,8 +46,8 @@ if (envPath) {
     console.log('[Startup] YOUTUBE_CLIENT_ID:', process.env.YOUTUBE_CLIENT_ID?.substring(0, 20) + '...');
   }
 } else {
-  console.log('[Startup] No .env file found in any of these locations:');
-  possibleEnvPaths.forEach(p => console.log('  -', p));
+  console.log('[Startup] No .env file found at:', envPath || 'unknown');
+  console.log('[Startup] This is normal if you haven\'t configured any API keys yet');
 }
 
 // NOW import adapters after env vars are loaded

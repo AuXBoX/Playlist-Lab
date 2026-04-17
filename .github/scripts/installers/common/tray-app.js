@@ -335,7 +335,9 @@ function zlibDeflate(data) {
 }
 
 function getIconPath(color) {
-  const iconName = color === 'green' ? 'tray-running.png' : 'tray-stopped.png';
+  // On Windows, use .ico files; on other platforms use .png
+  const iconExt = isWindows ? 'ico' : 'png';
+  const iconName = color === 'green' ? `tray-running.${iconExt}` : `tray-stopped.${iconExt}`;
   
   // Try multiple possible locations for the icons
   const possiblePaths = [
@@ -457,9 +459,10 @@ function startTray(SysTray) {
       }
     },
     onUpdateError: (error) => {
-      log(`Update error: ${error.message}`);
+      log(`Update check failed: ${error.message}`);
       isDownloadingUpdate = false;
-      notify('Update Error', `Failed to check for updates: ${error.message}`);
+      // Don't show error notification for network issues - just log it
+      // Users don't need to be bothered by update check failures
       refreshTray();
     }
   });

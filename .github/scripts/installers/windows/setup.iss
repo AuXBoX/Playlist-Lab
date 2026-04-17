@@ -42,10 +42,7 @@ Source: "{#MyAppSourceDir}\release\windows\nodejs\*"; DestDir: "{app}\nodejs"; F
 ; Server files
 Source: "{#MyAppSourceDir}\apps\server\dist\*"; DestDir: "{app}\server\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MyAppSourceDir}\apps\server\package.json"; DestDir: "{app}\server"; Flags: ignoreversion
-Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Excludes: "@playlist-lab"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-; Shared package - copy to temp location first, then move during install
-Source: "{#MyAppSourceDir}\apps\server\node_modules\@playlist-lab\shared\*"; DestDir: "{app}\temp-shared"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\apps\server\node_modules\*"; DestDir: "{app}\server\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Web app files
 Source: "{#MyAppSourceDir}\apps\web\dist\*"; DestDir: "{app}\web\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -101,44 +98,12 @@ Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; 
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode remove"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
 
 [Code]
-procedure MoveSharedPackage();
-var
-  TempSharedDir: String;
-  TargetDir: String;
-  PlaylistLabDir: String;
-  ResultCode: Integer;
-begin
-  TempSharedDir := ExpandConstant('{app}\temp-shared');
-  PlaylistLabDir := ExpandConstant('{app}\server\node_modules\@playlist-lab');
-  TargetDir := PlaylistLabDir + '\shared';
-  
-  // Create @playlist-lab directory
-  if not DirExists(PlaylistLabDir) then
-    CreateDir(PlaylistLabDir);
-  
-  // Move temp-shared to @playlist-lab/shared
-  if DirExists(TempSharedDir) then
-  begin
-    if not DirExists(TargetDir) then
-      CreateDir(TargetDir);
-    
-    // Copy files from temp to target
-    Exec(ExpandConstant('{cmd}'), '/c xcopy "' + TempSharedDir + '" "' + TargetDir + '" /E /I /Y /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    
-    // Delete temp directory
-    DelTree(TempSharedDir, True, True, True);
-  end;
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
-    // Move shared package to correct location
-    MoveSharedPackage();
-    
     // If this is a silent install (update), restart the tray app
     if WizardSilent then
     begin
