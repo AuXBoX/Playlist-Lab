@@ -602,32 +602,24 @@ function startTray(SysTray) {
         exec(`powershell -Command "${ps}"`, async (err, stdout) => {
           if (stdout.trim() === 'Yes') {
             log('User confirmed installation');
-            notify('Installing Update', 'Stopping server and closing application...');
+            notify('Installing Update', 'Launching installer...');
             
-            // Stop server before installing
-            stopServer(() => {
-              // Wait longer for server to fully stop, then kill all related processes
-              setTimeout(async () => {
-                // Kill any remaining node.exe and wscript.exe processes to ensure clean install
-                log('Ensuring all processes are stopped...');
-                exec('taskkill /F /IM node.exe /T >nul 2>&1 & taskkill /F /IM wscript.exe /T >nul 2>&1', () => {
-                  // Wait a bit more after force killing
-                  setTimeout(async () => {
-                    try {
-                      log('Launching installer...');
-                      await updater.installUpdate(installerPath);
-                      // Installer will close this app and restart it
-                      setTimeout(() => process.exit(0), 1000);
-                    } catch (error) {
-                      log(`Installation error: ${error.message}`);
-                      notify('Installation Error', `Failed to start installer: ${error.message}`);
-                      isDownloadingUpdate = false;
-                      refreshTray();
-                    }
-                  }, 2000); // Wait 2 more seconds after force kill
-                });
-              }, 3000); // Wait 3 seconds for server to fully stop
-            });
+            try {
+              log('Launching installer...');
+              await updater.installUpdate(installerPath);
+              
+              // Give installer time to start, then exit
+              // The installer will handle stopping the server and tray app
+              setTimeout(() => {
+                log('Installer launched, exiting tray app...');
+                process.exit(0);
+              }, 3000);
+            } catch (error) {
+              log(`Installation error: ${error.message}`);
+              notify('Installation Error', `Failed to start installer: ${error.message}`);
+              isDownloadingUpdate = false;
+              refreshTray();
+            }
           } else {
             log('User cancelled installation');
             notify('Update Cancelled', 'Update installer saved. You can install it later from the tray menu.');
