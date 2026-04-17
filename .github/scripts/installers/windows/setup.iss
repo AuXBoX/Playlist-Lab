@@ -174,15 +174,22 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
   StartupShortcut: String;
+  IsNodeRunning: Boolean;
 begin
   if CurStep = ssPostInstall then
   begin
     // Check if there's a startup shortcut
     StartupShortcut := ExpandConstant('{userstartup}\PlaylistLabServer.lnk');
     
-    // Only restart tray app if it was running before AND there's no startup shortcut
-    // If there's a startup shortcut, Windows will start it automatically
-    if WasRunningBeforeUpdate and not FileExists(StartupShortcut) then
+    // Check if Node.js is already running (might have been auto-started by Windows)
+    Exec('tasklist', '/FI "IMAGENAME eq node.exe" /NH', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    IsNodeRunning := (ResultCode = 0);
+    
+    if IsNodeRunning then
+    begin
+      Log('Node.js already running (likely auto-started by Windows) - not restarting');
+    end
+    else if WasRunningBeforeUpdate and not FileExists(StartupShortcut) then
     begin
       Log('Restarting tray app after update (no startup shortcut found)...');
       Sleep(3000); // Wait longer for files to settle and old processes to fully terminate
@@ -192,7 +199,7 @@ begin
     end
     else if FileExists(StartupShortcut) then
     begin
-      Log('Startup shortcut exists - not restarting tray app (will start on next login)');
+      Log('Startup shortcut exists - not restarting tray app (will start on next login or already running)');
     end;
   end;
 end;

@@ -719,6 +719,45 @@ function runHeadless() {
 
 log(`Playlist Lab Tray starting on ${platform}, port ${config.port}`);
 
+// Check if another instance is already running
+const lockFile = path.join(dataDir, 'tray.lock');
+try {
+  if (fs.existsSync(lockFile)) {
+    const lockData = fs.readFileSync(lockFile, 'utf8');
+    const lockPid = parseInt(lockData, 10);
+    
+    // Check if the process is still running
+    try {
+      process.kill(lockPid, 0); // Signal 0 just checks if process exists
+      log(`Another tray instance is already running (PID ${lockPid}), exiting...`);
+      process.exit(0);
+    } catch (e) {
+      // Process doesn't exist, remove stale lock file
+      log(`Removing stale lock file (PID ${lockPid} not running)`);
+      fs.unlinkSync(lockFile);
+    }
+  }
+  
+  // Create lock file with our PID
+  fs.writeFileSync(lockFile, String(process.pid));
+  
+  // Remove lock file on exit
+  process.on('exit', () => {
+    try {
+      if (fs.existsSync(lockFile)) {
+        const currentLockPid = parseInt(fs.readFileSync(lockFile, 'utf8'), 10);
+        if (currentLockPid === process.pid) {
+          fs.unlinkSync(lockFile);
+        }
+      }
+    } catch (e) {
+      // Ignore errors during cleanup
+    }
+  });
+} catch (e) {
+  log(`Error checking for existing instance: ${e.message}`);
+}
+
 // Start server if not already running
 checkHealth(config.port, (running) => {
   if (!running) {
