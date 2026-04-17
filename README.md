@@ -13,33 +13,33 @@ A comprehensive music playlist management system with Plex Media Server integrat
 - **Multi-User Support**: Manage playlists for multiple Plex users and share between them
 - **Scheduling**: Automatically update playlists on a schedule
 - **Missing Track Detection**: Identify and track songs not available in your library
-- **Cross-Platform**: Available as web app, desktop app, and mobile app
+- **Cross-Platform**: Available as web app and desktop app
 
 ## Applications
 
 This is a monorepo containing multiple applications:
 
-### Server (Multi-User Web Server)
+### Server (Multi-User Web Server) - **Actively Maintained**
 - **Location**: `apps/server/`
 - **Type**: Express.js REST API with SQLite database
 - **Features**: Multi-user authentication, playlist management, Plex integration, scheduling
 - **Deployment**: Can be deployed anywhere (VPS, cloud, local network)
 - **Port**: 3001 (configurable)
 
-### Web App (Responsive PWA)
+### Web App (Responsive PWA) - **Actively Maintained**
 - **Location**: `apps/web/`
 - **Type**: React Progressive Web App (PWA)
-- **Features**: Full-featured interface, works on desktop and mobile
+- **Features**: Full-featured interface, works on desktop and mobile browsers
 - **Responsive**: Adapts to any screen size (desktop, tablet, mobile)
-- **Installable**: Add to home screen on mobile devices
+- **Installable**: Add to home screen on mobile devices for app-like experience
 - **Access**: Connect to any Playlist Lab server
 - **Platforms**: Any device with a modern browser
 
-### Desktop App
+### Desktop App - **No Longer Maintained**
 - **Location**: `apps/desktop/`
 - **Type**: Standalone Electron application
-- **Features**: Embedded server, single-user, portable
-- **Platforms**: Windows, macOS, Linux
+- **Status**: Legacy - use the server + web app instead
+- **Note**: The desktop app is no longer actively maintained. Please use the server installation with the web app for the best experience.
 
 ## Quick Start
 
@@ -48,7 +48,7 @@ This is a monorepo containing multiple applications:
 **Option 1: Windows Installer**
 ```cmd
 # Download and run the installer
-PlaylistLabServer-Setup-1.1.3.exe
+PlaylistLabServer-Setup-1.2.2.exe
 ```
 
 **Option 2: Docker (Recommended for Development)**
@@ -80,26 +80,27 @@ cd apps/web && npm run build && cd ../..
 cd apps/server && npm start
 ```
 
-### Desktop App
+### Desktop App (Legacy - Not Recommended)
 
-Download the appropriate installer for your platform:
-- Windows: `PlaylistLab-Setup-1.1.3.exe`
-- macOS: `PlaylistLab-1.1.3.dmg`
-- Linux: `PlaylistLab-1.1.3.deb`
+The desktop app is no longer actively maintained. Please use the server installation instead.
+
+If you still need the desktop app, older versions are available in the releases, but they will not receive updates or bug fixes.
 
 ### Web App on Mobile
 
-The web app works perfectly on mobile devices:
+The web app is fully responsive and works on mobile devices through your browser:
 
 **iOS (iPhone/iPad)**
 1. Open Safari and navigate to your server URL
 2. Tap Share → "Add to Home Screen"
-3. App icon appears on home screen
+3. App icon appears on home screen with full-screen app experience
 
 **Android**
 1. Open Chrome and navigate to your server URL
-2. Tap menu → "Install app"
-3. App icon appears in app drawer
+2. Tap menu → "Install app" or "Add to Home Screen"
+3. App icon appears in app drawer with full-screen app experience
+
+The PWA provides an app-like experience with offline support and push notifications.
 
 ### Prerequisites
 - Node.js 18+
@@ -126,11 +127,9 @@ npm run dev:web     # Web app on port 5173
 ## Technology Stack
 
 - **Backend**: Node.js, Express.js, SQLite, TypeScript
-- **Frontend**: React, TypeScript, Vite
-- **Mobile**: React Native, Expo
-- **Desktop**: Electron
+- **Frontend**: React, TypeScript, Vite, PWA
 - **Testing**: Jest, fast-check (property-based testing)
-- **Build**: TypeScript, Vite, Electron Builder, EAS Build
+- **Build**: TypeScript, Vite
 
 ### Server Installers
 The Windows/macOS/Linux server installers include a system tray application for easy server management. The server runs as a background service and is accessed via web browser at `http://localhost:3001`.
@@ -152,34 +151,6 @@ The Windows/macOS/Linux server installers include a system tray application for 
 
 **Access**: After installation, open your browser to `http://localhost:3001` or use the tray app to open the interface.
 
-## Documentation
-
-### User Guides
-- [User Guide](docs/USER_GUIDE.md) - Complete user documentation
-- [API Documentation](docs/API.md) - REST API reference
-- [Deployment Guide](docs/DEPLOYMENT_ANYWHERE.md) - Deploy to VPS, cloud, or local network
-- [YouTube OAuth Setup](docs/YOUTUBE_OAUTH_SETUP.md) - Configure YouTube playlist export
-
-### Developer Guides
-- [Developer Guide](docs/DEVELOPER_GUIDE.md) - Development setup and workflow
-- [Monorepo Guide](docs/MONOREPO_GUIDE.md) - Project structure and organization
-- [Testing Setup](docs/TESTING_SETUP.md) - Running tests
-
-### Installation & Build
-- [Windows Installer Guide](docs/WINDOWS_INSTALLER_GUIDE.md) - Building Windows installers
-- [Linux Installer Guide](docs/LINUX_INSTALLER_GUIDE.md) - Building Linux packages
-- [macOS Installer Guide](docs/MACOS_INSTALLER_GUIDE.md) - Building macOS installers
-- [Docker Setup](docs/DOCKER_SETUP.md) - Docker deployment
-
-### Customization
-- [Icon System](docs/ICON_SYSTEM.md) - Customizing application icons
-- [Icon Quick Start](scripts/ICON_QUICK_START.txt) - Quick reference for icon generation
-
-### Troubleshooting
-- [Quick Fix Guide](docs/QUICK_FIX_GUIDE.md) - Common issues and solutions
-- [Network Access Fix](docs/NETWORK_ACCESS_FIX.md) - Fixing network access issues
-- [Tray Icon Guide](docs/TRAY_ICON_GUIDE.md) - Tray icon troubleshooting
-
 ## License
 
 See LICENSE file for details.
@@ -192,4 +163,5 @@ See LICENSE file for details.
 ## 📧 Support
 
 - Issues: [GitHub Issues](https://github.com/AuXBoX/playlist-lab/issues)
+- Community: [r/PlaylistLab](https://www.reddit.com/r/PlaylistLab/)
 
