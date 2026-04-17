@@ -173,17 +173,26 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
+  StartupShortcut: String;
 begin
   if CurStep = ssPostInstall then
   begin
-    // Restart tray app if it was running before the update
-    if WasRunningBeforeUpdate then
+    // Check if there's a startup shortcut
+    StartupShortcut := ExpandConstant('{userstartup}\PlaylistLabServer.lnk');
+    
+    // Only restart tray app if it was running before AND there's no startup shortcut
+    // If there's a startup shortcut, Windows will start it automatically
+    if WasRunningBeforeUpdate and not FileExists(StartupShortcut) then
     begin
-      Log('Restarting tray app after update...');
+      Log('Restarting tray app after update (no startup shortcut found)...');
       Sleep(3000); // Wait longer for files to settle and old processes to fully terminate
       
       // Use Node.js to start tray app directly (not VBScript)
       Exec(ExpandConstant('{app}\nodejs\node.exe'), ExpandConstant('"{app}\tray-app.js"'), ExpandConstant('{app}'), SW_HIDE, ewNoWait, ResultCode);
+    end
+    else if FileExists(StartupShortcut) then
+    begin
+      Log('Startup shortcut exists - not restarting tray app (will start on next login)');
     end;
   end;
 end;
