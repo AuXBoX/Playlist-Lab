@@ -434,8 +434,6 @@ export class DatabaseService {
   getDueSchedules(): Schedule[] {
     const now = Math.floor(Date.now() / 1000);
     const currentDate = new Date();
-    const currentHour = currentDate.getHours();
-    const currentMinute = currentDate.getMinutes();
     
     // Get all schedules
     const stmt = this.db.prepare('SELECT * FROM schedules');
