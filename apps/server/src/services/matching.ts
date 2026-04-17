@@ -320,6 +320,12 @@ async function findBestMatch(
         logger.info(`[Matching] Alternate version penalty applied, new score: ${score}`);
       }
       
+      // Penalize demo versions when source doesn't have demo indicator
+      if (!hasDemoIndicator(track.title) && hasDemoIndicator(plexTitle)) {
+        score -= 35;
+        logger.info(`[Matching] Demo version penalty applied, new score: ${score}`);
+      }
+      
       // Prefer remasters (better quality of the same track)
       if (hasRemasterIndicator(plexTitle) && !hasRemixIndicator(plexTitle)) {
         score += 5;
@@ -517,6 +523,7 @@ function artistsMatch(sourceArtist: string, plexArtist: string): boolean {
 const REMIX_KEYWORDS = /\b(remix|remixed|edit|mix|version|acoustic|live|instrumental|radio edit|bootleg|dub|extended|vip|flip|rework|reimagined)\b/i;
 const REMASTER_KEYWORDS = /\b(remaster(?:ed)?)\b/i;
 const ALTERNATE_VERSION_KEYWORDS = /\b(unplugged|acoustic|live|instrumental|radio edit|session|performance|cover)\b/i;
+const DEMO_KEYWORDS = /\b(demo)\b/i;
 
 function hasRemixIndicator(title: string): boolean {
   return REMIX_KEYWORDS.test(title);
@@ -528,6 +535,10 @@ function hasRemasterIndicator(title: string): boolean {
 
 function hasAlternateVersionIndicator(title: string): boolean {
   return ALTERNATE_VERSION_KEYWORDS.test(title);
+}
+
+function hasDemoIndicator(title: string): boolean {
+  return DEMO_KEYWORDS.test(title);
 }
 
 function calculateMatchScore(sourceTitle: string, sourceArtist: string, plexTitle: string, plexArtist: string): number {
