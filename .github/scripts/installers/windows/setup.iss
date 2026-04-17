@@ -174,20 +174,37 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
   StartupShortcut: String;
-  IsNodeRunning: Boolean;
+  IsTrayAppRunning: Boolean;
+  Output: AnsiString;
+  OutputFile: String;
 begin
   if CurStep = ssPostInstall then
   begin
     // Check if there's a startup shortcut
     StartupShortcut := ExpandConstant('{userstartup}\PlaylistLabServer.lnk');
     
-    // Check if Node.js is already running (might have been auto-started by Windows)
-    Exec('tasklist', '/FI "IMAGENAME eq node.exe" /NH', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    IsNodeRunning := (ResultCode = 0);
+    // Check if the tray app is already running by looking for the specific command line
+    OutputFile := ExpandConstant('{tmp}\processes.txt');
+    Exec('wmic', 'process where "name=''node.exe''" get commandline /format:list > "' + OutputFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     
-    if IsNodeRunning then
+    IsTrayAppRunning := False;
+    if FileExists(OutputFile) then
     begin
-      Log('Node.js already running (likely auto-started by Windows) - not restarting');
+      if LoadStringFromFile(OutputFile, Output) then
+      begin
+        // Check if any node.exe process has "tray-app.js" in its command line
+        if Pos('tray-app.js', String(Output)) > 0 then
+        begin
+          IsTrayAppRunning := True;
+          Log('Tray app is already running (found tray-app.js in process list)');
+        end;
+      end;
+      DeleteFile(OutputFile);
+    end;
+    
+    if IsTrayAppRunning then
+    begin
+      Log('Tray app already running - not restarting');
     end
     else if WasRunningBeforeUpdate and not FileExists(StartupShortcut) then
     begin
