@@ -98,18 +98,86 @@ Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; 
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode remove"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
 
 [Code]
-procedure CurStepChanged(CurStep: TSetupStep);
+procedure KillProcessesByName(ProcessName: String);
 var
   ResultCode: Integer;
 begin
+  Log('Attempting to kill process: ' + ProcessName);
+  Exec('taskkill', '/F /IM ' + ProcessName + ' /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode = 0 then
+    Log('Successfully killed: ' + ProcessName)
+  else
+    Log('Process not found or already stopped: ' + ProcessName);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+  WasRunning: Boolean;
+  PlaylistLabDir: String;
+begin
+  Result := '';
+  WasRunning := False;
+  
+  // Check if this is an update (installation directory already exists)
+  if DirExists(ExpandConstant('{app}')) then
+  begin
+    Log('Existing installation detected - stopping all processes...');
+    
+    // Check if tray app was running before we kill it
+    Exec('tasklist', '/FI "IMAGENAME eq node.exe" /NH', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    if ResultCode = 0 then
+      WasRunning := True;
+    
+    // Kill all Node.js processes (server and tray app)
+    KillProcessesByName('node.exe');
+    
+    // Kill VBScript processes (old tray launcher)
+    KillProcessesByName('wscript.exe');
+    
+    // Wait for processes to fully terminate and release file locks
+    Sleep(3000);
+    
+    // Ensure the @playlist-lab directory exists and is writable
+    PlaylistLabDir := ExpandConstant('{app}\server\node_modules\@playlist-lab');
+    if DirExists(PlaylistLabDir) then
+    begin
+      Log('Removing existing @playlist-lab directory...');
+      DelTree(PlaylistLabDir, True, True, True);
+      Sleep(500);
+    end;
+    
+    // Create the directory structure
+    Log('Creating @playlist-lab directory structure...');
+    ForceDirectories(PlaylistLabDir);
+    
+    Log('All processes stopped and directories prepared, ready to update files');
+    
+    // Store whether we need to restart after install
+    SetPreviousData('WasRunning', IntToStr(Integer(WasRunning)));
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  WasRunning: Boolean;
+  WasRunningStr: String;
+begin
   if CurStep = ssPostInstall then
   begin
-    // If this is a silent install (update), restart the tray app
-    if WizardSilent then
+    // Check if the app was running before update
+    WasRunningStr := GetPreviousData('WasRunning', '0');
+    WasRunning := StrToIntDef(WasRunningStr, 0) = 1;
+    
+    // Restart tray app if it was running before, or if this is a silent install
+    if WasRunning or WizardSilent then
     begin
-      Log('Silent install detected, restarting tray app...');
+      Log('Restarting tray app after update...');
       Sleep(2000); // Wait for files to settle
-      Exec(ExpandConstant('{sys}\wscript.exe'), ExpandConstant('"{app}\start-tray.vbs"'), ExpandConstant('{app}'), SW_HIDE, ewNoWait, ResultCode);
+      
+      // Use Node.js to start tray app directly (not VBScript)
+      Exec(ExpandConstant('{app}\nodejs\node.exe'), ExpandConstant('"{app}\tray-app.js"'), ExpandConstant('{app}'), SW_HIDE, ewNoWait, ResultCode);
     end;
   end;
 end;
