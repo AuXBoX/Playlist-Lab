@@ -495,21 +495,12 @@ export class DatabaseService {
         const [scheduleHour, scheduleMinute] = (config.run_time as string).split(':').map(Number);
         
         // Check if we're at or past the scheduled time today
-        const lastRunDate = new Date(schedule.last_run * 1000);
         const scheduledTimeToday = new Date(currentDate);
         scheduledTimeToday.setHours(scheduleHour, scheduleMinute, 0, 0);
         
-        // If last run was before today's scheduled time, and we're now at or past it, run
-        if (lastRunDate < scheduledTimeToday && currentDate >= scheduledTimeToday) {
+        // If we're past the scheduled time today, run it
+        if (currentDate >= scheduledTimeToday) {
           return true;
-        }
-        
-        // Also check if we're within the scheduled hour and close to the minute (for real-time execution)
-        if (currentHour === scheduleHour) {
-          const minuteDiff = Math.abs(currentMinute - scheduleMinute);
-          if (minuteDiff <= 10) {
-            return true;
-          }
         }
         
         return false; // Frequency met but not at scheduled time yet
