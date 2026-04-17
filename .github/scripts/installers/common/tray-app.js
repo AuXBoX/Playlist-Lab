@@ -140,18 +140,27 @@ function startServer() {
     serverProcess = null;
   });
   
-  // Check if server actually started after a few seconds
-  setTimeout(() => {
+  // Check if server actually started - retry up to 3 times with increasing delays
+  let healthCheckAttempts = 0;
+  const maxAttempts = 3;
+  const checkServerHealth = () => {
+    healthCheckAttempts++;
     checkHealth(config.port, (running) => {
       if (running) {
         log('Server started successfully');
         notify('Server Started', `Playlist Lab is now running on port ${config.port}`);
+      } else if (healthCheckAttempts < maxAttempts) {
+        log(`Server health check ${healthCheckAttempts}/${maxAttempts} failed, retrying...`);
+        setTimeout(checkServerHealth, 3000); // Retry after 3 more seconds
       } else {
-        log('Server failed to start - health check failed');
+        log('Server failed to start - health check failed after multiple attempts');
         notify('Server Failed', `Server did not start successfully. Check logs for details.`);
       }
     });
-  }, 3000);
+  };
+  
+  // Start first health check after 5 seconds (server needs time to initialize)
+  setTimeout(checkServerHealth, 5000);
 }
 
 function stopServer(cb) {
