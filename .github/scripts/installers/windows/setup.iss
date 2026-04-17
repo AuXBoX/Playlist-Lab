@@ -98,6 +98,9 @@ Filename: "http://localhost:3001"; Description: "Open Playlist Lab in browser"; 
 Filename: "{app}\nodejs\node.exe"; Parameters: """{app}\startup-manager.js"" --mode remove"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
 
 [Code]
+var
+  WasRunningBeforeUpdate: Boolean;
+
 procedure KillProcessesByName(ProcessName: String);
 var
   ResultCode: Integer;
@@ -113,11 +116,10 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
-  WasRunning: Boolean;
   PlaylistLabDir: String;
 begin
   Result := '';
-  WasRunning := False;
+  WasRunningBeforeUpdate := False;
   
   // Check if this is an update (installation directory already exists)
   if DirExists(ExpandConstant('{app}')) then
@@ -127,7 +129,7 @@ begin
     // Check if tray app was running before we kill it
     Exec('tasklist', '/FI "IMAGENAME eq node.exe" /NH', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     if ResultCode = 0 then
-      WasRunning := True;
+      WasRunningBeforeUpdate := True;
     
     // Kill all Node.js processes (server and tray app)
     KillProcessesByName('node.exe');
@@ -152,26 +154,17 @@ begin
     ForceDirectories(PlaylistLabDir);
     
     Log('All processes stopped and directories prepared, ready to update files');
-    
-    // Store whether we need to restart after install
-    SetPreviousData('WasRunning', IntToStr(Integer(WasRunning)));
   end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
-  WasRunning: Boolean;
-  WasRunningStr: String;
 begin
   if CurStep = ssPostInstall then
   begin
-    // Check if the app was running before update
-    WasRunningStr := GetPreviousData('WasRunning', '0');
-    WasRunning := StrToIntDef(WasRunningStr, 0) = 1;
-    
     // Restart tray app if it was running before, or if this is a silent install
-    if WasRunning or WizardSilent then
+    if WasRunningBeforeUpdate or WizardSilent then
     begin
       Log('Restarting tray app after update...');
       Sleep(2000); // Wait for files to settle
