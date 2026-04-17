@@ -58,7 +58,7 @@ class AutoUpdater {
   /**
    * Check for updates from GitHub releases
    */
-  async checkForUpdates() {
+  async checkForUpdates(retryCount = 0) {
     this.log('Checking for updates...');
     
     try {
@@ -94,6 +94,16 @@ class AutoUpdater {
       }
     } catch (error) {
       this.log(`Error checking for updates: ${error.message}`);
+      
+      // Retry up to 2 times with exponential backoff for network errors
+      if (retryCount < 2 && (error.code === 'EACCES' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT')) {
+        const delay = Math.pow(2, retryCount) * 2000; // 2s, 4s
+        this.log(`Retrying in ${delay/1000} seconds... (attempt ${retryCount + 1}/2)`);
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.checkForUpdates(retryCount + 1);
+      }
+      
       this.onUpdateError(error);
       return null;
     }
@@ -110,8 +120,10 @@ class AutoUpdater {
         method: 'GET',
         headers: {
           'User-Agent': 'Playlist-Lab-Auto-Updater',
-          'Accept': 'application/vnd.github.v3+json'
-        }
+          'Accept': 'application/vnd.github.v3+json',
+          'Cache-Control': 'no-cache'
+        },
+        timeout: 15000
       };
 
       const req = https.request(options, (res) => {
@@ -138,10 +150,12 @@ class AutoUpdater {
       });
 
       req.on('error', (err) => {
+        // Log the specific error but don't reject immediately - we'll retry
+        this.log(`Request error: ${err.code || err.message}`);
         reject(err);
       });
 
-      req.setTimeout(10000, () => {
+      req.on('timeout', () => {
         req.destroy();
         reject(new Error('Request timeout'));
       });

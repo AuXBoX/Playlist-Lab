@@ -526,9 +526,18 @@ function startTray(SysTray) {
     copyDir: true,
   });
 
+  log('Tray object created, setting up click handler...');
+
   tray.onClick((action) => {
+    log(`Tray click received: ${JSON.stringify(action)}`);
+    
     const title = action.item && action.item.title;
-    if (!title) return;
+    if (!title) {
+      log('No title in action, ignoring click');
+      return;
+    }
+
+    log(`Processing menu item: ${title}`);
 
     if (title === 'Open Playlist Lab') {
       openBrowser();
