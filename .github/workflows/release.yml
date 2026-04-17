@@ -48,6 +48,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Extract version from tag
+        id: get_version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="0.0.0-dev"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Extracted version: ${VERSION}"
+      
+      - name: Update version in package.json files
+        shell: bash
+        run: |
+          node .github/scripts/update-version.js "${{ steps.get_version.outputs.VERSION }}"
+      
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
