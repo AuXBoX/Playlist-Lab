@@ -104,13 +104,26 @@ var
 procedure KillProcessesByName(ProcessName: String);
 var
   ResultCode: Integer;
+  Attempts: Integer;
 begin
   Log('Attempting to kill process: ' + ProcessName);
-  Exec('taskkill', '/F /IM ' + ProcessName + ' /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if ResultCode = 0 then
-    Log('Successfully killed: ' + ProcessName)
-  else
-    Log('Process not found or already stopped: ' + ProcessName);
+  
+  // Try multiple times to ensure all instances are killed
+  for Attempts := 1 to 3 do
+  begin
+    Exec('taskkill', '/F /IM ' + ProcessName + ' /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(1000); // Wait between attempts
+    
+    // Check if any instances are still running
+    Exec('tasklist', '/FI "IMAGENAME eq ' + ProcessName + '" /NH', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    if ResultCode <> 0 then
+    begin
+      Log('All ' + ProcessName + ' processes killed after ' + IntToStr(Attempts) + ' attempt(s)');
+      Exit;
+    end;
+  end;
+  
+  Log('Warning: Some ' + ProcessName + ' processes may still be running');
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -163,11 +176,11 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    // Restart tray app if it was running before, or if this is a silent install
-    if WasRunningBeforeUpdate or WizardSilent then
+    // Restart tray app if it was running before the update
+    if WasRunningBeforeUpdate then
     begin
       Log('Restarting tray app after update...');
-      Sleep(2000); // Wait for files to settle
+      Sleep(3000); // Wait longer for files to settle and old processes to fully terminate
       
       // Use Node.js to start tray app directly (not VBScript)
       Exec(ExpandConstant('{app}\nodejs\node.exe'), ExpandConstant('"{app}\tray-app.js"'), ExpandConstant('{app}'), SW_HIDE, ewNoWait, ResultCode);
