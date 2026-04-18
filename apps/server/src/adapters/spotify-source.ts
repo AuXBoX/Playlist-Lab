@@ -124,9 +124,18 @@ export const spotifySourceAdapter: SourceAdapter = {
   /**
    * Search for public Spotify playlists without authentication.
    * Uses Spotify's embed API which doesn't require OAuth.
+   * Also supports fetching playlists by user ID.
    */
   async searchPlaylistsUnauthenticated(query: string): Promise<PlaylistInfo[]> {
     try {
+      // Check if query is a user ID or user URL
+      const userIdMatch = query.match(/(?:user\/|^)([a-zA-Z0-9]+)$/);
+      if (userIdMatch) {
+        const userId = userIdMatch[1];
+        logger.info('[SpotifySourceAdapter] Fetching playlists for user', { userId });
+        return this.fetchUserPlaylistsUnauthenticated(userId);
+      }
+
       // Try to extract playlist ID from URL if it's a direct link
       const playlistIdMatch = query.match(/playlist[/:]([A-Za-z0-9]+)/);
       if (playlistIdMatch) {
@@ -151,11 +160,74 @@ export const spotifySourceAdapter: SourceAdapter = {
 
       // For search queries, we can't do much without auth
       // Return empty array and let the user know they need to provide a direct link
-      logger.warn('[SpotifySourceAdapter] Unauthenticated search requires direct playlist URL', { query });
+      logger.warn('[SpotifySourceAdapter] Unauthenticated search requires direct playlist URL or user ID', { query });
       return [];
     } catch (error) {
       logger.error('[SpotifySourceAdapter] Unauthenticated search failed', { error, query });
       return [];
+    }
+  },
+
+  /**
+   * Fetch public playlists from a Spotify user without authentication.
+   * Uses web scraping of the user's public profile.
+   */
+  async fetchUserPlaylistsUnauthenticated(userId: string): Promise<PlaylistInfo[]> {
+    try {
+      // Fetch the user's public profile page
+      const profileUrl = `https://open.spotify.com/user/${userId}`;
+      const response = await fetch(profileUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch Spotify user profile: ${response.status}`);
+      }
+
+      const html = await response.text();
+
+      // Try to extract embedded JSON data
+      const scriptMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.+?)<\/script>/);
+      if (!scriptMatch) {
+        logger.warn('[SpotifySourceAdapter] Could not find playlist data in user profile', { userId });
+        throw new Error('Unable to fetch user playlists. The user profile may be private or the user ID may be invalid.');
+      }
+
+      const data = JSON.parse(scriptMatch[1]);
+      
+      // Navigate through the Next.js data structure to find playlists
+      const pageProps = data?.props?.pageProps;
+      const userProfile = pageProps?.userProfile;
+      const publicPlaylists = userProfile?.publicPlaylists || userProfile?.playlists;
+
+      if (!publicPlaylists || !Array.isArray(publicPlaylists)) {
+        logger.warn('[SpotifySourceAdapter] No public playlists found for user', { userId });
+        return [];
+      }
+
+      const playlists: PlaylistInfo[] = publicPlaylists
+        .filter((item: any) => item && item.uri)
+        .map((item: any) => {
+          const playlistId = item.uri.split(':').pop() || '';
+          return {
+            id: playlistId,
+            name: item.name || 'Untitled Playlist',
+            trackCount: item.totalCount || 0,
+            coverUrl: item.images?.[0]?.url || item.image?.url,
+          };
+        });
+
+      logger.info('[SpotifySourceAdapter] Fetched user playlists (unauthenticated)', {
+        userId,
+        playlistCount: playlists.length,
+      });
+
+      return playlists;
+    } catch (error) {
+      logger.error('[SpotifySourceAdapter] Failed to fetch user playlists', { error, userId });
+      throw new Error(`Unable to fetch playlists for user ${userId}. The profile may be private or the user ID may be invalid.`);
     }
   },
 
