@@ -139,7 +139,7 @@ app.use(compression({
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10), // 1 minute
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '1000', 10), // 1000 requests per window (increased for dev)
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '5000', 10), // 5000 requests per window
   message: { error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests, please try again later', statusCode: 429 } },
   standardHeaders: true,
   legacyHeaders: false,
