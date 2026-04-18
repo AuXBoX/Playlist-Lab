@@ -283,7 +283,8 @@ export class AuthService {
             'X-Plex-Token': authToken,
             'X-Plex-Product': this.productName,
             'X-Plex-Client-Identifier': this.clientId
-          }
+          },
+          timeout: 10000 // 10 second timeout
         }
       );
 
@@ -299,11 +300,18 @@ export class AuthService {
         if (error.response?.status === 401) {
           throw new Error('Invalid or expired Plex token');
         }
+        if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+          throw new Error('Request to Plex timed out');
+        }
+        if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+          throw new Error('Could not connect to Plex servers');
+        }
         throw new Error(`Failed to get servers: ${error.message}`);
       }
       // For non-Axios errors, ensure we have a proper error message
       const errorMessage = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to get servers: ${errorMessage}`);
+      const finalMessage = errorMessage || 'Unknown error occurred';
+      throw new Error(`Failed to get servers: ${finalMessage}`);
     }
   }
 

@@ -74,6 +74,8 @@ router.get('/', requireAuth, async (req: Request, res: Response, next: NextFunct
   } catch (error) {
     logger.error('Failed to get servers', { 
       error: error instanceof Error ? error.message : String(error),
+      errorType: error?.constructor?.name,
+      errorKeys: error ? Object.keys(error) : [],
       stack: error instanceof Error ? error.stack : undefined,
       userId: req.session.userId 
     });
