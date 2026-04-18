@@ -117,15 +117,19 @@ router.get('/callback', async (req: Request, res: Response) => {
         <head><title>Spotify Authentication</title></head>
         <body>
           <script>
+            console.log('Spotify callback received, status:', '${status}');
             if (window.opener) {
-              window.opener.postMessage(${JSON.stringify(message)}, window.location.origin);
-              window.close();
+              console.log('Posting message to opener window');
+              // Use '*' to allow cross-origin communication (safe here as we're just signaling success)
+              window.opener.postMessage(${JSON.stringify(message)}, '*');
+              setTimeout(() => window.close(), 1000);
             } else {
+              console.log('No opener window, redirecting to import page');
               // Fallback: redirect to import page (for non-popup flow)
               window.location.href = '${status === 'connected' ? '/import?spotify_connected=true' : `/import?spotify_error=${encodeURIComponent(detail)}`}';
             }
           </script>
-          <p>${status === 'connected' ? 'Connected successfully! You can close this window.' : `Error: ${detail}`}</p>
+          <p>${status === 'connected' ? 'Connected successfully! Closing window...' : `Error: ${detail}`}</p>
         </body>
       </html>
     `);
