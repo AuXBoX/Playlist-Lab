@@ -51,9 +51,23 @@ router.get('/login', requireAuth, (req: Request, res: Response) => {
       clientId = decrypt(user.spotify_client_id, ENCRYPTION_SECRET);
       clientSecret = decrypt(user.spotify_client_secret, ENCRYPTION_SECRET);
     } catch (decryptError) {
-      logger.error('Failed to decrypt Spotify credentials', { error: decryptError, userId });
+      logger.error('Failed to decrypt Spotify credentials - likely due to SESSION_SECRET change', { error: decryptError, userId });
+      
+      // Clear invalid encrypted credentials so user can re-enter them
+      db.prepare(
+        `UPDATE users SET 
+          spotify_client_id = NULL,
+          spotify_client_secret = NULL,
+          spotify_access_token = NULL,
+          spotify_refresh_token = NULL,
+          spotify_token_expires_at = NULL
+        WHERE id = ?`
+      ).run(userId);
+      
+      logger.info('Cleared invalid Spotify credentials', { userId });
+      
       return res.status(500).json({ 
-        error: 'Failed to load credentials. Please reconnect your Spotify account.' 
+        error: 'Spotify credentials are invalid (encryption key changed). Please re-enter your Client ID and Secret.' 
       });
     }
     
@@ -62,6 +76,9 @@ router.get('/login', requireAuth, (req: Request, res: Response) => {
     process.env.SPOTIFY_CLIENT_SECRET = clientSecret;
     
     const scopes = 'playlist-read-private playlist-read-collaborative user-library-read';
+    
+    // Log the redirect URI being used for debugging
+    logger.info('Spotify OAuth redirect URI', { redirectUri: SPOTIFY_REDIRECT_URI, userId });
     
     // Use authorization code flow (response_type=code)
     // This returns an authorization code that we exchange for tokens
@@ -72,6 +89,8 @@ router.get('/login', requireAuth, (req: Request, res: Response) => {
       `redirect_uri=${encodeURIComponent(SPOTIFY_REDIRECT_URI)}&` +
       `state=${userId}&` +
       `show_dialog=true`;
+    
+    logger.info('Generated Spotify auth URL', { authUrl: authUrl.replace(clientId, 'CLIENT_ID_HIDDEN'), userId });
     
     return res.json({ authUrl });
   } catch (err) {
@@ -578,12 +597,42 @@ async function refreshSpotifyToken(userId: number, encryptedRefreshToken: string
       clientId = decrypt(user.spotify_client_id, ENCRYPTION_SECRET);
       clientSecret = decrypt(user.spotify_client_secret, ENCRYPTION_SECRET);
     } catch (decryptError) {
-      logger.error('Failed to decrypt Spotify credentials for refresh', { error: decryptError, userId });
+      logger.error('Failed to decrypt Spotify credentials for refresh - SESSION_SECRET likely changed', { error: decryptError, userId });
+      
+      // Clear invalid encrypted credentials
+      db.prepare(
+        `UPDATE users SET 
+          spotify_client_id = NULL,
+          spotify_client_secret = NULL,
+          spotify_access_token = NULL,
+          spotify_refresh_token = NULL,
+          spotify_token_expires_at = NULL
+        WHERE id = ?`
+      ).run(userId);
+      
+      logger.info('Cleared invalid Spotify credentials due to decryption failure', { userId });
       return null;
     }
     
     // Decrypt refresh token
-    const refreshToken = decrypt(encryptedRefreshToken, ENCRYPTION_SECRET);
+    let refreshToken: string;
+    try {
+      refreshToken = decrypt(encryptedRefreshToken, ENCRYPTION_SECRET);
+    } catch (decryptError) {
+      logger.error('Failed to decrypt Spotify refresh token - SESSION_SECRET likely changed', { error: decryptError, userId });
+      
+      // Clear invalid tokens
+      db.prepare(
+        `UPDATE users SET 
+          spotify_access_token = NULL,
+          spotify_refresh_token = NULL,
+          spotify_token_expires_at = NULL
+        WHERE id = ?`
+      ).run(userId);
+      
+      logger.info('Cleared invalid Spotify tokens due to decryption failure', { userId });
+      return null;
+    }
     
     logger.info('Attempting to refresh Spotify token', { 
       userId,
