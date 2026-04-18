@@ -292,10 +292,28 @@ export class AuthService {
       const resources = Array.isArray(response.data) ? response.data : response.data.resources || [];
 
       // Filter to only return server resources (not clients)
-      return resources.filter((resource: PlexServer) => 
-        resource.provides && resource.provides.includes('server')
-      );
+      // Safely check if provides exists and includes 'server'
+      const servers = resources.filter((resource: any) => {
+        try {
+          return resource && resource.provides && 
+                 (typeof resource.provides === 'string' ? resource.provides.includes('server') : false);
+        } catch (e) {
+          console.error('Error filtering resource:', e, resource);
+          return false;
+        }
+      });
+
+      // Log what we're returning
+      console.log('getServers returning:', servers.length, 'servers');
+      
+      return servers;
     } catch (error) {
+      // Log the raw error for debugging
+      console.error('getServers error:', error);
+      console.error('Error type:', typeof error);
+      console.error('Error constructor:', error?.constructor?.name);
+      console.error('Error keys:', error ? Object.keys(error) : 'null');
+      
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 401) {
           throw new Error('Invalid or expired Plex token');
