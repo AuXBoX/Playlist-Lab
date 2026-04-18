@@ -301,7 +301,9 @@ export class AuthService {
         }
         throw new Error(`Failed to get servers: ${error.message}`);
       }
-      throw error;
+      // For non-Axios errors, ensure we have a proper error message
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to get servers: ${errorMessage}`);
     }
   }
 
