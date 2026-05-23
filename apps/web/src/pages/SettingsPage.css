@@ -130,6 +130,35 @@
 .settings-loading { font-size: 0.875rem; color: var(--text-secondary); padding: 0.25rem 0; }
 .settings-hint { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem; }
 
+.settings-info-box {
+  background-color: rgba(91, 155, 213, 0.08);
+  border: 1px solid rgba(91, 155, 213, 0.2);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.settings-info-box p {
+  margin: 0.5rem 0;
+  font-size: 0.875rem;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+.settings-info-box p:first-child {
+  margin-top: 0;
+}
+
+.settings-info-box p:last-child {
+  margin-bottom: 0;
+}
+
+.settings-info-box code {
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
 .settings-actions {
   display: flex;
   gap: 0.75rem;

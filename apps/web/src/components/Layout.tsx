@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { Footer } from './Footer';
+import { ImportQueueStatus } from './ImportQueueStatus';
 import './Layout.css';
 
 interface LayoutProps {
@@ -21,6 +22,7 @@ export const Layout: FC<LayoutProps> = ({ user, onLogout }) => {
         </main>
       </div>
       <Footer />
+      <ImportQueueStatus />
     </div>
   );
 };

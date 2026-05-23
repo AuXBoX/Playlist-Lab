@@ -90,7 +90,37 @@ router.get('/', requireAuth, async (req: Request, res: Response, next: NextFunct
   }
 });
 
-export default router;/**
+/**
+ * GET /api/playlists/shared-with-me
+ * Get playlists that have been shared with the current user
+ */
+router.get('/shared-with-me', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const currentUserId = req.session.userId!;
+    const db = req.dbService!;
+    
+    logger.info('[Shared Playlists] Fetching shared playlists', { userId: currentUserId });
+    
+    // Get shared playlists from database
+    const sharedPlaylists = db.getPlaylistsSharedWithUser(currentUserId);
+    
+    logger.info('[Shared Playlists] Found shared playlists', { 
+      userId: currentUserId, 
+      count: sharedPlaylists.length 
+    });
+    
+    res.json({ sharedPlaylists });
+  } catch (error: any) {
+    logger.error('[Shared Playlists] Failed to get shared playlists', { 
+      error: error.message,
+      stack: error.stack,
+      userId: req.session.userId 
+    });
+    next(createInternalError('Failed to retrieve shared playlists'));
+  }
+});
+
+/**
  * GET /api/playlists/:id
  * Get playlist details
  */
@@ -979,22 +1009,4 @@ router.post('/:id/share', requireAuth, async (req: Request, res: Response, next:
   }
 });
 
-/**
- * GET /api/playlists/shared-with-me
- * Get playlists that have been shared with the current user
- */
-router.get('/shared-with-me', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const currentUserId = req.session.userId!;
-    const db = req.dbService!;
-
-    const sharedPlaylists = db.getPlaylistsSharedWithUser(currentUserId);
-
-    res.json({
-      sharedPlaylists
-    });
-  } catch (error: any) {
-    logger.error('Failed to get shared playlists', { error: error.message });
-    next(createInternalError('Failed to get shared playlists'));
-  }
-});
+export default router;

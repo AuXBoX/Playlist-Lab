@@ -58,6 +58,7 @@ export const listenbrainzSourceAdapter: SourceAdapter = {
       id: p.identifier,
       name: p.playlist?.title || 'ListenBrainz Playlist',
       trackCount: p.playlist?.track?.length ?? 0,
+      coverUrl: p.playlist?.extension?.['https://musicbrainz.org/doc/jspf#playlist']?.picture ?? undefined,
     }));
   },
 
@@ -84,12 +85,14 @@ export const listenbrainzSourceAdapter: SourceAdapter = {
       id: `listenbrainz-${mbid}`,
       name: data.title || 'ListenBrainz Playlist',
       trackCount: tracks.length,
+      coverUrl: data.extension?.['https://musicbrainz.org/doc/jspf#playlist']?.picture ?? undefined,
     };
 
     logger.info('[ListenBrainzSourceAdapter] Fetched playlist', {
       mbid,
       name: playlist.name,
       trackCount: tracks.length,
+      hasCoverUrl: !!playlist.coverUrl,
     });
 
     return { playlist, tracks };

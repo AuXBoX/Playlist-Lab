@@ -7,16 +7,18 @@ import { LoginPage } from './pages/LoginPage';
 import { AuthCallbackPage } from './pages/AuthCallbackPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ImportPage } from './pages/ImportPage';
+import { QueuePage } from './pages/QueuePage';
 import { GenerateMixesPage } from './pages/GenerateMixesPage';
 import { PlaylistsPage } from './pages/PlaylistsPage';
 import { EditPlaylistsPage } from './pages/EditPlaylistsPage';
 import { SharePlaylistsPage } from './pages/SharePlaylistsPage';
+import { ExportPlaylistsPage } from './pages/ExportPlaylistsPage';
+import { PlexHomePage } from './pages/PlexHomePage';
 import { BackupRestorePage } from './pages/BackupRestorePage';
 import { SchedulesPage } from './pages/SchedulesPage';
 import { MissingTracksPage } from './pages/MissingTracksPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AdminPage } from './pages/AdminPage';
-import { CrossImportPage } from './pages/CrossImportPage';
 
 function AppRoutes() {
   const { user, logout } = useAuth();
@@ -35,11 +37,13 @@ function AppRoutes() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="import" element={<ImportPage />} />
-        <Route path="youtube" element={<CrossImportPage />} />
+        <Route path="queue" element={<QueuePage />} />
         <Route path="generate" element={<GenerateMixesPage />} />
         <Route path="playlists" element={<PlaylistsPage />} />
         <Route path="playlists/edit" element={<EditPlaylistsPage />} />
         <Route path="playlists/share" element={<SharePlaylistsPage />} />
+        <Route path="playlists/export" element={<ExportPlaylistsPage />} />
+        <Route path="playlists/home-users" element={<PlexHomePage />} />
         <Route path="playlists/backup" element={<BackupRestorePage />} />
         <Route path="playlists/missing" element={<MissingTracksPage />} />
         <Route path="schedules" element={<SchedulesPage />} />

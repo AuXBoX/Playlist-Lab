@@ -1,4 +1,3 @@
-// BUILD_TIMESTAMP: 2025-01-XX-FORCE-REFRESH
 import type { FC } from 'react';
 import { useState, useEffect } from 'react';
 import { useApp } from '../contexts/AppContext';
@@ -20,6 +19,8 @@ interface PopularPlaylist {
   videoCount?: number;
   count?: number;
   trackCount?: number;
+  owner?: string;
+  imageUrl?: string;
 }
 
 export const ImportPage: FC = () => {
@@ -62,6 +63,10 @@ export const ImportPage: FC = () => {
   const [isSavingSpotify, setIsSavingSpotify] = useState(false);
   const [spotifyPlaylists, setSpotifyPlaylists] = useState<PopularPlaylist[]>([]);
   const [isLoadingSpotifyPlaylists, setIsLoadingSpotifyPlaylists] = useState(false);
+  const [spotifySearchQuery, setSpotifySearchQuery] = useState('');
+  const [spotifySearchResults, setSpotifySearchResults] = useState<PopularPlaylist[]>([]);
+  const [isSearchingSpotify, setIsSearchingSpotify] = useState(false);
+  const [spotifyPremiumRequired, setSpotifyPremiumRequired] = useState(false);
   const [searchResults, setSearchResults] = useState<PopularPlaylist[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string>('US');
@@ -104,22 +109,6 @@ export const ImportPage: FC = () => {
     const [y, m, d] = iso.split('-');
     return `${d}/${m}/${y}`;
   };
-  const getMostRecentMonday = () => {
-    const d = new Date();
-    const day = d.getDay();
-    
-    // If it's Friday (5), Saturday (6), or Sunday (0), show next Monday
-    if (day === 5 || day === 6 || day === 0) {
-      const daysUntilMonday = day === 0 ? 1 : 8 - day;
-      d.setDate(d.getDate() + daysUntilMonday);
-      return toLocalDateStr(d);
-    }
-    
-    // Otherwise show most recent Monday
-    const diff = day === 0 ? 6 : day - 1;
-    d.setDate(d.getDate() - diff);
-    return toLocalDateStr(d);
-  };
   const getRecentMondays = (count: number) => {
     const mondays: string[] = [];
     const d = new Date();
@@ -142,31 +131,17 @@ export const ImportPage: FC = () => {
     return mondays;
   };
   const recentMondays = getRecentMondays(52);
-  const [ariaTop50Date, setAriaTop50Date] = useState(() => getMostRecentMonday());
-  const [ariaAustralianDate, setAriaAustralianDate] = useState(() => getMostRecentMonday());
-  const [ariaReplayDate, setAriaReplayDate] = useState(() => getMostRecentMonday());
-  const [ariaNewMusicDate, setAriaNewMusicDate] = useState(() => getMostRecentMonday());
-  const [ariaHipHopDate, setAriaHipHopDate] = useState(() => getMostRecentMonday());
-  const [ariaDanceDate, setAriaDanceDate] = useState(() => getMostRecentMonday());
-  const [ariaClubDate, setAriaClubDate] = useState(() => getMostRecentMonday());
+  const [ariaTop50Date, setAriaTop50Date] = useState('latest');
+  const [_ariaAlbumsDate] = useState('latest');
+  const [ariaAustralianDate, setAriaAustralianDate] = useState('latest');
+  const [ariaReplayDate, setAriaReplayDate] = useState('latest');
+  const [ariaNewMusicDate, setAriaNewMusicDate] = useState('latest');
+  const [ariaHipHopDate, setAriaHipHopDate] = useState('latest');
+  const [ariaDanceDate, setAriaDanceDate] = useState('latest');
+  const [ariaClubDate, setAriaClubDate] = useState('latest');
   const [ariaTop100Year, setAriaTop100Year] = useState(() => new Date().getFullYear().toString());
 
   // Billboard charts are dated for Saturdays (but released on Tuesdays)
-  const getMostRecentSaturday = () => {
-    const d = new Date();
-    const day = d.getDay();
-    
-    // Get most recent Saturday (including today if today is Saturday)
-    if (day === 6) {
-      // Today is Saturday, use today
-      return toLocalDateStr(d);
-    } else {
-      // Go back to last Saturday
-      const daysBack = day === 0 ? 1 : day + 1;
-      d.setDate(d.getDate() - daysBack);
-      return toLocalDateStr(d);
-    }
-  };
   const getPastSaturdays = (count: number) => {
     const saturdays: string[] = [];
     const d = new Date();
@@ -190,7 +165,7 @@ export const ImportPage: FC = () => {
   const recentSaturdays = getPastSaturdays(52);
 
   // Billboard date state
-  const [billboardDate, setBillboardDate] = useState(() => getMostRecentSaturday());
+  const [billboardDate, setBillboardDate] = useState('latest');
 
   // Country options for charts/popular playlists
   const countries = [
@@ -327,7 +302,7 @@ export const ImportPage: FC = () => {
   const currentSource = sources.find(s => s.id === activeSource);
   // Use dynamic playlists for supported sources, Spotify playlists for Spotify, empty for others
   const currentPopular = activeSource === 'spotify' 
-    ? spotifyPlaylists 
+    ? spotifyPlaylists
     : (['deezer', 'youtube', 'apple'].includes(activeSource) 
       ? dynamicPlaylists 
       : []);
@@ -369,15 +344,63 @@ export const ImportPage: FC = () => {
       if (response.ok) {
         const data = await response.json();
         setSpotifyPlaylists(data.playlists || []);
+        setSpotifyPremiumRequired(false);
       } else {
-        console.error('Failed to fetch Spotify playlists');
+        const errorData = await response.json();
+        console.error('Failed to fetch Spotify playlists', errorData);
         setSpotifyPlaylists([]);
+        
+        // Check if Premium is required
+        if (errorData.premiumRequired) {
+          setSpotifyPremiumRequired(true);
+          setError(errorData.error);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch Spotify playlists', err);
       setSpotifyPlaylists([]);
     } finally {
       setIsLoadingSpotifyPlaylists(false);
+    }
+  };
+
+  const searchSpotifyPlaylists = async () => {
+    if (!spotifySearchQuery.trim()) {
+      setSpotifySearchResults([]);
+      return;
+    }
+    
+    setIsSearchingSpotify(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/spotify/search?q=${encodeURIComponent(spotifySearchQuery)}`,
+        { credentials: 'include' }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setSpotifySearchResults(data.playlists || []);
+        setSpotifyPremiumRequired(false);
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to search Spotify playlists', errorData);
+        setSpotifySearchResults([]);
+        
+        // Check if Premium is required
+        if (errorData.premiumRequired) {
+          setSpotifyPremiumRequired(true);
+          setError(errorData.error);
+        } else {
+          setError('Failed to search Spotify playlists');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to search Spotify playlists', err);
+      setError('Failed to search Spotify playlists');
+      setSpotifySearchResults([]);
+    } finally {
+      setIsSearchingSpotify(false);
     }
   };
 
@@ -805,9 +828,36 @@ export const ImportPage: FC = () => {
           
           // When using SSE (sessionId provided), the POST just starts the import
           // The actual result will come via the SSE 'complete' event
-          // So we don't need to process the response here
           const responseData = await response.json();
           console.log('[ImportPage] Import started:', responseData);
+          
+          // Check if import was queued
+          if (responseData.queued) {
+            // Import is queued, hide progress modal and let queue status show it
+            setImportProgress(null);
+            setIsImporting(false);
+            
+            // Close SSE and polling since we'll reconnect when it starts processing
+            if (eventSource.readyState !== EventSource.CLOSED) {
+              eventSource.close();
+            }
+            setCurrentEventSource(null);
+            if (pollInterval) {
+              clearInterval(pollInterval);
+              setPollInterval(null);
+            }
+            
+            // Show a brief success message
+            const position = responseData.position || 0;
+            const message = position === 0 
+              ? 'Import started' 
+              : `Import queued (position ${position})`;
+            
+            // You could show a toast notification here if you have one
+            console.log('[ImportPage] ' + message);
+            
+            return;
+          }
           
           // Don't set result here - it will come via SSE complete event
           // Just return to let the SSE handler take over
@@ -1462,7 +1512,7 @@ export const ImportPage: FC = () => {
           )}
           
           {activeSource === 'spotify' && spotifyConnected && (
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{
                 padding: '0.5rem 1rem',
                 backgroundColor: 'rgba(76, 175, 80, 0.1)',
@@ -1476,19 +1526,65 @@ export const ImportPage: FC = () => {
               <button
                 className="btn btn-secondary btn-small"
                 onClick={handleDisconnectSpotify}
-                title="Disconnect and reconnect to refresh credentials"
+                title="Disconnect from Spotify"
               >
-                Reconnect
+                Disconnect
               </button>
             </div>
           )}
         </div>
       </div>
 
+      {/* Spotify Premium Requirement Notice - Always visible when Spotify is selected */}
+      {activeSource === 'spotify' && (
+        <div style={{
+          marginBottom: '1.5rem',
+          padding: '1rem',
+          backgroundColor: 'rgba(255, 152, 0, 0.1)',
+          border: '1px solid rgba(255, 152, 0, 0.5)',
+          borderRadius: '4px',
+          color: 'var(--text-primary)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+            <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>⚠️</span>
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                Spotify Premium Required
+              </div>
+              <div style={{ fontSize: '0.85rem', lineHeight: '1.5' }}>
+                The Spotify app owner (the account that created the Spotify Developer app) must have an active Spotify Premium subscription to browse and search playlists. Free accounts cannot access these features through the Spotify API.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Spotify Setup Panel */}
       {activeSource === 'spotify' && showSpotifySetup && !spotifyConnected && (
         <div className="card" style={{ marginBottom: '2rem', backgroundColor: 'rgba(91, 155, 213, 0.05)' }}>
           <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Setup Spotify Connection</h3>
+          
+          {/* Premium Requirement Warning */}
+          <div style={{
+            marginBottom: '1.5rem',
+            padding: '1rem',
+            backgroundColor: 'rgba(255, 152, 0, 0.1)',
+            border: '1px solid rgba(255, 152, 0, 0.5)',
+            borderRadius: '4px',
+            color: 'var(--text-primary)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+              <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>⚠️</span>
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                  Spotify Premium Required
+                </div>
+                <div style={{ fontSize: '0.85rem', lineHeight: '1.5' }}>
+                  The Spotify app owner (the account that created the Spotify Developer app) must have an active Spotify Premium subscription to use this feature. Free accounts cannot access the Spotify API for playlist browsing and search.
+                </div>
+              </div>
+            </div>
+          </div>
           
           {spotifyHasCredentials && (
             <div style={{
@@ -1584,12 +1680,12 @@ export const ImportPage: FC = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               className="btn btn-primary"
               onClick={handleSaveSpotifyCredentials}
               disabled={isSavingSpotify || (!spotifyHasCredentials && (!spotifyClientId.trim() || !spotifyClientSecret.trim()))}
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: '200px' }}
             >
               {isSavingSpotify ? (
                 <>
@@ -1608,6 +1704,36 @@ export const ImportPage: FC = () => {
             >
               Open Spotify Dashboard
             </button>
+            {spotifyHasCredentials && (
+              <button
+                className="btn btn-secondary"
+                onClick={async () => {
+                  if (!confirm('Clear saved Spotify credentials? You will need to set them up again to use Spotify features.')) {
+                    return;
+                  }
+                  try {
+                    const response = await fetch('/api/spotify/disconnect', {
+                      method: 'DELETE',
+                      credentials: 'include',
+                    });
+                    if (!response.ok) {
+                      throw new Error('Failed to clear credentials');
+                    }
+                    setSpotifyHasCredentials(false);
+                    setSpotifyClientId('');
+                    setSpotifyClientSecret('');
+                    setShowSpotifySetup(false);
+                    setError(null);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Failed to clear credentials');
+                  }
+                }}
+                style={{ color: 'var(--error)' }}
+                title="Remove saved credentials"
+              >
+                Clear Credentials
+              </button>
+            )}
           </div>
           
           {isSavingSpotify && (
@@ -1794,26 +1920,72 @@ export const ImportPage: FC = () => {
               </div>
             ) : !['aria', 'billboard'].includes(activeSource) ? (
               <div>
+                {/* Spotify Premium Required Warning */}
+                {activeSource === 'spotify' && spotifyConnected && spotifyPremiumRequired && (
+                  <div style={{
+                    marginBottom: '1rem',
+                    padding: '1rem',
+                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                    border: '1px solid rgba(244, 67, 54, 0.5)',
+                    borderRadius: '4px',
+                    color: 'var(--text-primary)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                      <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>🚫</span>
+                      <div>
+                        <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                          Spotify Premium Subscription Required
+                        </div>
+                        <div style={{ fontSize: '0.85rem', lineHeight: '1.5' }}>
+                          The Spotify app owner needs an active Premium subscription to browse and search playlists. Free accounts cannot access these features through the Spotify API.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-                  {['deezer', 'youtube'].includes(activeSource) ? `${currentSource?.name} URL or Search` : `${currentSource?.name} URL`}
+                  {activeSource === 'spotify' && spotifyConnected 
+                    ? 'Search Spotify Playlists'
+                    : ['deezer', 'youtube'].includes(activeSource) 
+                      ? `${currentSource?.name} URL or Search` 
+                      : `${currentSource?.name} URL`}
                 </label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input
                     type="text"
-                    value={url}
+                    value={activeSource === 'spotify' && spotifyConnected ? spotifySearchQuery : url}
                     onChange={(e) => {
-                      setUrl(e.target.value);
-                      // Clear search results when user types
-                      if (searchResults.length > 0) {
-                        setSearchResults([]);
+                      if (activeSource === 'spotify' && spotifyConnected) {
+                        setSpotifySearchQuery(e.target.value);
+                        // Clear search results when user clears input
+                        if (!e.target.value.trim()) {
+                          setSpotifySearchResults([]);
+                        }
+                      } else {
+                        setUrl(e.target.value);
+                        // Clear search results when user types
+                        if (searchResults.length > 0) {
+                          setSearchResults([]);
+                        }
                       }
                     }}
-                    placeholder={['deezer', 'youtube'].includes(activeSource) ? `${currentSource?.placeholder} or search for playlists` : currentSource?.placeholder}
+                    placeholder={
+                      activeSource === 'spotify' && spotifyConnected
+                        ? 'Search for playlists on Spotify...'
+                        : ['deezer', 'youtube'].includes(activeSource) 
+                          ? `${currentSource?.placeholder} or search for playlists` 
+                          : currentSource?.placeholder
+                    }
                     disabled={isImporting}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && ['deezer', 'youtube'].includes(activeSource) && url.trim() && !url.includes('http')) {
+                      if (e.key === 'Enter') {
                         e.preventDefault();
-                        handleSearch();
+                        if (activeSource === 'spotify' && spotifyConnected && spotifySearchQuery.trim()) {
+                          searchSpotifyPlaylists();
+                        } else if (['deezer', 'youtube'].includes(activeSource) && url.trim() && !url.includes('http')) {
+                          handleSearch();
+                        }
                       }
                     }}
                     style={{
@@ -1825,6 +1997,16 @@ export const ImportPage: FC = () => {
                       color: 'var(--text-primary)',
                     }}
                   />
+                  {(activeSource === 'spotify' && spotifyConnected) && (
+                    <button
+                      className="btn btn-secondary"
+                      onClick={searchSpotifyPlaylists}
+                      disabled={isSearchingSpotify || !spotifySearchQuery.trim()}
+                      style={{ minWidth: '100px' }}
+                    >
+                      {isSearchingSpotify ? 'Searching...' : 'Search'}
+                    </button>
+                  )}
                   {['deezer', 'youtube'].includes(activeSource) && (
                     <button
                       className="btn btn-secondary"
@@ -1835,17 +2017,34 @@ export const ImportPage: FC = () => {
                       {isSearching ? 'Searching...' : 'Search'}
                     </button>
                   )}
+                  {activeSource === 'spotify' && spotifyConnected && (spotifySearchQuery || spotifySearchResults.length > 0) && (
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setSpotifySearchQuery('');
+                        setSpotifySearchResults([]);
+                      }}
+                      style={{ minWidth: '80px' }}
+                      title="Clear search"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
-                {['deezer', 'youtube'].includes(activeSource) && (
+                {activeSource === 'spotify' && spotifyConnected ? (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                    Search Spotify's catalog for playlists by name or keywords
+                  </div>
+                ) : ['deezer', 'youtube'].includes(activeSource) ? (
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
                     Paste a URL to import directly, or enter keywords to search for playlists
                   </div>
-                )}
+                ) : null}
               </div>
             ) : null}
 
             {/* Optional Custom Playlist Name */}
-            {!['aria', 'billboard'].includes(activeSource) && (
+            {!['aria', 'billboard'].includes(activeSource) && !(activeSource === 'spotify' && spotifyConnected) && (
               <button
                 className="btn btn-primary"
                 onClick={() => handleImport()}
@@ -1857,30 +2056,8 @@ export const ImportPage: FC = () => {
             )}
             </div>
           )}
-
           {/* Popular/User Playlists */}
-          {activeSource === 'spotify' && !spotifyConnected ? (
-            <div style={{ 
-              textAlign: 'center', 
-              padding: '2rem',
-              marginBottom: '1rem',
-              border: '1px solid var(--border-color)',
-              borderRadius: '4px',
-              backgroundColor: 'rgba(91, 155, 213, 0.05)',
-            }}>
-              <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>🎵</div>
-              <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>Connect to Spotify</div>
-              <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                Connect your Spotify account to see and import your playlists
-              </div>
-              <button
-                className="btn btn-primary"
-                onClick={() => setShowSpotifySetup(true)}
-              >
-                Connect to Spotify
-              </button>
-            </div>
-          ) : searchResults.length > 0 ? (
+          {searchResults.length > 0 ? (
             <>
               <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', fontWeight: 500 }}>
                 Search Results for "{url}"
@@ -1946,6 +2123,7 @@ export const ImportPage: FC = () => {
                 ARIA Charts
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+                
                 {/* Top 50 Singles */}
                 <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
                   <div style={{ flex: 1, marginBottom: '0.75rem' }}>
@@ -1953,12 +2131,13 @@ export const ImportPage: FC = () => {
                     <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Weekly ARIA Top 50 Singles Chart</div>
                     <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Chart week (Monday):</label>
                     <select value={ariaTop50Date} onChange={(e) => setAriaTop50Date(e.target.value)} style={{ padding: '0.4rem', border: '1px solid var(--border-color)', borderRadius: '4px', backgroundColor: 'var(--surface)', color: 'var(--text-primary)', fontSize: '0.8rem', width: '100%', cursor: 'pointer' }}>
+                      <option value="latest">Latest</option>
                       {recentMondays.map(m => <option key={m} value={m}>{formatDateDMY(m)}</option>)}
                     </select>
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button className="btn btn-primary btn-small" onClick={() => handleImport(`https://www.aria.com.au/charts/singles-chart/${ariaTop50Date}`)} disabled={isImporting} style={{ flex: 1 }}>Import</button>
-                    <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: `ARIA Top 50 Singles - ${ariaTop50Date}`, url: `https://www.aria.com.au/charts/singles-chart/${ariaTop50Date}` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
+                    <button className="btn btn-primary btn-small" onClick={() => handleImport(ariaTop50Date === 'latest' ? `https://www.aria.com.au/charts/singles-chart` : `https://www.aria.com.au/charts/singles-chart/${ariaTop50Date}`)} disabled={isImporting} style={{ flex: 1 }}>Import</button>
+                    <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: ariaTop50Date === 'latest' ? `ARIA Top 50 Singles - Latest` : `ARIA Top 50 Singles - ${ariaTop50Date}`, url: ariaTop50Date === 'latest' ? `https://www.aria.com.au/charts/singles-chart` : `https://www.aria.com.au/charts/singles-chart/${ariaTop50Date}` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
                   </div>
                 </div>
 
@@ -1969,12 +2148,13 @@ export const ImportPage: FC = () => {
                     <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Australian Artist Singles Chart</div>
                     <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Chart week (Monday):</label>
                     <select value={ariaAustralianDate} onChange={(e) => setAriaAustralianDate(e.target.value)} style={{ padding: '0.4rem', border: '1px solid var(--border-color)', borderRadius: '4px', backgroundColor: 'var(--surface)', color: 'var(--text-primary)', fontSize: '0.8rem', width: '100%', cursor: 'pointer' }}>
+                      <option value="latest">Latest</option>
                       {recentMondays.map(m => <option key={m} value={m}>{formatDateDMY(m)}</option>)}
                     </select>
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button className="btn btn-primary btn-small" onClick={() => handleImport(`https://www.aria.com.au/charts/australian-artist-singles-chart/${ariaAustralianDate}`)} disabled={isImporting} style={{ flex: 1 }}>Import</button>
-                    <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: `ARIA Australian Singles - ${ariaAustralianDate}`, url: `https://www.aria.com.au/charts/australian-artist-singles-chart/${ariaAustralianDate}` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
+                    <button className="btn btn-primary btn-small" onClick={() => handleImport(ariaAustralianDate === 'latest' ? `https://www.aria.com.au/charts/australian-artist-singles-chart` : `https://www.aria.com.au/charts/australian-artist-singles-chart/${ariaAustralianDate}`)} disabled={isImporting} style={{ flex: 1 }}>Import</button>
+                    <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: ariaAustralianDate === 'latest' ? `ARIA Australian Singles - Latest` : `ARIA Australian Singles - ${ariaAustralianDate}`, url: ariaAustralianDate === 'latest' ? `https://www.aria.com.au/charts/australian-artist-singles-chart` : `https://www.aria.com.au/charts/australian-artist-singles-chart/${ariaAustralianDate}` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
                   </div>
                 </div>
 
@@ -1985,12 +2165,13 @@ export const ImportPage: FC = () => {
                     <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Catalogue Singles Chart</div>
                     <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Chart week (Monday):</label>
                     <select value={ariaReplayDate} onChange={(e) => setAriaReplayDate(e.target.value)} style={{ padding: '0.4rem', border: '1px solid var(--border-color)', borderRadius: '4px', backgroundColor: 'var(--surface)', color: 'var(--text-primary)', fontSize: '0.8rem', width: '100%', cursor: 'pointer' }}>
+                      <option value="latest">Latest</option>
                       {recentMondays.map(m => <option key={m} value={m}>{formatDateDMY(m)}</option>)}
                     </select>
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button className="btn btn-primary btn-small" onClick={() => handleImport(`https://www.aria.com.au/charts/catalogue-singles-chart/${ariaReplayDate}`)} disabled={isImporting} style={{ flex: 1 }}>Import</button>
-                    <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: `ARIA On Replay Singles - ${ariaReplayDate}`, url: `https://www.aria.com.au/charts/catalogue-singles-chart/${ariaReplayDate}` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
+                    <button className="btn btn-primary btn-small" onClick={() => handleImport(ariaReplayDate === 'latest' ? `https://www.aria.com.au/charts/catalogue-singles-chart` : `https://www.aria.com.au/charts/catalogue-singles-chart/${ariaReplayDate}`)} disabled={isImporting} style={{ flex: 1 }}>Import</button>
+                    <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: ariaReplayDate === 'latest' ? `ARIA On Replay Singles - Latest` : `ARIA On Replay Singles - ${ariaReplayDate}`, url: ariaReplayDate === 'latest' ? `https://www.aria.com.au/charts/catalogue-singles-chart` : `https://www.aria.com.au/charts/catalogue-singles-chart/${ariaReplayDate}` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
                   </div>
                 </div>
 
@@ -2033,12 +2214,13 @@ export const ImportPage: FC = () => {
                     <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Weekly ARIA Dance Singles Chart</div>
                     <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Chart week (Monday):</label>
                     <select value={ariaDanceDate} onChange={(e) => setAriaDanceDate(e.target.value)} style={{ padding: '0.4rem', border: '1px solid var(--border-color)', borderRadius: '4px', backgroundColor: 'var(--surface)', color: 'var(--text-primary)', fontSize: '0.8rem', width: '100%', cursor: 'pointer' }}>
+                      <option value="latest">Latest</option>
                       {recentMondays.map(m => <option key={m} value={m}>{formatDateDMY(m)}</option>)}
                     </select>
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button className="btn btn-primary btn-small" onClick={() => handleImport(`https://www.aria.com.au/charts/dance-singles-chart/${ariaDanceDate}`)} disabled={isImporting} style={{ flex: 1 }}>Import</button>
-                    <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: `ARIA Dance Singles - ${ariaDanceDate}`, url: `https://www.aria.com.au/charts/dance-singles-chart/${ariaDanceDate}` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
+                    <button className="btn btn-primary btn-small" onClick={() => handleImport(ariaDanceDate === 'latest' ? `https://www.aria.com.au/charts/dance-singles-chart` : `https://www.aria.com.au/charts/dance-singles-chart/${ariaDanceDate}`)} disabled={isImporting} style={{ flex: 1 }}>Import</button>
+                    <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: ariaDanceDate === 'latest' ? `ARIA Dance Singles - Latest` : `ARIA Dance Singles - ${ariaDanceDate}`, url: ariaDanceDate === 'latest' ? `https://www.aria.com.au/charts/dance-singles-chart` : `https://www.aria.com.au/charts/dance-singles-chart/${ariaDanceDate}` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
                   </div>
                 </div>
 
@@ -2049,12 +2231,13 @@ export const ImportPage: FC = () => {
                     <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Weekly ARIA Club Tracks Chart</div>
                     <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Chart week (Monday):</label>
                     <select value={ariaClubDate} onChange={(e) => setAriaClubDate(e.target.value)} style={{ padding: '0.4rem', border: '1px solid var(--border-color)', borderRadius: '4px', backgroundColor: 'var(--surface)', color: 'var(--text-primary)', fontSize: '0.8rem', width: '100%', cursor: 'pointer' }}>
+                      <option value="latest">Latest</option>
                       {recentMondays.map(m => <option key={m} value={m}>{formatDateDMY(m)}</option>)}
                     </select>
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button className="btn btn-primary btn-small" onClick={() => handleImport(`https://www.aria.com.au/charts/club-tracks-chart/${ariaClubDate}`)} disabled={isImporting} style={{ flex: 1 }}>Import</button>
-                    <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: `ARIA Club Tracks - ${ariaClubDate}`, url: `https://www.aria.com.au/charts/club-tracks-chart/${ariaClubDate}` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
+                    <button className="btn btn-primary btn-small" onClick={() => handleImport(ariaClubDate === 'latest' ? `https://www.aria.com.au/charts/club-tracks-chart` : `https://www.aria.com.au/charts/club-tracks-chart/${ariaClubDate}`)} disabled={isImporting} style={{ flex: 1 }}>Import</button>
+                    <button className="btn btn-secondary btn-small" onClick={() => handleSchedule({ name: ariaClubDate === 'latest' ? `ARIA Club Tracks - Latest` : `ARIA Club Tracks - ${ariaClubDate}`, url: ariaClubDate === 'latest' ? `https://www.aria.com.au/charts/club-tracks-chart` : `https://www.aria.com.au/charts/club-tracks-chart/${ariaClubDate}` })} disabled={isImporting} style={{ flex: 1 }}>Schedule</button>
                   </div>
                 </div>
 
@@ -2104,6 +2287,7 @@ export const ImportPage: FC = () => {
                           fontSize: '0.875rem'
                         }}
                       >
+                        <option value="latest">Latest</option>
                         {recentSaturdays.map(date => (
                           <option key={date} value={date}>
                             {formatDateDMY(date)}
@@ -2115,7 +2299,7 @@ export const ImportPage: FC = () => {
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button 
                       className="btn btn-primary btn-small" 
-                      onClick={() => handleImport(`https://www.billboard.com/charts/hot-100/${billboardDate}/`)} 
+                      onClick={() => handleImport(billboardDate === 'latest' ? `https://www.billboard.com/charts/hot-100/` : `https://www.billboard.com/charts/hot-100/${billboardDate}/`)} 
                       disabled={isImporting} 
                       style={{ flex: 1 }}
                     >
@@ -2124,8 +2308,8 @@ export const ImportPage: FC = () => {
                     <button 
                       className="btn btn-secondary btn-small" 
                       onClick={() => handleSchedule({ 
-                        name: `Billboard Hot 100 - ${formatDateDMY(billboardDate)}`, 
-                        url: `https://www.billboard.com/charts/hot-100/${billboardDate}/` 
+                        name: billboardDate === 'latest' ? `Billboard Hot 100 - Latest` : `Billboard Hot 100 - ${formatDateDMY(billboardDate)}`, 
+                        url: billboardDate === 'latest' ? `https://www.billboard.com/charts/hot-100/` : `https://www.billboard.com/charts/hot-100/${billboardDate}/`
                       })} 
                       disabled={isImporting} 
                       style={{ flex: 1 }}
@@ -2609,8 +2793,90 @@ export const ImportPage: FC = () => {
             </>
           ) : (currentPopular.length > 0 || (activeSource === 'spotify' && isLoadingSpotifyPlaylists) || isLoadingDynamicPlaylists) && (
             <>
+              {/* Spotify Search Results Section */}
+              {activeSource === 'spotify' && spotifySearchResults.length > 0 && (
+                <>
+                  <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', fontWeight: 500 }}>
+                    Search Results ({spotifySearchResults.length})
+                  </h3>
+                  
+                  {isSearchingSpotify ? (
+                    <div style={{ 
+                      textAlign: 'center', 
+                      padding: '2rem',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.875rem',
+                      marginBottom: '1rem',
+                    }}>
+                      Searching Spotify...
+                    </div>
+                  ) : (
+                    <div style={{ 
+                      display: 'grid', 
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', 
+                      gap: '0.75rem',
+                      marginBottom: '2rem',
+                    }}>
+                      {spotifySearchResults.map((playlist, idx) => (
+                        <div
+                          key={idx}
+                          className="card"
+                          style={{ 
+                            padding: '1rem',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            cursor: 'pointer',
+                            transition: 'transform 0.2s, box-shadow 0.2s',
+                          }}
+                          onClick={() => {
+                            setUrl(playlist.url);
+                            setPlaylistName(playlist.name);
+                            handleImport(playlist.url);
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = '';
+                          }}
+                        >
+                          {playlist.imageUrl && (
+                            <img 
+                              src={playlist.imageUrl} 
+                              alt={playlist.name}
+                              style={{ 
+                                width: '100%', 
+                                aspectRatio: '1', 
+                                objectFit: 'cover', 
+                                borderRadius: '4px',
+                                marginBottom: '0.75rem',
+                              }}
+                            />
+                          )}
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 500, marginBottom: '0.25rem', fontSize: '0.9rem' }}>
+                              {playlist.name}
+                            </div>
+                            {playlist.description && (
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                {playlist.description}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* User Playlists Section */}
               <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', fontWeight: 500 }}>
-                {activeSource === 'spotify' ? 'Your Spotify Playlists' : 'Popular Playlists'}
+                {activeSource === 'spotify' 
+                  ? `Your Spotify Playlists (${spotifyPlaylists.length})`
+                  : 'Popular Playlists'}
               </h3>
               
               {(isLoadingSpotifyPlaylists || isLoadingDynamicPlaylists) ? (

@@ -267,3 +267,42 @@ CREATE TABLE IF NOT EXISTS schedule_executions (
 CREATE INDEX IF NOT EXISTS idx_schedule_executions_schedule_id ON schedule_executions(schedule_id);
 CREATE INDEX IF NOT EXISTS idx_schedule_executions_user_id ON schedule_executions(user_id);
 CREATE INDEX IF NOT EXISTS idx_schedule_executions_started_at ON schedule_executions(started_at DESC);
+
+-- Saved Spotify users table
+-- Stores Spotify user IDs that users want quick access to
+CREATE TABLE IF NOT EXISTS saved_spotify_users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  spotify_user_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  added_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(user_id, spotify_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_saved_spotify_users_user_id ON saved_spotify_users(user_id);
+
+-- Import queue table
+-- Stores import jobs that are queued or in progress
+CREATE TABLE IF NOT EXISTS import_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT UNIQUE NOT NULL,
+  user_id INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  url TEXT NOT NULL,
+  playlist_name TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',  -- 'queued', 'processing', 'completed', 'failed', 'cancelled'
+  progress INTEGER DEFAULT 0,
+  total INTEGER DEFAULT 0,
+  error_message TEXT,
+  result TEXT,  -- JSON: import result data
+  created_at INTEGER NOT NULL,
+  started_at INTEGER,
+  completed_at INTEGER,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_queue_user_id ON import_queue(user_id);
+CREATE INDEX IF NOT EXISTS idx_import_queue_status ON import_queue(status);
+CREATE INDEX IF NOT EXISTS idx_import_queue_session_id ON import_queue(session_id);
+

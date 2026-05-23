@@ -149,7 +149,7 @@ interface PlexMediaContainer<T = any> {
 export class PlexClient {
   private serverUrl: string;
   private token: string;
-  private client: AxiosInstance;
+  public client: AxiosInstance;
   private clientId: string;
   private productName: string;
   private searchCache: Map<string, { results: PlexTrack[]; timestamp: number }> = new Map();
@@ -208,20 +208,87 @@ export class PlexClient {
         let tracks: PlexTrack[] = [];
 
         if (libraryId && artist && title) {
-          // Use separate artist and title filters for precise matching
-          logger.info(`[Plex] Using filtered search: library=${libraryId}, artist="${artist}", title="${title}"`);
-          const response = await this.client.get<PlexMediaContainer>(
-            `/library/sections/${libraryId}/all`,
-            { 
-              params: { 
-                type: 10,
-                'artist.title': artist,
-                'track.title': title
-              } 
+          // OPTIMIZED STRATEGY: Search by artist first, then filter tracks
+          // This is much more efficient than searching for short track names
+          logger.info(`[Plex] Using artist-first search: library=${libraryId}, artist="${artist}", title="${title}"`);
+          
+          try {
+            // Step 1: Find the artist
+            const artistResponse = await this.client.get<PlexMediaContainer>(
+              `/library/sections/${libraryId}/all`,
+              { 
+                params: { 
+                  type: 8, // Artist type
+                  'artist.title': artist
+                } 
+              }
+            );
+            
+            const artists = artistResponse.data.MediaContainer.Metadata || [];
+            logger.info(`[Plex] Found ${artists.length} matching artists for "${artist}"`);
+            
+            if (artists.length > 0) {
+              // Step 2: Get tracks from the first matching artist
+              const artistKey = artists[0].ratingKey;
+              const artistName = artists[0].title;
+              logger.info(`[Plex] Fetching tracks from artist: ${artistName} (${artistKey})`);
+              
+              // Get all tracks by this artist (grandchildren endpoint)
+              const tracksResponse = await this.client.get<PlexMediaContainer>(
+                `/library/metadata/${artistKey}/allLeaves`,
+                { params: { type: 10 } } // Type 10 = tracks
+              );
+              
+              const artistTracks = tracksResponse.data.MediaContainer.Metadata || [];
+              logger.info(`[Plex] Artist has ${artistTracks.length} total tracks`);
+              
+              // Step 3: Filter tracks by title
+              const normalizeTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const normalizedSearchTitle = normalizeTitle(title);
+              
+              tracks = artistTracks.filter((track: PlexTrack) => {
+                const trackTitle = track.title || '';
+                const normalizedTrackTitle = normalizeTitle(trackTitle);
+                // Match if title contains search term or search term contains title
+                return normalizedTrackTitle.includes(normalizedSearchTitle) || 
+                       normalizedSearchTitle.includes(normalizedTrackTitle);
+              });
+              
+              logger.info(`[Plex] Filtered to ${tracks.length} tracks matching title "${title}"`);
             }
-          );
-          tracks = response.data.MediaContainer.Metadata || [];
-          logger.info(`[Plex] Filtered search returned ${tracks.length} tracks`);
+            
+            // If no results from artist-first search, fall back to direct filter
+            if (tracks.length === 0) {
+              logger.info(`[Plex] Artist-first search found nothing, trying direct filter`);
+              const response = await this.client.get<PlexMediaContainer>(
+                `/library/sections/${libraryId}/all`,
+                { 
+                  params: { 
+                    type: 10,
+                    'artist.title': artist,
+                    'track.title': title
+                  } 
+                }
+              );
+              tracks = response.data.MediaContainer.Metadata || [];
+              logger.info(`[Plex] Direct filter returned ${tracks.length} tracks`);
+            }
+          } catch (err: any) {
+            logger.warn(`[Plex] Artist-first search failed: ${err.message}, falling back to direct filter`);
+            // Fallback to original filtered search
+            const response = await this.client.get<PlexMediaContainer>(
+              `/library/sections/${libraryId}/all`,
+              { 
+                params: { 
+                  type: 10,
+                  'artist.title': artist,
+                  'track.title': title
+                } 
+              }
+            );
+            tracks = response.data.MediaContainer.Metadata || [];
+            logger.info(`[Plex] Fallback filtered search returned ${tracks.length} tracks`);
+          }
         } else if (libraryId && title) {
           // Search by title only
           logger.info(`[Plex] Using title-only search: library=${libraryId}, title="${title}"`);
@@ -235,12 +302,29 @@ export class PlexClient {
           // Fall back to hub search for combined query
           logger.info(`[Plex] Using hub search: query="${query}", library=${libraryId || 'all'}`);
           const response = await this.client.get<PlexMediaContainer>('/hubs/search', {
-            params: { query: query, limit: 50 }
+            params: { query: query, limit: 100 }
           });
           const hubs = response.data.MediaContainer.Hub || [];
           const trackHub = hubs.find((hub: any) => hub.type === 'track');
+          const albumHub = hubs.find((hub: any) => hub.type === 'album');
           let allTracks = trackHub?.Metadata || [];
           logger.info(`[Plex] Hub search returned ${allTracks.length} tracks before filtering`);
+          
+          // Also get tracks from matching albums
+          if (albumHub?.Metadata && albumHub.Metadata.length > 0) {
+            logger.info(`[Plex] Found ${albumHub.Metadata.length} matching albums, fetching their tracks`);
+            for (const album of albumHub.Metadata.slice(0, 5)) { // Limit to first 5 albums
+              try {
+                const albumTracksResponse = await this.client.get<PlexMediaContainer>(album.key);
+                const albumTracks = albumTracksResponse.data.MediaContainer.Metadata || [];
+                logger.info(`[Plex] Album "${album.title}" has ${albumTracks.length} tracks`);
+                allTracks = allTracks.concat(albumTracks);
+              } catch (err) {
+                logger.warn(`[Plex] Failed to fetch tracks for album ${album.title}`);
+              }
+            }
+            logger.info(`[Plex] After adding album tracks: ${allTracks.length} total tracks`);
+          }
           
           // Filter by library if specified
           if (libraryId && allTracks.length > 0) {
@@ -250,92 +334,6 @@ export class PlexClient {
             logger.info(`[Plex] After library filter (${libraryId}): ${tracks.length} tracks`);
           } else {
             tracks = allTracks;
-          }
-          
-          // ALWAYS try direct track search too (not just when hub search is empty)
-          // This helps when track name = album name (Plex hub search shows albums instead of tracks)
-          if (libraryId) {
-            logger.info(`[Plex] Also trying direct track search in library ${libraryId} to find album tracks`);
-            try {
-              // Try searching with the full query first
-              let directResponse = await this.client.get<PlexMediaContainer>(
-                `/library/sections/${libraryId}/all`,
-                { 
-                  params: { 
-                    type: 10,
-                    'track.title': query
-                  } 
-                }
-              );
-              const directTracks = directResponse.data.MediaContainer.Metadata || [];
-              logger.info(`[Plex] Direct track search (full query) returned ${directTracks.length} tracks`);
-              
-              // Merge with hub search results (avoid duplicates)
-              for (const track of directTracks) {
-                if (!tracks.some((t: PlexTrack) => t.ratingKey === track.ratingKey)) {
-                  tracks.push(track);
-                }
-              }
-              logger.info(`[Plex] After merging: ${tracks.length} total tracks`);
-              
-              // If we got few results, try removing potential artist name from the query
-              // Common patterns: "Artist - Title", "Artist Title"
-              if (directTracks.length < 3) {
-                const words = query.trim().split(/\s+/);
-                
-                // Try removing first word (potential artist name)
-                if (words.length >= 3) {
-                  const withoutFirstWord = words.slice(1).join(' ');
-                  logger.info(`[Plex] Trying without first word: "${withoutFirstWord}"`);
-                  directResponse = await this.client.get<PlexMediaContainer>(
-                    `/library/sections/${libraryId}/all`,
-                    { 
-                      params: { 
-                        type: 10,
-                        'track.title': withoutFirstWord
-                      } 
-                    }
-                  );
-                  const moreDirectTracks = directResponse.data.MediaContainer.Metadata || [];
-                  logger.info(`[Plex] Direct track search (without first word) returned ${moreDirectTracks.length} tracks`);
-                  
-                  // Merge results
-                  for (const track of moreDirectTracks) {
-                    if (!tracks.some((t: PlexTrack) => t.ratingKey === track.ratingKey)) {
-                      tracks.push(track);
-                    }
-                  }
-                  logger.info(`[Plex] After merging without first word: ${tracks.length} total tracks`);
-                }
-                
-                // Try last 2-3 words (likely the core title)
-                if (words.length >= 2) {
-                  const lastTwoWords = words.slice(-2).join(' ');
-                  logger.info(`[Plex] Trying with last 2 words: "${lastTwoWords}"`);
-                  directResponse = await this.client.get<PlexMediaContainer>(
-                    `/library/sections/${libraryId}/all`,
-                    { 
-                      params: { 
-                        type: 10,
-                        'track.title': lastTwoWords
-                      } 
-                    }
-                  );
-                  const lastWordTracks = directResponse.data.MediaContainer.Metadata || [];
-                  logger.info(`[Plex] Direct track search (last 2 words) returned ${lastWordTracks.length} tracks`);
-                  
-                  // Merge results
-                  for (const track of lastWordTracks) {
-                    if (!tracks.some((t: PlexTrack) => t.ratingKey === track.ratingKey)) {
-                      tracks.push(track);
-                    }
-                  }
-                  logger.info(`[Plex] After merging last words: ${tracks.length} total tracks`);
-                }
-              }
-            } catch (err) {
-              logger.warn(`[Plex] Direct track search failed: ${err}`);
-            }
           }
         }
 

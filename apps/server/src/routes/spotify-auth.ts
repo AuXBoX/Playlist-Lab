@@ -2,12 +2,21 @@ import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { encrypt, decrypt } from '../utils/encryption';
+import { configService } from '../config';
 
 const router = Router();
 
 // Spotify OAuth configuration
 // Users provide their own Spotify app credentials through the UI
-const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:3001/api/spotify/callback';
+// Redirect URI now uses configurable PUBLIC_URL for reverse proxy support
+const getSpotifyRedirectUri = () => {
+  // Allow environment variable override for backward compatibility
+  if (process.env.SPOTIFY_REDIRECT_URI) {
+    return process.env.SPOTIFY_REDIRECT_URI;
+  }
+  return configService.getOAuthRedirectUrl('spotify');
+};
+const SPOTIFY_REDIRECT_URI = getSpotifyRedirectUri();
 
 // Encryption secret for Spotify tokens
 const ENCRYPTION_SECRET = process.env.SESSION_SECRET || 'default-secret-change-in-production';
@@ -114,22 +123,60 @@ router.get('/callback', async (req: Request, res: Response) => {
     res.send(`
       <!DOCTYPE html>
       <html>
-        <head><title>Spotify Authentication</title></head>
+        <head>
+          <title>Spotify Authentication</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              height: 100vh;
+              margin: 0;
+              background: #f5f5f5;
+            }
+            .message {
+              text-align: center;
+              padding: 2rem;
+              background: white;
+              border-radius: 8px;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            }
+            .success { color: #4caf50; }
+            .error { color: #f44336; }
+          </style>
+        </head>
         <body>
+          <div class="message">
+            <h2 class="${status === 'connected' ? 'success' : 'error'}">
+              ${status === 'connected' ? '✓ Connected successfully!' : '✗ Connection failed'}
+            </h2>
+            <p>${status === 'connected' ? 'This window will close automatically...' : `Error: ${detail}`}</p>
+            ${status !== 'connected' ? '<p><button onclick="window.close()">Close Window</button></p>' : ''}
+          </div>
           <script>
             console.log('Spotify callback received, status:', '${status}');
-            if (window.opener) {
+            if (window.opener && !window.opener.closed) {
               console.log('Posting message to opener window');
-              // Use '*' to allow cross-origin communication (safe here as we're just signaling success)
-              window.opener.postMessage(${JSON.stringify(message)}, '*');
-              setTimeout(() => window.close(), 1000);
+              try {
+                // Post message to parent window
+                window.opener.postMessage(${JSON.stringify(message)}, '*');
+                console.log('Message posted successfully');
+                // Close window after a short delay
+                setTimeout(() => {
+                  console.log('Closing popup window');
+                  window.close();
+                }, 1000);
+              } catch (err) {
+                console.error('Failed to post message:', err);
+                document.body.innerHTML = '<div class="message"><p>Authentication complete. You can close this window.</p><button onclick="window.close()">Close Window</button></div>';
+              }
             } else {
-              console.log('No opener window, redirecting to import page');
-              // Fallback: redirect to import page (for non-popup flow)
-              window.location.href = '${status === 'connected' ? '/import?spotify_connected=true' : `/import?spotify_error=${encodeURIComponent(detail)}`}';
+              console.log('No opener window available');
+              // Show message to manually close window
+              document.body.innerHTML = '<div class="message"><h2 class="${status === 'connected' ? 'success' : 'error'}">${status === 'connected' ? '✓ Connected successfully!' : '✗ Connection failed'}</h2><p>Please close this window and return to Playlist Lab.</p><button onclick="window.close()">Close Window</button></div>';
             }
           </script>
-          <p>${status === 'connected' ? 'Connected successfully! Closing window...' : `Error: ${detail}`}</p>
         </body>
       </html>
     `);
@@ -478,6 +525,95 @@ router.get('/token', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
+ * Search Spotify playlists
+ * GET /api/spotify/search?q={query}
+ */
+router.get('/search', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { q } = req.query;
+    
+    if (!q || typeof q !== 'string') {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+    
+    const dbService = req.dbService!;
+    const userId = req.session.userId!;
+    const db = (dbService as any).db;
+    
+    const token = await getSpotifyToken(userId, db);
+    
+    if (!token) {
+      return res.status(401).json({ error: 'Not connected to Spotify' });
+    }
+    
+    // Search for playlists on Spotify
+    const searchResponse = await fetch(
+      `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=playlist&limit=20`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      }
+    );
+    
+    if (!searchResponse.ok) {
+      const errorData = await searchResponse.json();
+      logger.error('Failed to search Spotify playlists', { 
+        error: errorData,
+        userId 
+      });
+      
+      let errorMessage = 'Failed to search Spotify playlists';
+      let isPremiumRequired = false;
+      
+      if (errorData.error?.message) {
+        errorMessage = errorData.error.message;
+        
+        // Check if it's a premium subscription error
+        if (searchResponse.status === 403 && 
+            (errorMessage.toLowerCase().includes('premium') || 
+             errorMessage.toLowerCase().includes('subscription'))) {
+          isPremiumRequired = true;
+          errorMessage = 'Spotify Premium subscription required. The Spotify app owner needs an active Premium subscription to use this feature.';
+        }
+      }
+      
+      return res.status(searchResponse.status).json({ 
+        error: errorMessage,
+        premiumRequired: isPremiumRequired
+      });
+    }
+    
+    const data = await searchResponse.json() as any;
+    
+    // Transform to our format
+    const playlists = data.playlists.items.map((playlist: any) => ({
+      name: playlist.name,
+      url: playlist.external_urls.spotify,
+      description: `${playlist.tracks.total} tracks${playlist.owner.display_name ? ` • by ${playlist.owner.display_name}` : ''}`,
+      trackCount: playlist.tracks.total,
+      owner: playlist.owner.display_name,
+      imageUrl: playlist.images?.[0]?.url,
+    }));
+    
+    logger.info('Successfully searched Spotify playlists', { 
+      userId, 
+      query: q,
+      resultCount: playlists.length 
+    });
+    
+    return res.json({ playlists });
+  } catch (err: any) {
+    logger.error('Failed to search Spotify playlists', { 
+      error: err.message,
+      stack: err.stack,
+      userId: req.session.userId 
+    });
+    return res.status(500).json({ error: 'Failed to search playlists' });
+  }
+});
+
+/**
  * Get user's Spotify playlists
  * GET /api/spotify/playlists
  */
@@ -512,16 +648,29 @@ router.get('/playlists', requireAuth, async (req: Request, res: Response) => {
       
       // Try to parse as JSON if it looks like JSON
       let errorMessage = 'Failed to fetch playlists from Spotify';
+      let isPremiumRequired = false;
+      
       if (responseText.trim().startsWith('{')) {
         try {
           const errorData = JSON.parse(responseText);
           errorMessage = errorData.error?.message || errorMessage;
+          
+          // Check if it's a premium subscription error
+          if (playlistsResponse.status === 403 && 
+              (errorMessage.toLowerCase().includes('premium') || 
+               errorMessage.toLowerCase().includes('subscription'))) {
+            isPremiumRequired = true;
+            errorMessage = 'Spotify Premium subscription required. The Spotify app owner needs an active Premium subscription to use this feature.';
+          }
         } catch {
           // Not JSON, use default message
         }
       }
       
-      return res.status(playlistsResponse.status).json({ error: errorMessage });
+      return res.status(playlistsResponse.status).json({ 
+        error: errorMessage,
+        premiumRequired: isPremiumRequired
+      });
     }
     
     const data = await playlistsResponse.json() as any;

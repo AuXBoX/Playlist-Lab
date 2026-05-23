@@ -43,12 +43,15 @@ export interface TargetConfig {
 export interface SourceAdapter {
   meta: ServiceMeta;
   listPlaylists?(userId: number, db: any): Promise<PlaylistInfo[]>;
-  searchPlaylists?(query: string, userId: number, db: any): Promise<PlaylistInfo[]>;
+  searchPlaylists?(query: string, userId: number, db: any): Promise<PlaylistInfo[] | { displayName: string; playlists: PlaylistInfo[] }>;
   fetchTracks(
     playlistUrlOrId: string,
     userId: number,
     db: any
   ): Promise<{ playlist: PlaylistInfo; tracks: TrackInfo[] }>;
+  searchPlaylistsUnauthenticated?(query: string): Promise<PlaylistInfo[]>;
+  fetchUserPlaylistsUnauthenticated?(userId: string): Promise<PlaylistInfo[]>;
+  fetchTracksUnauthenticated?(playlistId: string): Promise<{ playlist: PlaylistInfo; tracks: TrackInfo[] }>;
 }
 
 export interface TargetAdapter {

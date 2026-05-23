@@ -55,8 +55,6 @@ router.get('/sources', async (req: Request, res: Response, next: NextFunction) =
             serverUrl: server.server_url,
             libraryId: server.library_id,
           });
-
-          // Plex Home users intentionally excluded from cross-import sources
         }
       }
       // External services removed - only Plex allowed as source

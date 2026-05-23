@@ -338,14 +338,38 @@ export const SchedulesPage: FC = () => {
     <div className="page-container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <h1 className="page-title">Schedules</h1>
-        {!showCreateForm && (
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowCreateForm(true)}
-          >
-            Create Schedule
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {!showCreateForm && schedules.length > 0 && (
+            <button
+              className="btn btn-secondary"
+              onClick={async () => {
+                if (confirm(`Run all ${schedules.length} schedule(s) now?`)) {
+                  try {
+                    const response = await apiClient.runAllSchedules();
+                    alert(response.message);
+                    // Refresh to show new executions
+                    await refreshSchedules();
+                    const execResponse = await apiClient.getRecentExecutions(20);
+                    setRecentExecutions(execResponse.executions || []);
+                  } catch (err) {
+                    console.error('Failed to run all schedules:', err);
+                    setError('Failed to run all schedules');
+                  }
+                }
+              }}
+            >
+              Run All Schedules
+            </button>
+          )}
+          {!showCreateForm && (
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowCreateForm(true)}
+            >
+              Create Schedule
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -689,6 +713,25 @@ export const SchedulesPage: FC = () => {
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    className="btn btn-primary btn-small"
+                    onClick={async () => {
+                      try {
+                        await apiClient.runSchedule(schedule.id);
+                        // Refresh to show new execution
+                        await refreshSchedules();
+                        const execResponse = await apiClient.getRecentExecutions(20);
+                        setRecentExecutions(execResponse.executions || []);
+                      } catch (err) {
+                        console.error('Failed to run schedule:', err);
+                        setError('Failed to run schedule');
+                      }
+                    }}
+                    disabled={isDeleting || isRunning}
+                    title="Run this schedule now"
+                  >
+                    Run Now
+                  </button>
                   <button
                     className="btn btn-secondary btn-small"
                     onClick={() => handleViewHistory(schedule)}

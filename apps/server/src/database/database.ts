@@ -1035,21 +1035,27 @@ export class DatabaseService {
     sharedAt: number;
     trackCount: number;
   }> {
-    const stmt = this.db.prepare(`
-      SELECT 
-        ps.id,
-        ps.playlist_name as playlistName,
-        ps.plex_playlist_id as plexPlaylistId,
-        u.plex_username as sharedByUsername,
-        ps.shared_at as sharedAt,
-        0 as trackCount
-      FROM playlist_shares ps
-      JOIN users u ON ps.owner_user_id = u.id
-      WHERE ps.shared_with_user_id = ?
-      ORDER BY ps.shared_at DESC
-    `);
+    try {
+      const stmt = this.db.prepare(`
+        SELECT 
+          ps.id,
+          ps.playlist_name as playlistName,
+          ps.plex_playlist_id as plexPlaylistId,
+          u.plex_username as sharedByUsername,
+          ps.shared_at as sharedAt,
+          0 as trackCount
+        FROM playlist_shares ps
+        JOIN users u ON ps.owner_user_id = u.id
+        WHERE ps.shared_with_user_id = ?
+        ORDER BY ps.shared_at DESC
+      `);
 
-    return stmt.all(userId) as any[];
+      return stmt.all(userId) as any[];
+    } catch (error) {
+      logger.error('[Database] Error getting shared playlists', { error, userId });
+      // Return empty array instead of throwing to avoid breaking the UI
+      return [];
+    }
   }
 
   /**

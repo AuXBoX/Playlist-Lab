@@ -66,6 +66,9 @@ import { errorHandler } from './middleware/error-handler';
 import { attachDatabase } from './middleware/auth';
 import { DatabaseService, getDatabase } from './database';
 import { JobScheduler } from './services/jobs';
+import { importQueue } from './services/import-queue';
+import { importPlaylist, ImportOptions } from './services/import';
+import { EventEmitter } from 'events';
 import { runDailyScraperJob } from './services/scraper-job';
 import { runScheduleCheckerJob } from './services/schedule-checker-job';
 import { runCacheCleanupJob } from './services/cache-cleanup-job';
@@ -88,6 +91,10 @@ import plexSharingRoutes from './routes/plex-sharing';
 import crossImportRoutes from './routes/cross-import';
 import mixTemplatesRoutes from './routes/mix-templates';
 import youtubeConfigRoutes from './routes/youtube-config';
+import savedSpotifyUsersRoutes from './routes/saved-spotify-users';
+import plexHomeRoutes from './routes/plex-home';
+import exportRoutes from './routes/export';
+import configRoutes from './routes/config';
 // DON'T import adapters here - they need env vars loaded first
 
 // Read version from package.json
@@ -198,7 +205,9 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 
 // Request logging middleware (skip noisy polling endpoints)
 app.use((req: Request, _res: Response, next: NextFunction) => {
-  if (!req.path.includes('/import/status/') && !req.path.includes('/import/progress/')) {
+  if (!req.path.includes('/import/status/') && 
+      !req.path.includes('/import/progress/') && 
+      !req.path.includes('/import/queue')) {
     logger.info(`${req.method} ${req.path}`, {
       ip: req.ip,
       userAgent: req.get('user-agent'),
@@ -647,7 +656,9 @@ function formatUptime(seconds: number): string {
 app.use('/api/auth', authRoutes);
 app.use('/api/servers', serversRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/config', configRoutes);
 app.use('/api/playlists', playlistsRoutes);
+app.use('/api/playlists', exportRoutes); // Export routes under /api/playlists/export
 app.use('/api/missing', missingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/migrate', migrateRoutes);
@@ -663,6 +674,8 @@ app.use('/api/plex', plexSharingRoutes);
 app.use('/api/cross-import', crossImportRoutes);
 app.use('/api/mix-templates', mixTemplatesRoutes);
 app.use('/api/youtube-config', youtubeConfigRoutes);
+app.use('/api/saved-spotify-users', savedSpotifyUsersRoutes);
+app.use('/api/plex-home', plexHomeRoutes);
 
 // Serve static files from the web app (in production)
 if (NODE_ENV === 'production') {
@@ -708,6 +721,114 @@ app.use('/api/*', (_req: Request, res: Response) => {
 
 // Error handling middleware (must be last)
 app.use(errorHandler);
+
+// Initialize import queue handler
+// Store active import sessions for progress tracking
+const importSessions = new Map<string, EventEmitter>();
+const cancelledSessions = new Set<string>();
+const progressState = new Map<string, any>();
+
+// Initialize import queue with database
+importQueue.initialize(db);
+
+importQueue.setHandler(async (job) => {
+  logger.info('Import queue processing job', {
+    jobId: job.id,
+    userId: job.userId,
+    source: job.source,
+  });
+
+  // Get user's database and server info
+  const userRow = (dbService as any).db.prepare('SELECT plex_token FROM users WHERE id = ?').get(job.userId);
+  if (!userRow) {
+    throw new Error('User not found');
+  }
+
+  const { plex_token: plexToken } = userRow;
+  const serverRow = (dbService as any).db.prepare('SELECT server_url, library_id FROM user_servers WHERE user_id = ? LIMIT 1').get(job.userId);
+  if (!serverRow) {
+    throw new Error('No Plex server configured');
+  }
+
+  const { server_url: serverUrl, library_id: libraryId } = serverRow;
+
+  const options: ImportOptions = {
+    userId: job.userId,
+    serverUrl,
+    plexToken,
+    libraryId,
+    customName: job.playlistName,
+  };
+
+  // Get or create progress emitter
+  let progressEmitter = importSessions.get(job.sessionId);
+  if (!progressEmitter) {
+    progressEmitter = new EventEmitter();
+    importSessions.set(job.sessionId, progressEmitter);
+    
+    // Listen for playlist name and progress from progress updates
+    progressEmitter.on('progress', (data: any) => {
+      progressState.set(job.sessionId, data);
+      // Update job with playlist name if we get it
+      if (data.playlistName && !job.playlistName) {
+        job.playlistName = data.playlistName;
+        // Update database with playlist name
+        (dbService as any).db.prepare(`
+          UPDATE import_queue 
+          SET playlist_name = ?
+          WHERE session_id = ?
+        `).run(data.playlistName, job.sessionId);
+      }
+      // Update progress in database
+      if (data.current !== undefined && data.total !== undefined) {
+        (dbService as any).db.prepare(`
+          UPDATE import_queue 
+          SET progress = ?, total = ?
+          WHERE session_id = ?
+        `).run(data.current, data.total, job.sessionId);
+      }
+    });
+    progressEmitter.on('complete', (data: any) => {
+      progressState.set(job.sessionId, { type: 'complete', ...data });
+    });
+    progressEmitter.on('error', (data: any) => {
+      progressState.set(job.sessionId, { type: 'error', ...data });
+    });
+  }
+
+  // Run the import
+  try {
+    const result = await importPlaylist(
+      job.source as any,
+      job.url,
+      options,
+      dbService,
+      progressEmitter,
+      job.sessionId,
+      cancelledSessions
+    );
+
+    // Update job with final playlist name
+    if (result.playlistName && !job.playlistName) {
+      job.playlistName = result.playlistName;
+    }
+
+    progressEmitter.emit('complete', result);
+    
+    // Cleanup after a delay
+    setTimeout(() => {
+      importSessions.delete(job.sessionId);
+      progressState.delete(job.sessionId);
+      cancelledSessions.delete(job.sessionId);
+    }, 60000); // Keep for 1 minute after completion
+    
+    // Return result so it can be stored in completed jobs
+    return result;
+  } catch (error: any) {
+    progressEmitter.emit('error', { message: error.message || 'Import failed' });
+    throw error;
+  }
+});
 
 // Initialize job scheduler
 const jobScheduler = new JobScheduler(dbService);

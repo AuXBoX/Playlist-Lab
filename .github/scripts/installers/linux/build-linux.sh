@@ -125,11 +125,13 @@ Version: $APP_VERSION
 Section: sound
 Priority: optional
 Architecture: amd64
-Depends: nodejs (>= 18.0.0)
+Depends: nodejs (>= 18.0.0), libnspr4, libnss3, libatk-adaptor, libcups2, libxkbcommon-dev, libasound2, libcairo-5c-dev, libxdamage-dev
 Maintainer: Playlist Lab <audexa@users.noreply.github.com>
 Description: Music playlist management server
  Playlist Lab Server is a multi-user web-based music playlist
  management system with Plex Media Server integration.
+ .
+ Includes system tray integration powered by Electron.
 EOF
 
 # Create postinst script
@@ -175,10 +177,11 @@ Version:        $APP_VERSION
 Release:        1%{?dist}
 Summary:        Music playlist management server
 License:        MIT
-Requires:       nodejs >= 18.0.0
+Requires:       nodejs >= 18.0.0, nspr, nss, at-spi2-atk, cups-libs, libxkbcommon, alsa-lib, cairo, libXdamage
 
 %description
 Playlist Lab Server - multi-user web-based music playlist management.
+Includes system tray integration powered by Electron.
 
 %install
 mkdir -p %{buildroot}/opt/$APP_NAME

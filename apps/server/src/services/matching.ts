@@ -390,31 +390,45 @@ function getCoreTitle(title: string): string {
   
   // Remove remaster/deluxe/edition patterns BEFORE stripping parentheses/brackets
   const remasterPatterns = [
+    // Remaster patterns with year
     /\s*-\s*remaster(?:ed)?\s*\d{4}/gi,
     /\s*-\s*\d{4}\s*remaster(?:ed)?/gi,
+    // Remaster patterns without year (with dash, parentheses, or brackets)
     /\s*-\s*remaster(?:ed)?/gi,
     /\s*\(remaster(?:ed)?\s*\d{4}\)/gi,
     /\s*\(remaster(?:ed)?\)/gi,
     /\s*\[remaster(?:ed)?\s*\d{4}\]/gi,
     /\s*\[remaster(?:ed)?\]/gi,
+    // Remaster at end of string (no dash, just space)
+    /\s+remaster(?:ed)?$/gi,
+    // Deluxe edition patterns
     /\s*-\s*deluxe\s*edition/gi,
     /\s*\(deluxe\s*edition\)/gi,
     /\s*\[deluxe\s*edition\]/gi,
     /\s*-\s*deluxe/gi,
     /\s*\(deluxe\)/gi,
     /\s*\[deluxe\]/gi,
+    /\s+deluxe$/gi,
+    // Year edition patterns
     /\s*-\s*\d{4}\s*edition/gi,
     /\s*\(\d{4}\s*edition\)/gi,
     /\s*\[\d{4}\s*edition\]/gi,
+    // Anniversary edition patterns
     /\s*-\s*anniversary\s*edition/gi,
     /\s*\(anniversary\s*edition\)/gi,
     /\s*\[anniversary\s*edition\]/gi,
+    // Expanded edition patterns
     /\s*-\s*expanded\s*edition/gi,
     /\s*\(expanded\s*edition\)/gi,
     /\s*\[expanded\s*edition\]/gi,
+    // Special edition patterns
     /\s*-\s*special\s*edition/gi,
     /\s*\(special\s*edition\)/gi,
-    /\s*\[special\s*edition\]/gi
+    /\s*\[special\s*edition\]/gi,
+    // Bonus track patterns
+    /\s*-\s*bonus\s*track/gi,
+    /\s*\(bonus\s*track\)/gi,
+    /\s*\[bonus\s*track\]/gi
   ];
   
   for (const pattern of remasterPatterns) {
@@ -432,31 +446,45 @@ function cleanTrackTitle(title: string): string {
   // Remove remaster/deluxe/edition patterns BEFORE stripping parentheses/brackets
   // This handles cases like "Song Title - Remastered" or "Song Title (Deluxe Edition)"
   const remasterPatterns = [
+    // Remaster patterns with year
     /\s*-\s*remaster(?:ed)?\s*\d{4}/gi,
     /\s*-\s*\d{4}\s*remaster(?:ed)?/gi,
+    // Remaster patterns without year (with dash, parentheses, or brackets)
     /\s*-\s*remaster(?:ed)?/gi,
     /\s*\(remaster(?:ed)?\s*\d{4}\)/gi,
     /\s*\(remaster(?:ed)?\)/gi,
     /\s*\[remaster(?:ed)?\s*\d{4}\]/gi,
     /\s*\[remaster(?:ed)?\]/gi,
+    // Remaster at end of string (no dash, just space)
+    /\s+remaster(?:ed)?$/gi,
+    // Deluxe edition patterns
     /\s*-\s*deluxe\s*edition/gi,
     /\s*\(deluxe\s*edition\)/gi,
     /\s*\[deluxe\s*edition\]/gi,
     /\s*-\s*deluxe/gi,
     /\s*\(deluxe\)/gi,
     /\s*\[deluxe\]/gi,
+    /\s+deluxe$/gi,
+    // Year edition patterns
     /\s*-\s*\d{4}\s*edition/gi,
     /\s*\(\d{4}\s*edition\)/gi,
     /\s*\[\d{4}\s*edition\]/gi,
+    // Anniversary edition patterns
     /\s*-\s*anniversary\s*edition/gi,
     /\s*\(anniversary\s*edition\)/gi,
     /\s*\[anniversary\s*edition\]/gi,
+    // Expanded edition patterns
     /\s*-\s*expanded\s*edition/gi,
     /\s*\(expanded\s*edition\)/gi,
     /\s*\[expanded\s*edition\]/gi,
+    // Special edition patterns
     /\s*-\s*special\s*edition/gi,
     /\s*\(special\s*edition\)/gi,
-    /\s*\[special\s*edition\]/gi
+    /\s*\[special\s*edition\]/gi,
+    // Bonus track patterns
+    /\s*-\s*bonus\s*track/gi,
+    /\s*\(bonus\s*track\)/gi,
+    /\s*\[bonus\s*track\]/gi
   ];
   
   for (const pattern of remasterPatterns) {

@@ -9,6 +9,7 @@ import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { encrypt, decrypt } from '../utils/encryption';
 import { logger } from '../utils/logger';
+import { configService } from '../config';
 
 const ENCRYPTION_SECRET = process.env.SESSION_SECRET || 'default-secret-change-in-production';
 
@@ -32,18 +33,20 @@ export class YouTubeOAuthService {
     
     const clientId = process.env.YOUTUBE_CLIENT_ID;
     const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
-    const redirectUri = process.env.YOUTUBE_REDIRECT_URI;
+    // Use config service for redirect URI, with env var fallback for backward compatibility
+    const redirectUri = process.env.YOUTUBE_REDIRECT_URI || 
+      configService.getOAuthRedirectUrl('cross-import/oauth/youtube', '/api/cross-import/oauth/youtube/callback');
 
     // Debug logging
     logger.info('[YouTubeOAuth] Initializing service', {
       hasClientId: !!clientId,
       hasClientSecret: !!clientSecret,
-      hasRedirectUri: !!redirectUri,
+      redirectUri,
       clientIdPreview: clientId?.substring(0, 20),
       allEnvKeys: Object.keys(process.env).filter(k => k.startsWith('YOUTUBE'))
     });
 
-    if (!clientId || !clientSecret || !redirectUri) {
+    if (!clientId || !clientSecret) {
       logger.warn('[YouTubeOAuth] YouTube OAuth credentials not configured. YouTube export feature will not be available.');
       this.isConfigured = false;
       this.oauth2Client = new google.auth.OAuth2('', '', '');
@@ -54,7 +57,7 @@ export class YouTubeOAuthService {
         clientSecret,
         redirectUri
       );
-      logger.info('[YouTubeOAuth] YouTube OAuth service initialized successfully');
+      logger.info('[YouTubeOAuth] YouTube OAuth service initialized successfully', { redirectUri });
     }
     
     this.initialized = true;

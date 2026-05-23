@@ -233,6 +233,33 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
 });
 
 /**
+ * DELETE /api/schedules/executions
+ * Clear all execution history for the user
+ * NOTE: This must come BEFORE DELETE /:id to avoid route collision
+ */
+router.delete('/executions', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+
+    logger.info('Clearing all executions for user', { userId });
+
+    const deletedCount = db.clearUserExecutions(userId);
+
+    logger.info('Executions cleared', { userId, deletedCount });
+
+    res.json({
+      success: true,
+      message: `Cleared ${deletedCount} execution records`,
+      deletedCount
+    });
+  } catch (error: any) {
+    logger.error('Failed to clear executions', { error: error.message });
+    next(createInternalError(error.message || 'Failed to clear executions'));
+  }
+});
+
+/**
  * DELETE /api/schedules/:id
  * Delete a schedule
  */
@@ -460,28 +487,104 @@ router.delete('/executions/:id', async (req: Request, res: Response, next: NextF
 });
 
 /**
- * DELETE /api/schedules/executions
- * Clear all execution history for the user
+ * POST /api/schedules/:id/run
+ * Manually trigger a schedule to run immediately
  */
-router.delete('/executions', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/run', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+    const scheduleId = parseInt(req.params.id, 10);
+
+    if (isNaN(scheduleId)) {
+      return next(createValidationError('Invalid schedule ID'));
+    }
+
+    // Verify schedule exists and belongs to user
+    const schedule = db.getScheduleById(scheduleId);
+    if (!schedule) {
+      return res.status(404).json({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Schedule not found',
+          statusCode: 404
+        }
+      });
+    }
+
+    if (schedule.user_id !== userId) {
+      return res.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'You do not have permission to run this schedule',
+          statusCode: 403
+        }
+      });
+    }
+
+    logger.info('Manually triggering schedule', { scheduleId, userId });
+
+    // Import the schedule checker job function
+    const { runSingleSchedule } = await import('../services/schedule-checker-job');
+    
+    // Run the schedule asynchronously (don't wait for completion)
+    runSingleSchedule(db, schedule).catch((error: any) => {
+      logger.error('Failed to execute schedule', { scheduleId, error: error.message });
+    });
+
+    res.json({
+      success: true,
+      message: 'Schedule execution started'
+    });
+  } catch (error: any) {
+    logger.error('Failed to trigger schedule', { error: error.message });
+    next(createInternalError(error.message || 'Failed to trigger schedule'));
+  }
+});
+
+/**
+ * POST /api/schedules/run-all
+ * Manually trigger all user schedules to run immediately
+ */
+router.post('/run-all', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = req.session.userId!;
     const db = req.dbService!;
 
-    logger.info('Clearing all executions for user', { userId });
+    logger.info('Manually triggering all schedules', { userId });
 
-    const deletedCount = db.clearUserExecutions(userId);
+    // Get all user schedules
+    const schedules = db.getUserSchedules(userId);
 
-    logger.info('Executions cleared', { userId, deletedCount });
+    if (schedules.length === 0) {
+      res.json({
+        success: true,
+        message: 'No schedules to run',
+        triggered: 0
+      });
+      return;
+    }
+
+    // Import the schedule checker job function
+    const { runSingleSchedule } = await import('../services/schedule-checker-job');
+    
+    // Run all schedules asynchronously (don't wait for completion)
+    let triggered = 0;
+    for (const schedule of schedules) {
+      runSingleSchedule(db, schedule).catch((error: any) => {
+        logger.error('Failed to execute schedule', { scheduleId: schedule.id, error: error.message });
+      });
+      triggered++;
+    }
 
     res.json({
       success: true,
-      message: `Cleared ${deletedCount} execution records`,
-      deletedCount
+      message: `Started execution of ${triggered} schedule(s)`,
+      triggered
     });
   } catch (error: any) {
-    logger.error('Failed to clear executions', { error: error.message });
-    next(createInternalError(error.message || 'Failed to clear executions'));
+    logger.error('Failed to trigger all schedules', { error: error.message });
+    next(createInternalError(error.message || 'Failed to trigger all schedules'));
   }
 });
 

@@ -82,7 +82,7 @@ export const Sidebar: FC = () => {
   const navItems = [
     { path: '/', label: 'Dashboard' },
     { path: '/import', label: 'Import' },
-    { path: '/youtube', label: 'YouTube' },
+    { path: '/queue', label: 'Queue' },
     { path: '/generate', label: 'Generate Mixes' },
     { path: '/schedules', label: 'Schedules' },
   ];
@@ -90,6 +90,7 @@ export const Sidebar: FC = () => {
   const managePlaylistsItems = [
     { path: '/playlists/edit', label: 'Edit Playlists' },
     { path: '/playlists/share', label: 'Share Playlists' },
+    { path: '/playlists/export', label: 'Export Playlists' },
     { path: '/playlists/backup', label: 'Backup & Restore' },
     { path: '/playlists/missing', label: 'Missing Tracks' },
   ];

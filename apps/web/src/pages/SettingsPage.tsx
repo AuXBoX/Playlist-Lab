@@ -22,7 +22,7 @@ const DEFAULT_MIX_SETTINGS = {
   newMusic: { albumCount: 10, tracksPerAlbum: 3 },
 };
 
-type SettingsTab = 'plex' | 'ai' | 'matching' | 'mixes' | 'services';
+type SettingsTab = 'plex' | 'server' | 'ai' | 'matching' | 'mixes' | 'services';
 
 
 
@@ -239,6 +239,7 @@ export const SettingsPage: FC = () => {
 
   const tabs: { id: SettingsTab; label: string; description: string }[] = [
     { id: 'plex', label: 'Plex Server', description: 'Server & library' },
+    { id: 'server', label: 'Server Config', description: 'Public URL & OAuth' },
     { id: 'ai', label: 'AI Features', description: 'Gemini API' },
     { id: 'matching', label: 'Matching', description: 'Track matching' },
     { id: 'mixes', label: 'Mixes', description: 'Mix generation' },
@@ -287,6 +288,7 @@ export const SettingsPage: FC = () => {
               onSelectServer={handleSelectServer}
             />
           )}
+          {activeTab === 'server' && <ServerConfigTab apiClient={apiClient} />}
           {activeTab === 'ai' && (
             <AITab
               geminiApiKey={geminiApiKey}
@@ -676,6 +678,150 @@ const MixesTab: FC<MixesTabProps> = ({ mixSettings, setMixSettings, isSaving, on
         <button className="btn btn-secondary" onClick={onReset} disabled={isSaving}>
           Reset to defaults
         </button>
+      </div>
+    </div>
+  );
+};
+
+interface ServerConfigTabProps {
+  apiClient: any;
+}
+
+const ServerConfigTab: FC<ServerConfigTabProps> = ({ apiClient }) => {
+  const [publicUrl, setPublicUrl] = useState('');
+  const [_configuredPublicUrl, setConfiguredPublicUrl] = useState('');
+  const [oauthRedirectUrls, setOauthRedirectUrls] = useState<Record<string, string>>({});
+  const [isDefault, setIsDefault] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  const loadConfig = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const config = await apiClient.getPublicUrlConfig();
+      setPublicUrl(config.configuredPublicUrl);
+      setConfiguredPublicUrl(config.configuredPublicUrl);
+      setOauthRedirectUrls(config.oauthRedirectUrls);
+      setIsDefault(config.isDefault);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load configuration');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const result = await apiClient.updatePublicUrl(publicUrl);
+      setSuccessMessage(result.message);
+      setConfiguredPublicUrl(result.publicUrl);
+      setOauthRedirectUrls(result.oauthRedirectUrls);
+      setIsDefault(result.publicUrl === 'http://localhost:3001');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save configuration');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleReset = () => {
+    setPublicUrl('http://127.0.0.1:3001');
+    setError(null);
+    setSuccessMessage(null);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="settings-section">
+        <p className="settings-loading">Loading configuration...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <h2>Server Configuration</h2>
+        <p>
+          Configure the public-facing URL for this server. Required for OAuth and reverse proxy setups.
+        </p>
+      </div>
+
+      {error && <div className="settings-alert settings-alert--error">{error}</div>}
+      {successMessage && <div className="settings-alert settings-alert--success">{successMessage}</div>}
+
+      <div className="settings-field-group">
+        <div className="settings-field">
+          <label className="settings-label">Public Server URL</label>
+          <input
+            type="url"
+            className="settings-input"
+            value={publicUrl}
+            onChange={(e) => setPublicUrl(e.target.value)}
+            placeholder="http://127.0.0.1:3001"
+            disabled={isSaving}
+          />
+          <p className="settings-hint">
+            The public-facing URL where users access Playlist Lab.
+            <br />
+            Examples: <code>https://playlist-lab.example.com</code>, <code>http://192.168.1.100:3001</code>
+            <br />
+            <strong>Note:</strong> Use <code>127.0.0.1</code> instead of <code>localhost</code> for better OAuth compatibility (especially Spotify).
+          </p>
+        </div>
+
+        {!isDefault && (
+          <div className="settings-field">
+            <label className="settings-label">OAuth Redirect URLs</label>
+            <div className="settings-info-box">
+              <p><strong>Spotify:</strong> <code>{oauthRedirectUrls.spotify || 'Loading...'}</code></p>
+              <p><strong>YouTube:</strong> <code>{oauthRedirectUrls.youtube || 'Loading...'}</code></p>
+            </div>
+            <p className="settings-hint">
+              Make sure these URLs are registered in your OAuth app configurations.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="settings-actions">
+        <button className="btn btn-primary" onClick={handleSave} disabled={isSaving || !publicUrl}>
+          {isSaving ? 'Saving...' : 'Save Configuration'}
+        </button>
+        <button className="btn btn-secondary" onClick={handleReset} disabled={isSaving}>
+          Reset to Default
+        </button>
+      </div>
+
+      {!isDefault && (
+        <div className="settings-alert settings-alert--info" style={{ marginTop: '1rem' }}>
+          <strong>Note:</strong> This is a runtime configuration change. To persist across server restarts,
+          update the <code>PUBLIC_URL</code> environment variable in your <code>.env</code> file.
+        </div>
+      )}
+
+      <div className="settings-subsection" style={{ marginTop: '2rem' }}>
+        <h3>Reverse Proxy Setup</h3>
+        <p className="settings-hint">
+          If you're running Playlist Lab behind a reverse proxy (Nginx, Apache, Caddy, etc.):
+        </p>
+        <ol className="settings-hint" style={{ marginLeft: '1.5rem', marginTop: '0.5rem' }}>
+          <li>Set <code>PUBLIC_URL</code> to your public domain (e.g., <code>https://playlist-lab.example.com</code>)</li>
+          <li>Set <code>TRUST_PROXY=true</code> in your <code>.env</code> file</li>
+          <li>Configure your reverse proxy to forward headers (<code>X-Forwarded-Proto</code>, <code>X-Forwarded-Host</code>)</li>
+          <li>Update OAuth app redirect URIs to match your public URL</li>
+          <li>Restart the server</li>
+        </ol>
       </div>
     </div>
   );

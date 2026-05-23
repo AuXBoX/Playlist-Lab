@@ -6,6 +6,7 @@ import { importPlaylist, ImportOptions } from '../services/import';
 import { EventEmitter } from 'events';
 import { debugLog } from '../utils/debug-logger';
 import multer from 'multer';
+import { importQueue } from '../services/import-queue';
 
 const upload = multer({ 
   storage: multer.memoryStorage(),
@@ -137,15 +138,150 @@ router.get('/status/:sessionId', (req: Request, res: Response) => {
  */
 router.post('/cancel/:sessionId', (req: Request, res: Response) => {
   const { sessionId } = req.params;
+  const userId = req.session.userId!;
   
-  cancelledSessions.add(sessionId);
+  // Try to cancel from queue first
+  const cancelled = importQueue.cancelJob(sessionId, userId);
   
-  const emitter = importSessions.get(sessionId);
-  if (emitter) {
-    emitter.emit('error', { message: 'Import cancelled by user' });
+  if (cancelled) {
+    logger.info('Import job cancelled from queue', { sessionId, userId });
+  } else {
+    // Fall back to old cancellation method for currently processing job
+    cancelledSessions.add(sessionId);
+    
+    const emitter = importSessions.get(sessionId);
+    if (emitter) {
+      emitter.emit('error', { message: 'Import cancelled by user' });
+    }
   }
   
-  res.json({ success: true });
+  res.json({ success: true, cancelled });
+});
+
+/**
+ * GET /api/import/queue
+ * Get user's import queue status
+ */
+router.get('/queue', (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const status = importQueue.getUserQueueStatus(userId);
+  
+  // Enrich processing job with progress data if available
+  if (status.processing) {
+    const progress = progressState.get(status.processing.sessionId);
+    if (progress && progress.type === 'progress') {
+      status.processing.progress = {
+        current: progress.current || 0,
+        total: progress.total || 0,
+        currentTrackName: progress.currentTrackName,
+        phase: progress.phase,
+      };
+    }
+  }
+  
+  res.json({
+    success: true,
+    ...status,
+  });
+});
+
+/**
+ * GET /api/import/queue/completed
+ * Get user's completed imports waiting for review
+ */
+router.get('/queue/completed', (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const completed = importQueue.getCompletedImports(userId);
+  
+  // Transform to frontend format - only send counts, not full track arrays
+  // This makes the response much smaller and faster
+  const formattedCompleted = completed.map(job => ({
+    id: job.id,
+    source: job.source,
+    playlistName: job.playlistName || 'Imported Playlist',
+    completedAt: job.completedAt,
+    matchedCount: job.result?.matched?.length || 0,
+    unmatchedCount: job.result?.unmatched?.length || 0,
+    coverUrl: job.result?.coverUrl,
+    // Don't send full track arrays - they'll be loaded when user selects the import
+  }));
+  
+  res.json({
+    success: true,
+    completed: formattedCompleted,
+  });
+});
+
+/**
+ * GET /api/import/queue/completed/:jobId
+ * Get full details of a specific completed import (with all tracks)
+ */
+router.get('/queue/completed/:jobId', (req: Request, res: Response): void => {
+  const userId = req.session.userId!;
+  const { jobId } = req.params;
+  
+  const job = importQueue.getJob(jobId);
+  
+  if (!job || job.userId !== userId) {
+    res.status(404).json({
+      success: false,
+      error: { message: 'Import not found' },
+    });
+    return;
+  }
+  
+  res.json({
+    success: true,
+    import: {
+      id: job.id,
+      source: job.source,
+      playlistName: job.playlistName || 'Imported Playlist',
+      completedAt: job.completedAt,
+      matched: job.result?.matched || [],
+      unmatched: job.result?.unmatched || [],
+      coverUrl: job.result?.coverUrl,
+    },
+  });
+});
+
+/**
+ * DELETE /api/import/queue/completed/:jobId
+ * Remove a completed import from the queue
+ */
+router.delete('/queue/completed/:jobId', (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { jobId } = req.params;
+  
+  const removed = importQueue.removeCompletedImport(userId, jobId);
+  
+  res.json({
+    success: true,
+    removed,
+  });
+});
+
+/**
+ * DELETE /api/import/queue/:jobId
+ * Cancel an active or queued import job
+ */
+router.delete('/queue/:jobId', (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { jobId } = req.params;
+  
+  const cancelled = importQueue.cancelJob(jobId, userId);
+  
+  if (cancelled) {
+    logger.info('Import job cancelled by user', { userId, jobId });
+    res.json({
+      success: true,
+      message: 'Import cancelled',
+    });
+  } else {
+    res.status(404).json({
+      success: false,
+      message: 'Job not found or already completed',
+    });
+  }
 });
 
 /**
@@ -163,11 +299,12 @@ async function handleImport(
   debugLog('============================================');
 
   try {
-    const { url, sessionId, customName } = req.body;
+    const { url, sessionId, customName, skipQueue } = req.body;
 
     debugLog('[Import Route] URL:', url);
     debugLog('[Import Route] SessionId:', sessionId);
     debugLog('[Import Route] Custom Name:', customName);
+    debugLog('[Import Route] Skip Queue:', skipQueue);
 
     if (!url || typeof url !== 'string') {
       debugLog('[Import Route] ERROR: URL validation failed');
@@ -220,6 +357,41 @@ async function handleImport(
       customName: customName?.trim() || undefined,
     };
 
+    // Check if we should use the queue (default: yes, unless skipQueue is explicitly true)
+    const useQueue = skipQueue !== true;
+
+    if (useQueue) {
+      // Add to queue
+      const job = importQueue.enqueue({
+        id: sessionId,
+        userId,
+        source,
+        url,
+        playlistName: customName || undefined,
+        sessionId,
+      });
+
+      logger.info('Import job added to queue', {
+        jobId: job.id,
+        userId,
+        source,
+        playlistName: job.playlistName,
+        queuePosition: importQueue.getUserQueueStatus(userId).position,
+      });
+
+      // Return immediately with queue status
+      const queueStatus = importQueue.getUserQueueStatus(userId);
+      return res.json({
+        success: true,
+        queued: true,
+        position: queueStatus.position,
+        message: queueStatus.position === 0 
+          ? 'Import started' 
+          : `Import queued (position ${queueStatus.position})`,
+      });
+    }
+
+    // Legacy path: run immediately without queue (for backward compatibility)
     // Get progress emitter if sessionId provided
     let progressEmitter = sessionId ? importSessions.get(sessionId) : undefined;
 
@@ -653,24 +825,226 @@ router.post('/plex/search', async (req: Request, res: Response, next: NextFuncti
     const { PlexClient } = await import('../services/plex');
     const plexClient = new PlexClient(serverUrl, plexToken);
 
-    // Search for tracks
-    const rawTracks = await plexClient.searchTrack(query, searchLibraryId);
+    let rawTracks: any[] = [];
+    
+    // Try to parse query as "Artist - Title" or "Artist Title" format
+    let parsedArtist: string | undefined;
+    let parsedTitle: string | undefined;
+    
+    // Check for "Artist - Title" format
+    if (query.includes(' - ')) {
+      const parts = query.split(' - ');
+      if (parts.length === 2) {
+        parsedArtist = parts[0].trim();
+        parsedTitle = parts[1].trim();
+        logger.info(`[Plex Search] Parsed query as artist-title: "${parsedArtist}" - "${parsedTitle}"`);
+      }
+    }
+    
+    // If not parsed yet, try to detect artist name at start (common pattern: "Artist Name Track Name")
+    // Look for known artists or use first 2-3 words as artist
+    if (!parsedArtist && !parsedTitle) {
+      const words = query.split(/\s+/);
+      if (words.length >= 3) {
+        // Try first 2 words as artist, rest as title
+        parsedArtist = words.slice(0, 2).join(' ');
+        parsedTitle = words.slice(2).join(' ');
+        logger.info(`[Plex Search] Attempting to split query: artist="${parsedArtist}", title="${parsedTitle}"`);
+      }
+    }
+    
+    // If we have both artist and title, use optimized artist-first search
+    if (parsedArtist && parsedTitle && searchLibraryId) {
+      logger.info(`[Plex Search] Using artist-first search with parsed values`);
+      
+      try {
+        // Search for artist (Album Artist)
+        const artistResponse = await plexClient.client.get(
+          `/library/sections/${searchLibraryId}/all`,
+          { 
+            params: { 
+              type: 8, // Artist type
+              'artist.title': parsedArtist
+            } 
+          }
+        );
+        
+        const artists = artistResponse.data.MediaContainer.Metadata || [];
+        logger.info(`[Plex Search] Found ${artists.length} matching album artists for "${parsedArtist}"`);
+        
+        if (artists.length > 0) {
+          // Get all tracks from the first matching artist
+          const artistKey = artists[0].ratingKey;
+          const artistName = artists[0].title;
+          logger.info(`[Plex Search] Fetching tracks from album artist: ${artistName}`);
+          
+          const tracksResponse = await plexClient.client.get(
+            `/library/metadata/${artistKey}/allLeaves`,
+            { params: { type: 10 } }
+          );
+          
+          const artistTracks = tracksResponse.data.MediaContainer.Metadata || [];
+          logger.info(`[Plex Search] Album artist has ${artistTracks.length} tracks`);
+          
+          // Filter by title
+          const normalizeTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const normalizedSearchTitle = normalizeTitle(parsedTitle);
+          
+          rawTracks = artistTracks.filter((track: any) => {
+            const trackTitle = track.title || '';
+            const normalizedTrackTitle = normalizeTitle(trackTitle);
+            return normalizedTrackTitle.includes(normalizedSearchTitle) || 
+                   normalizedSearchTitle.includes(normalizedTrackTitle);
+          });
+          
+          logger.info(`[Plex Search] Filtered to ${rawTracks.length} tracks matching title "${parsedTitle}"`);
+        }
+        
+        // If no results from album artist, try searching by track artist (for compilations)
+        if (rawTracks.length === 0) {
+          logger.info(`[Plex Search] No results from album artist, trying track-level artist search`);
+          
+          // Search for tracks by title, then filter by track artist in memory
+          // This is necessary because Plex doesn't support filtering by track.originalTitle directly
+          const trackSearchResponse = await plexClient.client.get(
+            `/library/sections/${searchLibraryId}/all`,
+            { 
+              params: { 
+                type: 10, // Track type
+                'track.title': parsedTitle
+              } 
+            }
+          );
+          
+          const allTracks = trackSearchResponse.data.MediaContainer.Metadata || [];
+          logger.info(`[Plex Search] Found ${allTracks.length} tracks with title "${parsedTitle}"`);
+          
+          // Filter by track artist (originalTitle field)
+          const normalizeArtist = (a: string) => a.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const normalizedSearchArtist = normalizeArtist(parsedArtist);
+          
+          rawTracks = allTracks.filter((track: any) => {
+            const trackArtist = track.originalTitle || '';
+            const normalizedTrackArtist = normalizeArtist(trackArtist);
+            return normalizedTrackArtist.includes(normalizedSearchArtist) || 
+                   normalizedSearchArtist.includes(normalizedTrackArtist);
+          });
+          
+          logger.info(`[Plex Search] Track artist filter matched ${rawTracks.length} tracks where track artist contains "${parsedArtist}"`);
+        }
+      } catch (err: any) {
+        logger.warn(`[Plex Search] Artist-first search with parsed values failed: ${err.message}`);
+      }
+    }
+    
+    // Check if this looks like an artist-only search (no track-specific words)
+    if (rawTracks.length === 0) {
+      const trackIndicators = /\b(remix|feat|ft|featuring|live|acoustic|version|edit|mix|cover|demo|remaster)\b/i;
+      const looksLikeArtistSearch = !trackIndicators.test(query) && query.split(/\s+/).length <= 3;
+      
+      if (looksLikeArtistSearch && searchLibraryId) {
+        logger.info(`[Plex Search] Query looks like artist search, trying artist-first approach for: ${query}`);
+        
+        try {
+          // Search for album artist
+          const artistResponse = await plexClient.client.get(
+            `/library/sections/${searchLibraryId}/all`,
+            { 
+              params: { 
+                type: 8, // Artist type
+                'artist.title': query
+              } 
+            }
+          );
+          
+          const artists = artistResponse.data.MediaContainer.Metadata || [];
+          logger.info(`[Plex Search] Found ${artists.length} matching album artists`);
+          
+          if (artists.length > 0) {
+            // Get all tracks from the first matching artist
+            const artistKey = artists[0].ratingKey;
+            const artistName = artists[0].title;
+            logger.info(`[Plex Search] Fetching all tracks from album artist: ${artistName}`);
+            
+            const tracksResponse = await plexClient.client.get(
+              `/library/metadata/${artistKey}/allLeaves`,
+              { params: { type: 10 } }
+            );
+            
+            rawTracks = tracksResponse.data.MediaContainer.Metadata || [];
+            logger.info(`[Plex Search] Album artist has ${rawTracks.length} tracks`);
+          }
+          
+          // If no results from album artist, try hub search (which searches track artists too)
+          if (rawTracks.length === 0) {
+            logger.info(`[Plex Search] No album artist found, trying hub search for track artists`);
+            
+            const hubResponse = await plexClient.client.get('/hubs/search', {
+              params: { query: query, limit: 500 }
+            });
+            
+            const hubs = hubResponse.data.MediaContainer.Hub || [];
+            const trackHub = hubs.find((hub: any) => hub.type === 'track');
+            const allHubTracks = trackHub?.Metadata || [];
+            logger.info(`[Plex Search] Hub search returned ${allHubTracks.length} tracks`);
+            
+            // Filter by library if specified
+            if (searchLibraryId && allHubTracks.length > 0) {
+              const libraryIdNum = parseInt(searchLibraryId, 10);
+              rawTracks = allHubTracks.filter((track: any) => track.librarySectionID === libraryIdNum);
+              logger.info(`[Plex Search] After library filter: ${rawTracks.length} tracks`);
+            } else {
+              rawTracks = allHubTracks;
+            }
+          }
+        } catch (err: any) {
+          logger.warn(`[Plex Search] Artist-first search failed: ${err.message}, falling back to regular search`);
+        }
+      }
+    }
+    
+    // If artist search didn't find anything, use regular search
+    if (rawTracks.length === 0) {
+      logger.info(`[Plex Search] Using regular search for: ${query}`);
+      rawTracks = await plexClient.searchTrack(query, searchLibraryId);
+    }
+
+    logger.info(`[Plex Search] Found ${rawTracks.length} raw tracks for query: ${query}`);
+
+    // Filter to ensure we only have tracks (type 10), not albums or artists
+    const trackTypeOnly = rawTracks.filter((track: any) => {
+      // Plex track type is 'track' (string) or 10 (number)
+      const isTrack = track.type === 'track' || track.type === 10;
+      if (!isTrack) {
+        logger.warn(`[Plex Search] Filtering out non-track item: ${track.title} (type: ${track.type})`);
+      }
+      return isTrack;
+    });
+
+    logger.info(`[Plex Search] After type filter: ${trackTypeOnly.length} tracks`);
 
     // Enrich tracks missing artist/album/media by fetching full metadata
     // Use concurrency limit to avoid hammering Plex with 50 simultaneous requests
     const CONCURRENCY = 5;
     const enrichedTracks: any[] = [];
-    for (let i = 0; i < rawTracks.length; i += CONCURRENCY) {
-      const batch = rawTracks.slice(i, i + CONCURRENCY);
+    for (let i = 0; i < trackTypeOnly.length; i += CONCURRENCY) {
+      const batch = trackTypeOnly.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
         batch.map(async (track: any) => {
-          if (track.grandparentTitle && track.parentTitle && track.Media?.length) {
+          // Check if track has all required metadata
+          const hasMetadata = track.grandparentTitle && track.parentTitle && track.Media?.length;
+          
+          if (hasMetadata) {
             return track;
           }
+          
+          // Fetch full metadata if missing
           try {
+            logger.info(`[Plex Search] Enriching track ${track.ratingKey}: ${track.title}`);
             const detailResp = await plexClient.getTrackDetails(track.ratingKey);
             return detailResp || track;
-          } catch {
+          } catch (err) {
+            logger.warn(`[Plex Search] Failed to enrich track ${track.ratingKey}: ${err}`);
             return track;
           }
         })
@@ -678,22 +1052,228 @@ router.post('/plex/search', async (req: Request, res: Response, next: NextFuncti
       enrichedTracks.push(...results);
     }
 
-    // Map Plex fields to the format the frontend expects
-    const tracks = enrichedTracks.map((track: any) => ({
-      ratingKey: track.ratingKey,
-      title: track.title,
-      artist: track.grandparentTitle || track.originalTitle || '',
-      album: track.parentTitle || '',
-      codec: track.Media?.[0]?.audioCodec?.toUpperCase() || '',
-      bitrate: track.Media?.[0]?.bitrate || 0,
-      duration: track.duration || 0,
-    }));
+    logger.info(`[Plex Search] Enriched ${enrichedTracks.length} tracks`);
+
+    // Log a sample track to see what data we have
+    if (enrichedTracks.length > 0) {
+      const sample = enrichedTracks[0];
+      logger.info(`[Plex Search] Sample track data:`, {
+        title: sample.title,
+        hasMedia: !!sample.Media,
+        mediaLength: sample.Media?.length,
+        mediaData: sample.Media?.[0] ? {
+          bitrate: sample.Media[0].bitrate,
+          audioCodec: sample.Media[0].audioCodec,
+          container: sample.Media[0].container,
+        } : 'no media',
+      });
+    }
+
+    // Calculate relevance score for each track
+    const queryLower = query.toLowerCase();
+    const queryWords = queryLower.split(/\s+/).filter(w => w.length >= 2);
+    
+    const tracksWithScores = enrichedTracks.map((track: any) => {
+      const titleLower = (track.title || '').toLowerCase();
+      const artistLower = (track.grandparentTitle || track.originalTitle || '').toLowerCase();
+      const albumLower = (track.parentTitle || '').toLowerCase();
+      
+      // Extract media info
+      const media = track.Media?.[0];
+      const codec = media?.audioCodec?.toUpperCase() || 'Unknown';
+      const bitrate = media?.bitrate || 0;
+      // Plex returns bitrate in kbps, not bps, so don't divide
+      const bitrateKbps = bitrate || 0;
+      
+      logger.info(`[Plex Search] Track "${track.title}": codec=${codec}, bitrate=${bitrate}, bitrateKbps=${bitrateKbps}`);
+      
+      let score = 0;
+      
+      // Check if query matches artist name well (for artist-focused searches)
+      const artistMatchesQuery = artistLower.includes(queryLower) || queryLower.includes(artistLower);
+      
+      if (artistMatchesQuery) {
+        // If artist matches, prioritize it heavily
+        score += 800;
+        
+        // Exact artist match gets even more
+        if (artistLower === queryLower) {
+          score += 200;
+        }
+      }
+      
+      // Exact title match (highest score for title-focused searches)
+      if (titleLower === queryLower) {
+        score += 1000;
+      }
+      
+      // Title starts with query
+      if (titleLower.startsWith(queryLower)) {
+        score += 500;
+      }
+      
+      // Title contains full query
+      if (titleLower.includes(queryLower)) {
+        score += 300;
+      }
+      
+      // Count matching words in title
+      for (const word of queryWords) {
+        if (titleLower.includes(word)) {
+          score += 100;
+        }
+      }
+      
+      // Artist word matches (if not already counted above)
+      if (!artistMatchesQuery) {
+        for (const word of queryWords) {
+          if (artistLower.includes(word)) {
+            score += 20;
+          }
+        }
+      }
+      
+      // Album match (lowest priority)
+      if (albumLower.includes(queryLower)) {
+        score += 10;
+      }
+      
+      // Prefer higher quality (small bonus)
+      if (codec === 'FLAC') score += 5;
+      else if (codec === 'ALAC') score += 4;
+      else if (codec === 'AAC') score += 2;
+      
+      return {
+        ratingKey: track.ratingKey,
+        title: track.title,
+        artist: track.grandparentTitle || track.originalTitle || 'Unknown Artist',
+        album: track.parentTitle || 'Unknown Album',
+        codec: codec,
+        bitrate: bitrateKbps,
+        duration: track.duration || 0,
+        score: score,
+      };
+    });
+
+    // Sort by score (highest first)
+    tracksWithScores.sort((a, b) => b.score - a.score);
+    
+    // Remove score from final output (internal use only)
+    const tracks = tracksWithScores.map(({ score, ...track }) => track);
+
+    logger.info(`[Plex Search] Returning ${tracks.length} tracks sorted by relevance`);
 
     // Return tracks with mapped metadata
     res.json({ tracks });
   } catch (error: any) {
     logger.error('Failed to search Plex tracks', { error: error.message, query: req.body.query });
     next(createInternalError(`Failed to search tracks: ${error.message || 'Unknown error'}`));
+  }
+});
+
+/**
+ * Retry matching a single track
+ * POST /api/import/plex/retry-match
+ */
+router.post('/plex/retry-match', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { track } = req.body;
+
+    if (!track || typeof track !== 'object') {
+      return next(createValidationError('track is required and must be an object'));
+    }
+
+    if (!track.title || !track.artist) {
+      return next(createValidationError('track must have title and artist'));
+    }
+
+    const userId = req.session.userId!;
+    const db = req.dbService!;
+
+    // Get user's Plex token from users table
+    const userRow = (db as any).db.prepare('SELECT plex_token FROM users WHERE id = ?').get(userId);
+    
+    if (!userRow) {
+      return next(createValidationError('User not found'));
+    }
+
+    const { plex_token: plexToken } = userRow;
+
+    if (!plexToken || typeof plexToken !== 'string') {
+      return next(createValidationError('No Plex token found. Please log in again.'));
+    }
+
+    // Get user's server configuration from user_servers table
+    const serverRow = (db as any).db.prepare('SELECT server_url, library_id FROM user_servers WHERE user_id = ? LIMIT 1').get(userId);
+    
+    if (!serverRow) {
+      return next(createValidationError('No Plex server configured. Please go to Settings and select a server.'));
+    }
+
+    const { server_url: serverUrl, library_id: libraryId } = serverRow;
+
+    if (!serverUrl || typeof serverUrl !== 'string') {
+      return next(createValidationError('No Plex server URL configured. Please go to Settings and select a server.'));
+    }
+
+    // Get user's matching settings
+    const settingsRow = (db as any).db.prepare('SELECT matching_settings FROM users WHERE id = ?').get(userId);
+    const matchingSettings = settingsRow?.matching_settings 
+      ? JSON.parse(settingsRow.matching_settings)
+      : {
+          minMatchScore: 70,
+          preferHigherQuality: true,
+          preferLossless: false,
+          allowRemaster: true,
+          allowLive: false,
+          allowRemix: false,
+          allowCover: false,
+          allowKaraoke: false,
+          allowInstrumental: false,
+          allowAcoustic: true,
+          allowExplicit: true,
+          allowClean: true,
+        };
+
+    // Import matching service
+    const { matchPlaylist } = await import('../services/matching');
+    
+    // Use matchPlaylist with a single track
+    const externalTrack = {
+      title: track.title,
+      artist: track.artist,
+      album: track.album || '',
+    };
+
+    const matchResults = await matchPlaylist(
+      [externalTrack],
+      serverUrl,
+      plexToken,
+      libraryId,
+      matchingSettings
+    );
+
+    const matchResult = matchResults[0];
+
+    if (matchResult && matchResult.matched && matchResult.plexRatingKey) {
+      // Return the matched track info
+      res.json({
+        matched: true,
+        plexRatingKey: matchResult.plexRatingKey,
+        plexTitle: matchResult.plexTitle,
+        plexArtist: matchResult.plexArtist,
+        plexAlbum: matchResult.plexAlbum,
+      });
+    } else {
+      // No match found
+      res.json({
+        matched: false,
+        message: 'Track not found in Plex library',
+      });
+    }
+  } catch (error: any) {
+    logger.error('Failed to retry track match', { error: error.message, track: req.body.track });
+    next(createInternalError(`Failed to retry match: ${error.message || 'Unknown error'}`));
   }
 });
 
@@ -1200,6 +1780,118 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
   } catch (error: any) {
     logger.error('Failed to confirm import', { error: error.message });
     next(createInternalError(error.message || 'Failed to create playlist'));
+  }
+});
+
+/**
+ * GET /api/import/spotify/user/:userId/playlists
+ * Fetch public playlists from a Spotify user (unauthenticated)
+ */
+router.get('/spotify/user/:userId/playlists', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { userId: spotifyUserId } = req.params;
+    const userId = req.session.userId!;
+    const db = (req as any).db;
+
+    if (!spotifyUserId) {
+      res.status(400).json({
+        error: { message: 'Spotify user ID is required' }
+      });
+      return;
+    }
+
+    logger.info('[Spotify User Playlists] Fetching playlists', { spotifyUserId, userId });
+
+    // Import the adapter
+    const { adapterRegistry } = await import('../adapters');
+    const adapter = adapterRegistry.getSource('spotify');
+
+    if (!adapter || !adapter.searchPlaylists) {
+      res.status(500).json({
+        error: { message: 'Spotify adapter not available' }
+      });
+      return;
+    }
+
+    // Use searchPlaylists with the user ID - it will use unauthenticated method
+    const result = await adapter.searchPlaylists(spotifyUserId, userId, db);
+    
+    // Check if result includes displayName (for user ID queries) or is just playlists array
+    let displayName: string;
+    let playlists: any[];
+    
+    if (Array.isArray(result)) {
+      // Old format: just playlists array
+      displayName = spotifyUserId;
+      playlists = result;
+    } else {
+      // New format: { displayName, playlists }
+      displayName = result.displayName;
+      playlists = result.playlists;
+    }
+
+    // Update the display name in the database if this user is saved
+    try {
+      db.prepare(
+        `UPDATE saved_spotify_users 
+         SET display_name = ? 
+         WHERE user_id = ? AND spotify_user_id = ?`
+      ).run(displayName, userId, spotifyUserId);
+    } catch (updateError) {
+      logger.warn('[Spotify User Playlists] Could not update display name', { 
+        spotifyUserId, 
+        error: updateError 
+      });
+    }
+
+    logger.info('[Spotify User Playlists] Found playlists', { 
+      spotifyUserId,
+      displayName,
+      count: playlists.length 
+    });
+
+    res.json({ displayName, playlists });
+  } catch (error: any) {
+    logger.error('[Spotify User Playlists] Error', { error: error.message, stack: error.stack });
+    next(createInternalError(error.message || 'Failed to fetch Spotify user playlists'));
+  }
+});
+
+/**
+ * GET /api/import/spotify/playlist/:playlistId/tracks
+ * Fetch tracks from a Spotify playlist for preview
+ */
+router.get('/spotify/playlist/:playlistId/tracks', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { playlistId } = req.params;
+    const userId = req.session.userId!;
+    const db = (req.dbService as any).db; // Get the actual database instance
+
+    logger.info('[Spotify Playlist Tracks] Fetching tracks', { playlistId, userId });
+
+    // Import the adapter
+    const { adapterRegistry } = await import('../adapters');
+    const adapter = adapterRegistry.getSource('spotify');
+
+    if (!adapter || !adapter.fetchTracks) {
+      res.status(500).json({
+        error: { message: 'Spotify adapter not available' }
+      });
+      return;
+    }
+
+    // Fetch tracks from the playlist
+    const { tracks } = await adapter.fetchTracks(playlistId, userId, db);
+
+    logger.info('[Spotify Playlist Tracks] Found tracks', { 
+      playlistId, 
+      count: tracks.length 
+    });
+
+    res.json({ tracks });
+  } catch (error: any) {
+    logger.error('[Spotify Playlist Tracks] Error', { error: error.message, stack: error.stack });
+    next(createInternalError(error.message || 'Failed to fetch Spotify playlist tracks'));
   }
 });
 

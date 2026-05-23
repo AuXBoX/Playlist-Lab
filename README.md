@@ -7,12 +7,30 @@ A comprehensive music playlist management system with Plex Media Server integrat
 
 ## Features
 
-- **Multi-Source Import**: Import playlists from Spotify, Apple Music, YouTube, and more
+### Core Features
+- **Multi-Source Import**: Import playlists from Spotify, Apple Music, and more
 - **Smart Playlist Generation**: Create dynamic playlists based on genres, moods, and listening patterns
 - **Plex Integration**: Seamless sync with Plex Media Server
 - **Multi-User Support**: Manage playlists for multiple Plex users and share between them
+- **Playlist Sharing**: Share playlists between Plex Home users
 - **Scheduling**: Automatically update playlists on a schedule
 - **Missing Track Detection**: Identify and track songs not available in your library
+
+### Import Features
+- **Import Queue System**: Background processing with real-time progress tracking
+- **Queue Management**: View pending, processing, and completed imports
+- **Retry Failed Imports**: Easily retry imports that failed
+- **Cancel Pending Imports**: Cancel imports before they start processing
+- **Import History**: Track all imports with success/failure status
+- **Spotify Search**: Search Spotify's entire catalog, not just your playlists
+- **OAuth Authentication**: Secure popup-based OAuth for Spotify (no session loss)
+- **Batch Import**: Import multiple playlists at once
+- **Progress Tracking**: Real-time import progress with detailed status
+
+### User Experience
+- **Responsive PWA**: Works on desktop, tablet, and mobile browsers
+- **Installable**: Add to home screen on mobile devices for app-like experience
+- **System Tray App**: Easy server management on Windows/macOS/Linux (installer versions)
 - **Cross-Platform**: Available as web app and desktop app
 
 ## Applications
@@ -35,12 +53,6 @@ This is a monorepo containing multiple applications:
 - **Access**: Connect to any Playlist Lab server
 - **Platforms**: Any device with a modern browser
 
-### Desktop App - **No Longer Maintained**
-- **Location**: `apps/desktop/`
-- **Type**: Standalone Electron application
-- **Status**: Legacy - use the server + web app instead
-- **Note**: The desktop app is no longer actively maintained. Please use the server installation with the web app for the best experience.
-
 ## Quick Start
 
 ### Server Installation
@@ -48,7 +60,7 @@ This is a monorepo containing multiple applications:
 **Option 1: Windows Installer**
 ```cmd
 # Download and run the installer
-PlaylistLabServer-Setup-1.2.2.exe
+PlaylistLabServer-Setup-1.2.4.exe
 ```
 
 **Option 2: Docker (Recommended for Development)**
@@ -80,12 +92,6 @@ cd apps/web && npm run build && cd ../..
 cd apps/server && npm start
 ```
 
-### Desktop App (Legacy - Not Recommended)
-
-The desktop app is no longer actively maintained. Please use the server installation instead.
-
-If you still need the desktop app, older versions are available in the releases, but they will not receive updates or bug fixes.
-
 ### Web App on Mobile
 
 The web app is fully responsive and works on mobile devices through your browser:
@@ -106,6 +112,14 @@ The PWA provides an app-like experience with offline support and push notificati
 - Node.js 18+
 - npm or yarn
 - Git
+- Plex Media Server with authentication token
+
+### Third-Party Service Requirements
+
+**Spotify Import** (Optional)
+- Spotify Premium subscription required for the app owner
+- Free Spotify accounts cannot browse or search playlists via API
+- See [Spotify Web API Documentation](https://developer.spotify.com/documentation/web-api) for details
 
 ### Setup
 ```bash
@@ -130,6 +144,31 @@ npm run dev:web     # Web app on port 5173
 - **Frontend**: React, TypeScript, Vite, PWA
 - **Testing**: Jest, fast-check (property-based testing)
 - **Build**: TypeScript, Vite
+
+## Configuration
+
+### Server Environment Variables
+
+Create a `.env` file in `apps/server/` with the following variables:
+
+```env
+# Server Configuration
+PORT=3001
+PUBLIC_URL=http://127.0.0.1:3001
+
+# Session Secret (generate a random string)
+SESSION_SECRET=your-random-secret-here
+
+# Spotify OAuth (Optional - for Spotify import)
+SPOTIFY_CLIENT_ID=your-spotify-client-id
+SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:3001/api/spotify/callback
+```
+
+**Important Notes:**
+- Use `127.0.0.1` instead of `localhost` for OAuth redirect URIs (better compatibility)
+- Spotify requires Premium subscription for the app owner to use playlist features
+- See `.env.example` files for complete configuration options
 
 ### Server Installers
 The Windows/macOS/Linux server installers include a system tray application for easy server management. The server runs as a background service and is accessed via web browser at `http://localhost:3001`.
@@ -164,4 +203,3 @@ See LICENSE file for details.
 
 - Issues: [GitHub Issues](https://github.com/AuXBoX/playlist-lab/issues)
 - Community: [r/PlaylistLab](https://www.reddit.com/r/PlaylistLab/)
-

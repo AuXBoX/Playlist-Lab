@@ -157,6 +157,29 @@ export class APIClient {
     });
   }
 
+  // Configuration methods
+  async getPublicUrlConfig(): Promise<{
+    publicUrl: string;
+    configuredPublicUrl: string;
+    oauthRedirectUrls: Record<string, string>;
+    isDefault: boolean;
+    trustProxy: boolean;
+  }> {
+    return this.request('/api/config/public-url');
+  }
+
+  async updatePublicUrl(publicUrl: string): Promise<{
+    success: boolean;
+    message: string;
+    publicUrl: string;
+    oauthRedirectUrls: Record<string, string>;
+  }> {
+    return this.request('/api/config/public-url', {
+      method: 'PUT',
+      body: JSON.stringify({ publicUrl }),
+    });
+  }
+
   // Playlist methods
   async getPlaylists(userId?: number): Promise<{ playlists: any[] }> {
     const url = userId ? `/api/playlists?userId=${userId}` : '/api/playlists';
@@ -691,6 +714,25 @@ export class APIClient {
   }> {
     return this.request('/api/schedules/executions', {
       method: 'DELETE'
+    });
+  }
+
+  async runSchedule(scheduleId: number): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    return this.request(`/api/schedules/${scheduleId}/run`, {
+      method: 'POST'
+    });
+  }
+
+  async runAllSchedules(): Promise<{
+    success: boolean;
+    message: string;
+    triggered: number;
+  }> {
+    return this.request('/api/schedules/run-all', {
+      method: 'POST'
     });
   }
 
