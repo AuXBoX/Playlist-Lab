@@ -144,10 +144,10 @@ export async function getDeezerCharts(country: string): Promise<ExternalPlaylist
 
 /**
  * Scrape Spotify playlist from URL using multiple fallback methods
- * Method 1: Spotify API (if user is authenticated)
- * Method 2: OEmbed API (most reliable, no auth)
- * Method 3: Embed page scraping
- * Method 4: Suggest OAuth
+ * Method 1: Embed page scraping (no auth needed, up to 100 tracks)
+ * Method 1b: Puppeteer DOM scrolling (no auth needed, up to 1000+ tracks)
+ * Method 2: Spotify API (if user is authenticated with Premium)
+ * Method 3: Client Credentials API (requires Premium app owner)
  */
 export async function scrapeSpotifyPlaylist(url: string, progressEmitter?: EventEmitter, userId?: number, db?: any): Promise<ExternalPlaylist> {
   progressEmitter?.emit('progress', {
@@ -166,7 +166,89 @@ export async function scrapeSpotifyPlaylist(url: string, progressEmitter?: Event
     
     const playlistId = match[1];
     
-    // Method 1: Try Spotify API if user is authenticated
+    // Method 1: Embed page scraping (no auth needed, works for any public playlist)
+    // The embed page returns __NEXT_DATA__ with full track data in the initial HTML - no lazy loading
+    try {
+      const embedUrl = `https://open.spotify.com/embed/playlist/${playlistId}`;
+      console.log('[Spotify] Trying embed page scraping for playlist', playlistId);
+      
+      const response = await axios.get(embedUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+        }
+      });
+      
+      const html = response.data;
+      const jsonMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.+?)<\/script>/s);
+      
+      if (jsonMatch) {
+        const data = JSON.parse(jsonMatch[1]);
+        const entity = data?.props?.pageProps?.state?.data?.entity;
+        
+        if (entity?.trackList?.length > 0) {
+          const tracks: ExternalTrack[] = entity.trackList
+            .filter((item: any) => item?.title)
+            .map((item: any) => ({
+              title: item.title || 'Unknown',
+              artist: item.subtitle || 'Unknown',
+              album: undefined, // Embed page doesn't include album info
+            }));
+          
+          const coverUrl = entity.coverArt?.sources?.[0]?.url;
+          
+          console.log('[Spotify] Successfully scraped playlist via embed page:', {
+            name: entity.name,
+            trackCount: tracks.length,
+          });
+          
+          // If we hit the 100-track embed cap, try Puppeteer for more tracks
+          if (tracks.length >= 100) {
+            console.log('[Spotify] Embed returned 100 tracks (cap), trying Puppeteer for more...');
+            try {
+              const { scrapeSpotifyWithBrowser } = await import('./browser-scrapers');
+              const browserResult = await scrapeSpotifyWithBrowser(url, progressEmitter);
+              
+              if (browserResult.tracks.length > tracks.length) {
+                console.log(`[Spotify] Puppeteer found ${browserResult.tracks.length} tracks (vs ${tracks.length} from embed), using Puppeteer result`);
+                return {
+                  ...browserResult,
+                  // Keep embed cover URL if Puppeteer didn't find one
+                  coverUrl: browserResult.coverUrl || coverUrl,
+                };
+              }
+              console.log(`[Spotify] Puppeteer found ${browserResult.tracks.length} tracks (not more than embed), using embed result`);
+            } catch (browserError: any) {
+              console.warn('[Spotify] Puppeteer fallback failed, using embed result:', browserError.message);
+            }
+          }
+          
+          progressEmitter?.emit('progress', {
+            type: 'progress',
+            phase: 'scraping',
+            current: tracks.length,
+            total: tracks.length,
+            currentTrackName: `Found ${tracks.length} tracks`
+          });
+          
+          return {
+            id: `spotify-${playlistId}`,
+            name: entity.name || 'Spotify Playlist',
+            description: entity.subtitle || '',
+            source: 'spotify',
+            tracks,
+            coverUrl,
+          };
+        }
+      }
+      
+      console.warn('[Spotify] Embed page returned no track data, trying API methods');
+    } catch (embedError: any) {
+      console.error('[Spotify] Embed scraping failed:', embedError.message);
+    }
+    
+    // Method 2: Try Spotify API if user is authenticated (requires Premium on app owner)
     if (userId && db) {
       try {
         const { getSpotifyToken } = await import('../routes/spotify-auth');
@@ -175,34 +257,31 @@ export async function scrapeSpotifyPlaylist(url: string, progressEmitter?: Event
         if (accessToken) {
           console.log('[Spotify] Using authenticated API for playlist', playlistId);
           
-          // Fetch playlist details
           const playlistResponse = await axios.get(`https://api.spotify.com/v1/playlists/${playlistId}`, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-            },
+            headers: { 'Authorization': `Bearer ${accessToken}` },
           });
           
           if (playlistResponse.data) {
             const playlist = playlistResponse.data;
             const tracks: ExternalTrack[] = [];
             
-            // Get all tracks (handle pagination)
-            let nextUrl = playlist.tracks.href;
+            // Handle the new API field names: items/items/item (Feb 2026 changes)
+            let nextUrl = playlist.items?.href || playlist.tracks?.href;
             while (nextUrl) {
               const tracksResponse = await axios.get(nextUrl, {
-                headers: {
-                  'Authorization': `Bearer ${accessToken}`,
-                },
+                headers: { 'Authorization': `Bearer ${accessToken}` },
               });
               
               const tracksData = tracksResponse.data;
+              const items = tracksData.items || [];
               
-              for (const item of tracksData.items) {
-                if (item?.track) {
+              for (const item of items) {
+                const track = item?.item || item?.track;
+                if (track) {
                   tracks.push({
-                    title: item.track.name || 'Unknown',
-                    artist: item.track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
-                    album: item.track.album?.name,
+                    title: track.name || 'Unknown',
+                    artist: track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
+                    album: track.album?.name,
                   });
                 }
               }
@@ -213,7 +292,6 @@ export async function scrapeSpotifyPlaylist(url: string, progressEmitter?: Event
             console.log('[Spotify] Successfully fetched playlist via API:', {
               name: playlist.name,
               trackCount: tracks.length,
-              isPrivate: !playlist.public
             });
             
             return {
@@ -226,152 +304,76 @@ export async function scrapeSpotifyPlaylist(url: string, progressEmitter?: Event
             };
           }
         }
-      } catch (apiError) {
-        console.error('[Spotify] API method failed, falling back to scraping:', apiError);
-        // Continue to fallback methods
+      } catch (apiError: any) {
+        console.error('[Spotify] API method failed:', apiError.message);
       }
     }
     
-    // Method 1: Try Spotify's oEmbed API (most reliable, publicly accessible)
+    // Method 3: Try Client Credentials flow (requires Premium app owner)
     try {
-      const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`;
-      const oembedResponse = await axios.get(oembedUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
+      const { getSpotifyClientCredentialsToken } = await import('../routes/spotify-auth');
+      const ccToken = await getSpotifyClientCredentialsToken(userId, db);
       
-      if (oembedResponse.data) {
-        // oEmbed gives us basic info, but not track list
-        // We need to fetch the actual page to get tracks
-        const pageResponse = await axios.get(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-          }
+      if (ccToken) {
+        console.log('[Spotify] Using Client Credentials flow for playlist', playlistId);
+        
+        const playlistResponse = await axios.get(`https://api.spotify.com/v1/playlists/${playlistId}`, {
+          headers: { 'Authorization': `Bearer ${ccToken}` },
         });
         
-        const html = pageResponse.data;
-        
-        // Try to extract Spotify data from meta tags and scripts
-        const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/);
-        const descMatch = html.match(/<meta property="og:description" content="([^"]+)"/);
-        
-        // Try to find track data in various script tags
-        let tracks: ExternalTrack[] = [];
-        
-        // Method 1a: Look for __NEXT_DATA__
-        const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.+?)<\/script>/s);
-        if (nextDataMatch) {
-          try {
-            const data = JSON.parse(nextDataMatch[1]);
-            const playlist = data?.props?.pageProps?.state?.data?.entity;
+        if (playlistResponse.data) {
+          const playlist = playlistResponse.data;
+          const tracks: ExternalTrack[] = [];
+          
+          let nextUrl = playlist.items?.href || playlist.tracks?.href;
+          while (nextUrl) {
+            const tracksResponse = await axios.get(nextUrl, {
+              headers: { 'Authorization': `Bearer ${ccToken}` },
+            });
             
-            if (playlist?.tracks?.items) {
-              tracks = playlist.tracks.items
-                .filter((item: any) => item?.track)
-                .map((item: any) => ({
-                  title: item.track.name || 'Unknown',
-                  artist: item.track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
-                  album: item.track.album?.name,
-                }));
-            }
-          } catch (parseError) {
-            console.error('[Spotify] Failed to parse __NEXT_DATA__:', parseError);
-          }
-        }
-        
-        // Method 1b: Look for Spotify resource data
-        if (tracks.length === 0) {
-          const resourceMatch = html.match(/Spotify\.Entity\s*=\s*({.+?});/s);
-          if (resourceMatch) {
-            try {
-              const data = JSON.parse(resourceMatch[1]);
-              if (data?.tracks?.items) {
-                tracks = data.tracks.items
-                  .filter((item: any) => item?.track)
-                  .map((item: any) => ({
-                    title: item.track.name || 'Unknown',
-                    artist: item.track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
-                    album: item.track.album?.name,
-                  }));
+            const tracksData = tracksResponse.data;
+            const items = tracksData.items || [];
+            
+            for (const item of items) {
+              const track = item?.item || item?.track;
+              if (track) {
+                tracks.push({
+                  title: track.name || 'Unknown',
+                  artist: track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
+                  album: track.album?.name,
+                });
               }
-            } catch (parseError) {
-              console.error('[Spotify] Failed to parse Spotify.Entity:', parseError);
             }
+            
+            nextUrl = tracksData.next;
           }
-        }
-        
-        if (tracks.length > 0) {
-          // Try to extract cover image from meta tags
-          const imageMatch = html.match(/<meta property="og:image" content="([^"]+)"/);
+          
+          console.log('[Spotify] Successfully fetched playlist via Client Credentials:', {
+            name: playlist.name,
+            trackCount: tracks.length,
+          });
           
           return {
             id: `spotify-${playlistId}`,
-            name: titleMatch?.[1] || oembedResponse.data.title || 'Spotify Playlist',
-            description: descMatch?.[1] || '',
+            name: playlist.name || 'Spotify Playlist',
+            description: playlist.description || '',
             source: 'spotify',
             tracks,
-            coverUrl: imageMatch?.[1],
+            coverUrl: playlist.images?.[0]?.url,
           };
         }
       }
-    } catch (oembedError) {
-      console.error('[Spotify] oEmbed method failed:', oembedError);
+    } catch (ccError: any) {
+      console.error('[Spotify] Client Credentials method failed:', ccError.message);
     }
     
-    // Method 2: Try embed page as fallback
-    try {
-      const embedUrl = `https://open.spotify.com/embed/playlist/${playlistId}`;
-      const response = await axios.get(embedUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-      
-      const html = response.data;
-      const jsonMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.+?)<\/script>/s);
-      
-      if (jsonMatch) {
-        const data = JSON.parse(jsonMatch[1]);
-        const playlist = data?.props?.pageProps?.state?.data?.entity;
-        
-        if (playlist?.tracks?.items) {
-          const tracks: ExternalTrack[] = playlist.tracks.items
-            .filter((item: any) => item?.track)
-            .map((item: any) => ({
-              title: item.track.name || 'Unknown',
-              artist: item.track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
-              album: item.track.album?.name,
-            }));
-          
-          if (tracks.length > 0) {
-            return {
-              id: `spotify-${playlistId}`,
-              name: playlist.name || 'Spotify Playlist',
-              description: playlist.description || '',
-              source: 'spotify',
-              tracks,
-              coverUrl: playlist.images?.[0]?.url,
-            };
-          }
-        }
-      }
-    } catch (embedError) {
-      console.error('[Spotify] Embed scraping failed:', embedError);
-    }
-    
-    // All methods failed - suggest OAuth or provide helpful error
+    // All methods failed
     throw new Error(
       'Unable to fetch Spotify playlist data. Possible reasons:\n' +
       '• The playlist may be private or region-restricted\n' +
-      '• Spotify may have changed their page structure\n' +
-      '• The playlist URL may be invalid\n\n' +
-      'Solutions:\n' +
-      '• Try a different public playlist\n' +
-      '• Set up OAuth connection if you have Spotify developer credentials\n' +
-      '• Use the direct import button (will attempt to fetch during import)'
+      '• The playlist URL may be invalid\n' +
+      '• Spotify may have changed their embed page structure\n\n' +
+      'Make sure the playlist is public and the URL is correct.'
     );
   } catch (error) {
     console.error('[Spotify] Scrape error:', error);
@@ -1544,4 +1546,80 @@ export async function scrapeYouTubePlaylist(url: string, progressEmitter?: Event
   }
 }
 
+/**
+ * Get popular Spotify playlists for a country using the Browse API.
+ * Uses Client Credentials flow (no user OAuth needed).
+ * Fetches featured playlists + toplists category in parallel.
+ */
+export async function getSpotifyPopularPlaylists(country: string, userId?: number, db?: any): Promise<Array<{ name: string; url: string; description: string; count?: number; imageUrl?: string; premiumRequired?: boolean }>> {
+  try {
+    const { getSpotifyClientCredentialsToken } = await import('../routes/spotify-auth');
+    const token = await getSpotifyClientCredentialsToken(userId, db);
+    
+    if (!token) {
+      console.warn('[Spotify Charts] No Client Credentials token available');
+      return [];
+    }
+
+    const results: Array<{ name: string; url: string; description: string; count?: number; imageUrl?: string }> = [];
+    const seen = new Set<string>();
+
+    const addPlaylist = (p: any) => {
+      if (!p || seen.has(p.id)) return;
+      seen.add(p.id);
+      results.push({
+        name: p.name,
+        url: p.external_urls?.spotify || `https://open.spotify.com/playlist/${p.id}`,
+        description: p.description || `${p.tracks?.total || 0} tracks`,
+        count: p.tracks?.total || 0,
+        imageUrl: p.images?.[0]?.url,
+      });
+    };
+
+    // Fetch featured playlists and toplists category in parallel
+    const [featuredRes, toplistsRes] = await Promise.allSettled([
+      axios.get('https://api.spotify.com/v1/browse/featured-playlists', {
+        params: { country, limit: 20 },
+        headers: { 'Authorization': `Bearer ${token}` },
+      }),
+      axios.get('https://api.spotify.com/v1/browse/categories/toplists/playlists', {
+        params: { country, limit: 50 },
+        headers: { 'Authorization': `Bearer ${token}` },
+      }),
+    ]);
+
+    // Check for premium required errors
+    const isPremiumError = (result: PromiseSettledResult<any>) => {
+      if (result.status === 'rejected' && result.reason?.response?.status === 403) return true;
+      if (result.status === 'fulfilled' && result.value.status === 403) return true;
+      return false;
+    };
+    
+    const bothFailedWithPremium = isPremiumError(featuredRes) && isPremiumError(toplistsRes);
+    if (bothFailedWithPremium) {
+      console.warn('[Spotify Charts] Premium required for browse API');
+      return [{ name: '__premium_required__', url: '', description: 'Spotify Premium required', count: 0, premiumRequired: true }];
+    }
+
+    // Process featured playlists
+    if (featuredRes.status === 'fulfilled' && featuredRes.value.data?.playlists?.items) {
+      for (const p of featuredRes.value.data.playlists.items) {
+        addPlaylist(p);
+      }
+    }
+
+    // Process toplists
+    if (toplistsRes.status === 'fulfilled' && toplistsRes.value.data?.playlists?.items) {
+      for (const p of toplistsRes.value.data.playlists.items) {
+        addPlaylist(p);
+      }
+    }
+
+    console.log(`[Spotify Charts] Found ${results.length} playlists for country ${country}`);
+    return results;
+  } catch (error) {
+    console.error('[Spotify Charts] Error fetching popular playlists:', error);
+    return [];
+  }
+}
 

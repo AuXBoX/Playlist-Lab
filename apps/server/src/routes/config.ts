@@ -36,10 +36,7 @@ router.get('/public-url', requireAuth, (req: Request, res: Response) => {
 
 /**
  * PUT /api/config/public-url
- * Updates the PUBLIC_URL configuration (runtime only, not persisted to .env)
- * 
- * Note: This is a runtime update. To persist changes, update the .env file
- * and restart the server.
+ * Updates the PUBLIC_URL configuration and persists to server.conf.json
  */
 router.put('/public-url', requireAuth, (req: Request, res: Response) => {
   try {
@@ -59,20 +56,20 @@ router.put('/public-url', requireAuth, (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid URL format' });
     }
 
-    // Update configuration (runtime only)
+    // Update and persist configuration
     configService.updateConfig({ 
       publicUrl,
       oauthRedirectBase: publicUrl, // Update OAuth base as well
     });
 
-    logger.info('[Config] PUBLIC_URL updated (runtime)', { 
+    logger.info('[Config] PUBLIC_URL updated and persisted', { 
       publicUrl,
       userId: req.session.userId,
     });
 
     return res.json({
       success: true,
-      message: 'PUBLIC_URL updated successfully (runtime only). To persist, update .env file and restart server.',
+      message: 'PUBLIC_URL updated and saved. Changes will persist across server restarts.',
       publicUrl,
       oauthRedirectUrls: configService.getAllOAuthRedirectUrls(),
     });

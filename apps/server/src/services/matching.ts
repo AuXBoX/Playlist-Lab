@@ -274,27 +274,46 @@ async function findBestMatch(
       });
       
       // Check if this is a "Various Artists" compilation
-      const isVariousArtists = normalizeForComparison(albumArtist).includes('various') || 
-                               normalizeForComparison(albumArtist).includes('compilation');
+      const albumArtistLower = albumArtist.toLowerCase();
+      const albumNameLower = albumName.toLowerCase();
+      const isVariousArtists = currentMatchingSettings.variousArtistsNames?.some(
+        (name: string) => albumArtistLower === name.toLowerCase() || 
+                          albumArtistLower.includes(name.toLowerCase())
+      ) || normalizeForComparison(albumArtist).includes('various') || 
+         normalizeForComparison(albumArtist).includes('compilation');
+      
+      // Also check if album name suggests it's a soundtrack/compilation
+      const isSoundtrackAlbum = albumNameLower.includes('soundtrack') || 
+                                albumNameLower.includes('ost') ||
+                                albumArtistLower.includes('cast') ||
+                                albumArtistLower.includes('soundtrack');
+      const isCompilation = isVariousArtists || isSoundtrackAlbum;
+      
+      // For compilations with exact title match, allow title-only matching
+      const cleanSourceTitle = normalizeForComparison(cleanTrackTitle(track.title));
+      const cleanPlexTitle = normalizeForComparison(cleanTrackTitle(plexTitle));
+      const exactTitleMatch = cleanSourceTitle === cleanPlexTitle;
+      const allowTitleOnlyMatch = isCompilation && exactTitleMatch;
       
       logger.info(`[Matching] Artist check results`, {
         albumArtistMatches,
         trackArtistMatches,
         anyArtistMatches,
-        isVariousArtists,
+        isCompilation,
+        allowTitleOnlyMatch,
         sourceArtist: track.artist,
         albumArtist,
         trackArtist
       });
       
-      // Allow Various Artists matches but with penalty, or require artist match
-      if (!albumArtistMatches && !trackArtistMatches && !anyArtistMatches && !isVariousArtists) {
+      // Allow match if artist matches, or it's a compilation with exact title match
+      if (!albumArtistMatches && !trackArtistMatches && !anyArtistMatches && !isVariousArtists && !allowTitleOnlyMatch) {
         logger.info(`[Matching] Artist mismatch, skipping`);
         continue;
       }
       
       // For Various Artists compilations, prefer track artist over album artist
-      const plexArtist = isVariousArtists && trackArtist 
+      const plexArtist = isCompilation && trackArtist 
         ? trackArtist 
         : (albumArtistMatches ? albumArtist : (trackArtist || albumArtist));
       let score = calculateMatchScore(track.title, track.artist, plexTitle, plexArtist);
@@ -303,9 +322,15 @@ async function findBestMatch(
       
       // Penalize Various Artists compilations heavily (but still allow them as last resort)
       // BUT: Don't penalize if the track artist (originalTitle) matches
-      if (isVariousArtists && !albumArtistMatches && !trackArtistMatches) {
+      if (isCompilation && !albumArtistMatches && !trackArtistMatches) {
         score -= 40;
-        logger.info(`[Matching] Various Artists penalty applied, new score: ${score}`);
+        logger.info(`[Matching] Compilation penalty applied, new score: ${score}`);
+      }
+      
+      // Extra penalty if we only matched by title (no artist match at all) on a compilation
+      if (allowTitleOnlyMatch && !trackArtistMatches && !anyArtistMatches) {
+        score -= 20;
+        logger.info(`[Matching] Title-only match penalty applied, new score: ${score}`);
       }
       
       // Penalize remixes when source track is not a remix
@@ -343,9 +368,14 @@ async function findBestMatch(
         logger.info(`[Matching] Self-titled track bonus applied (album="${albumName}" = track="${plexTitle}"), new score: ${score}`);
       }
       
-      if (currentMatchingSettings.preferNonCompilation && albumArtistMatches) {
-        score += 50;
-        logger.info(`[Matching] Non-compilation bonus applied, new score: ${score}`);
+      if (currentMatchingSettings.preferNonCompilation) {
+        if (albumArtistMatches) {
+          score += 50; // Big bonus for proper album artist match
+          logger.info(`[Matching] Non-compilation bonus applied, new score: ${score}`);
+        } else if (isCompilation) {
+          score -= 30; // Penalty for compilation/Various Artists
+          logger.info(`[Matching] Compilation penalty (preferNonCompilation) applied, new score: ${score}`);
+        }
       }
       
       logger.info(`[Matching] Final score: ${score}, minMatchScore: ${currentMatchingSettings.minMatchScore}`);

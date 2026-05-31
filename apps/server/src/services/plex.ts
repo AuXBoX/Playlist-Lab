@@ -42,6 +42,7 @@ export interface PlexTrack {
   grandparentGuid: string;
   type: string;
   title: string;
+  originalTitle?: string; // Track-level artist (used in compilations/Various Artists albums)
   grandparentKey: string;
   parentKey: string;
   grandparentTitle: string;
@@ -273,6 +274,66 @@ export class PlexClient {
               tracks = response.data.MediaContainer.Metadata || [];
               logger.info(`[Plex] Direct filter returned ${tracks.length} tracks`);
             }
+            
+            // If still no results, try searching by track title + track-level artist (originalTitle).
+            // This handles cases where the source artist is the track artist, not the album artist
+            // (e.g. soundtracks, compilations, singles where track artist ≠ album artist).
+            if (tracks.length === 0) {
+              logger.info(`[Plex] Direct filter found nothing, trying track-level artist search`);
+              try {
+                const trackArtistResponse = await this.client.get<PlexMediaContainer>(
+                  `/library/sections/${libraryId}/all`,
+                  { 
+                    params: { 
+                      type: 10,
+                      'track.title': title,
+                      'track.originalTitle': artist
+                    } 
+                  }
+                );
+                tracks = trackArtistResponse.data.MediaContainer.Metadata || [];
+                logger.info(`[Plex] Track-level artist filter returned ${tracks.length} tracks`);
+              } catch (err: any) {
+                // track.originalTitle filter may not be supported in all Plex versions
+                logger.info(`[Plex] Track-level artist filter not supported: ${err.message}, falling back to title-only search`);
+              }
+            }
+            
+            // If still no results, fall back to title-only search and filter by any artist field
+            if (tracks.length === 0) {
+              logger.info(`[Plex] Trying title-only search, filtering by track artist (originalTitle) and album artist (grandparentTitle)`);
+              const trackSearchResponse = await this.client.get<PlexMediaContainer>(
+                `/library/sections/${libraryId}/all`,
+                { 
+                  params: { 
+                    type: 10,
+                    'track.title': title
+                  } 
+                }
+              );
+              
+              const allTracks = trackSearchResponse.data.MediaContainer.Metadata || [];
+              logger.info(`[Plex] Found ${allTracks.length} tracks with title "${title}"`);
+              
+              // Match against either track artist (originalTitle) OR album artist (grandparentTitle).
+              // This covers all cases: compilations (artist in originalTitle), regular albums (artist in grandparentTitle),
+              // and tracks where the track artist differs from the album artist.
+              const normalizeArtist = (a: string) => a.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const normalizedSearchArtist = normalizeArtist(artist);
+              
+              tracks = allTracks.filter((track: PlexTrack) => {
+                const trackArtist = track.originalTitle || '';
+                const albumArtist = track.grandparentTitle || '';
+                const normalizedTrackArtist = normalizeArtist(trackArtist);
+                const normalizedAlbumArtist = normalizeArtist(albumArtist);
+                return normalizedTrackArtist.includes(normalizedSearchArtist) || 
+                       normalizedSearchArtist.includes(normalizedTrackArtist) ||
+                       normalizedAlbumArtist.includes(normalizedSearchArtist) ||
+                       normalizedSearchArtist.includes(normalizedAlbumArtist);
+              });
+              
+              logger.info(`[Plex] Artist filter matched ${tracks.length} tracks (checking both track artist and album artist)`);
+            }
           } catch (err: any) {
             logger.warn(`[Plex] Artist-first search failed: ${err.message}, falling back to direct filter`);
             // Fallback to original filtered search
@@ -337,8 +398,10 @@ export class PlexClient {
           }
         }
 
-        // Cache the results
-        this.searchCache.set(cacheKey, { results: tracks, timestamp: Date.now() });
+        // Cache the results, but don't cache empty results - the track might be added to the library later
+        if (tracks.length > 0) {
+          this.searchCache.set(cacheKey, { results: tracks, timestamp: Date.now() });
+        }
 
         // Clean up old cache entries
         if (this.searchCache.size > 1000) {

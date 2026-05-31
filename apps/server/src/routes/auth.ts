@@ -96,14 +96,19 @@ async function handleUserLogin(
  * POST /api/auth/start
  * Initiate Plex PIN-based OAuth flow
  */
-router.post('/start', async (_req: Request, res: Response, next: NextFunction) => {
+router.post('/start', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const pin = await authService.startAuth();
-    
+
+    // Build a forwardUrl so Plex redirects the popup back to our callback page
+    // after the user signs in. The callback notifies the parent and auto-closes.
+    const origin = req.headers.origin || `${req.protocol}://${req.headers.host}`;
+    const forwardUrl = `${origin}/auth/callback`;
+
     res.json({
       id: pin.id,
       code: pin.code,
-      authUrl: authService.getAuthUrl(pin.code),
+      authUrl: authService.getAuthUrl(pin.code, forwardUrl),
     });
   } catch (error) {
     logger.error('Failed to start auth', { error });

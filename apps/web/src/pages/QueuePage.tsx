@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../contexts/AppContext';
 import type { MatchedTrack } from '@playlist-lab/shared';
 import './QueuePage.css';
@@ -7,6 +7,7 @@ import './QueuePage.css';
 interface CompletedImport {
   id: string;
   source: string;
+  url?: string;
   playlistName: string;
   completedAt: number;
   matchedCount?: number;
@@ -31,6 +32,19 @@ export const QueuePage: FC = () => {
   const [rematchResults, setRematchResults] = useState<any[]>([]);
   const [isSearchingRematch, setIsSearchingRematch] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Track whether mousedown started on the backdrop
+  const backdropMouseDown = useRef(false);
+
+  // ESC key closes the rematch modal
+  useEffect(() => {
+    if (!rematchTrack) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRematchTrack(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [rematchTrack]);
 
   // Load completed imports and active queue
   useEffect(() => {
@@ -171,27 +185,20 @@ export const QueuePage: FC = () => {
       const matchedTracks = editableTracks.filter(t => t.matched && t.plexRatingKey);
       const unmatchedTracks = editableTracks.filter(t => !t.matched || !t.plexRatingKey);
 
-      const trackUris = matchedTracks
-        .filter(t => t.plexRatingKey)
-        .map(t => `server://playlist-lab-server/com.plexapp.plugins.library/library/metadata/${t.plexRatingKey}`);
-
-      await apiClient.createPlaylist({
-        name: playlistName,
-        tracks: trackUris,
+      // Use confirmImport endpoint which properly handles cover art, missing tracks, and overwrite
+      await apiClient.confirmImport({
+        playlistName,
+        source: selectedImport.source,
+        sourceUrl: selectedImport.url || '',
+        tracks: matchedTracks,
+        saveMissingTracks: unmatchedTracks.length > 0,
+        missingTracks: unmatchedTracks.map(t => ({
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+        })),
+        coverUrl: selectedImport.coverUrl,
       });
-
-      if (unmatchedTracks.length > 0) {
-        await apiClient.saveMissingTracks({
-          playlistName: playlistName,
-          source: selectedImport.source,
-          sourceUrl: '',
-          tracks: unmatchedTracks.map(t => ({
-            title: t.title,
-            artist: t.artist,
-            album: t.album,
-          })),
-        });
-      }
 
       await fetch(`/api/import/queue/completed/${selectedImport.id}`, {
         method: 'DELETE',
@@ -249,9 +256,10 @@ export const QueuePage: FC = () => {
         await apiClient.saveMissingTracks({
           playlistName: playlistName,
           source: selectedImport.source,
-          sourceUrl: '',
+          sourceUrl: selectedImport.url || '',
           tracks: unmatchedWithPositions,
           matchedTracks: matchedTracksData,
+          coverUrl: selectedImport.coverUrl,
         });
       } else if (matchedTracks.length > 0) {
         // Only matched tracks, create playlist normally
@@ -708,8 +716,11 @@ export const QueuePage: FC = () => {
 
       {/* Rematch Modal */}
       {rematchTrack && (
-        <div className="modal-overlay" onClick={() => setRematchTrack(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) backdropMouseDown.current = true; }}
+          onMouseUp={(e) => { if (e.target === e.currentTarget && backdropMouseDown.current) setRematchTrack(null); backdropMouseDown.current = false; }}
+        >
+          <div className="modal-content" onMouseDown={(e) => { backdropMouseDown.current = false; e.stopPropagation(); }}>
             <div className="modal-header">
               <h2>Search for Track</h2>
               <button className="modal-close" onClick={() => setRematchTrack(null)}>×</button>

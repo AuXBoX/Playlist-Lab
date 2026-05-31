@@ -805,8 +805,10 @@ const ServerConfigTab: FC<ServerConfigTabProps> = ({ apiClient }) => {
 
       {!isDefault && (
         <div className="settings-alert settings-alert--info" style={{ marginTop: '1rem' }}>
-          <strong>Note:</strong> This is a runtime configuration change. To persist across server restarts,
-          update the <code>PUBLIC_URL</code> environment variable in your <code>.env</code> file.
+          <strong>Note:</strong> Configuration has been saved. Changes will persist across server restarts.
+          {publicUrl && publicUrl !== 'http://127.0.0.1:3001' && (
+            <span> The <code>PUBLIC_URL</code> environment variable will override this setting if set.</span>
+          )}
         </div>
       )}
 

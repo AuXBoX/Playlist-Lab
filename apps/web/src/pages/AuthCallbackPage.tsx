@@ -6,10 +6,20 @@ export const AuthCallbackPage: FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Plex redirects back here after authorization
-    // The PIN info is in sessionStorage, so just redirect to login
-    // The login page will detect it and complete the auth
-    navigate('/login', { replace: true });
+    if (window.opener) {
+      // We're in a popup opened by the login page.
+      // Notify the parent window that auth completed, then auto-close the popup.
+      try {
+        window.opener.postMessage({ type: 'plex-auth-complete' }, window.location.origin);
+      } catch {
+        // Cross-origin safety - ignore
+      }
+      window.close();
+    } else {
+      // Opened in a regular tab (not a popup) - fall back to redirecting to login.
+      // The login page's polling will pick up the auth state.
+      navigate('/login', { replace: true });
+    }
   }, [navigate]);
 
   return (

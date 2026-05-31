@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../contexts/AppContext';
 import type { MissingTrack } from '@playlist-lab/shared';
 
@@ -35,6 +35,19 @@ export const MissingTracksPage: FC = () => {
   const [rematchQuery, setRematchQuery] = useState('');
   const [rematchResults, setRematchResults] = useState<RematchResult[]>([]);
   const [isSearchingRematch, setIsSearchingRematch] = useState(false);
+
+  // Track whether mousedown started on the backdrop (prevents closing when dragging text out of modal)
+  const backdropMouseDown = useRef(false);
+
+  // ESC key closes the rematch modal
+  useEffect(() => {
+    if (!rematchTrack) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleCloseRematch();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [rematchTrack]);
 
   useEffect(() => {
     loadMissingTracks();
@@ -388,12 +401,15 @@ export const MissingTracksPage: FC = () => {
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex',
           alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-        }} onClick={handleCloseRematch}>
+        }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) backdropMouseDown.current = true; }}
+          onMouseUp={(e) => { if (e.target === e.currentTarget && backdropMouseDown.current) handleCloseRematch(); backdropMouseDown.current = false; }}
+        >
           <div style={{
             backgroundColor: 'var(--surface)', borderRadius: '8px', padding: '1.5rem',
-            width: '700px', maxWidth: '90vw', maxHeight: '80vh', display: 'flex',
+            width: '950px', maxWidth: '95vw', maxHeight: '80vh', display: 'flex',
             flexDirection: 'column',
-          }} onClick={(e) => e.stopPropagation()}>
+          }} onMouseDown={(e) => { backdropMouseDown.current = false; e.stopPropagation(); }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h2 style={{ margin: 0 }}>Manual Rematch</h2>
               <button onClick={handleCloseRematch} style={{

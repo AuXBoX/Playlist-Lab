@@ -198,6 +198,7 @@ router.get('/queue/completed', (req: Request, res: Response) => {
   const formattedCompleted = completed.map(job => ({
     id: job.id,
     source: job.source,
+    url: job.url,
     playlistName: job.playlistName || 'Imported Playlist',
     completedAt: job.completedAt,
     matchedCount: job.result?.matched?.length || 0,
@@ -235,6 +236,7 @@ router.get('/queue/completed/:jobId', (req: Request, res: Response): void => {
     import: {
       id: job.id,
       source: job.source,
+      url: job.url,
       playlistName: job.playlistName || 'Imported Playlist',
       completedAt: job.completedAt,
       matched: job.result?.matched || [],
@@ -1791,7 +1793,7 @@ router.get('/spotify/user/:userId/playlists', async (req: Request, res: Response
   try {
     const { userId: spotifyUserId } = req.params;
     const userId = req.session.userId!;
-    const db = (req as any).db;
+    const db = (req.dbService as any)?.db || (req as any).db;
 
     if (!spotifyUserId) {
       res.status(400).json({
@@ -1831,17 +1833,43 @@ router.get('/spotify/user/:userId/playlists', async (req: Request, res: Response
     }
 
     // Update the display name in the database if this user is saved
-    try {
-      db.prepare(
-        `UPDATE saved_spotify_users 
-         SET display_name = ? 
-         WHERE user_id = ? AND spotify_user_id = ?`
-      ).run(displayName, userId, spotifyUserId);
-    } catch (updateError) {
-      logger.warn('[Spotify User Playlists] Could not update display name', { 
+    // But only if the display name looks valid (not a language dialog or generic title)
+    const invalidNames = ['choose a language', 'spotify', 'spotify - web player', 'spotify – web player', 'web player', ''];
+    const isValidDisplayName = displayName && 
+      !invalidNames.includes(displayName.toLowerCase().trim()) &&
+      !/choose|language|sprache|langue|idioma/i.test(displayName);
+    
+    if (isValidDisplayName) {
+      try {
+        db.prepare(
+          `UPDATE saved_spotify_users 
+           SET display_name = ? 
+           WHERE user_id = ? AND spotify_user_id = ?`
+        ).run(displayName, userId, spotifyUserId);
+      } catch (updateError) {
+        logger.warn('[Spotify User Playlists] Could not update display name', { 
+          spotifyUserId, 
+          error: updateError 
+        });
+      }
+    } else {
+      // Invalid display name from scraper — try to get the saved name from DB
+      logger.info('[Spotify User Playlists] Invalid scraper display name, falling back to DB', { 
         spotifyUserId, 
-        error: updateError 
+        scraperName: displayName 
       });
+      try {
+        const savedUser = db.prepare(
+          `SELECT display_name FROM saved_spotify_users WHERE user_id = ? AND spotify_user_id = ?`
+        ).get(userId, spotifyUserId) as { display_name: string } | undefined;
+        if (savedUser && !invalidNames.includes(savedUser.display_name.toLowerCase().trim()) && !/choose|language|sprache|langue|idioma/i.test(savedUser.display_name)) {
+          displayName = savedUser.display_name;
+        } else {
+          displayName = spotifyUserId;
+        }
+      } catch {
+        displayName = spotifyUserId;
+      }
     }
 
     logger.info('[Spotify User Playlists] Found playlists', { 

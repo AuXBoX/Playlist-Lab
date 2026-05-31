@@ -12,9 +12,13 @@ import { TargetAdapter, TargetConfig, TrackInfo, MatchResult, ServiceMeta } from
 import { getSpotifyToken } from '../routes/spotify-auth';
 import { encrypt, decrypt } from '../utils/encryption';
 import { logger } from '../utils/logger';
+import { configService } from '../config';
 
 const ENCRYPTION_SECRET = process.env.SESSION_SECRET || 'default-secret-change-in-production';
-const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:3001/api/spotify/callback';
+
+// Evaluate redirect URI at request time so runtime PUBLIC_URL changes take effect
+const getSpotifyRedirectUri = () =>
+  process.env.SPOTIFY_REDIRECT_URI || configService.getOAuthRedirectUrl('spotify');
 
 /** Compute a simple string-similarity confidence score (0–100) */
 function similarity(a: string, b: string): number {
@@ -294,7 +298,7 @@ export const spotifyTargetAdapter: TargetAdapter = {
       `response_type=code&` +
       `client_id=${clientId}&` +
       `scope=${encodeURIComponent(scopes)}&` +
-      `redirect_uri=${encodeURIComponent(SPOTIFY_REDIRECT_URI)}&` +
+      `redirect_uri=${encodeURIComponent(getSpotifyRedirectUri())}&` +
       `state=${userId}&` +
       `show_dialog=true`;
 
@@ -326,7 +330,7 @@ export const spotifyTargetAdapter: TargetAdapter = {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
-        redirect_uri: SPOTIFY_REDIRECT_URI,
+        redirect_uri: getSpotifyRedirectUri(),
       }),
     });
 

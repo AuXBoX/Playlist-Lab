@@ -8,7 +8,8 @@ const router = Router();
 
 // Spotify OAuth configuration
 // Users provide their own Spotify app credentials through the UI
-// Redirect URI now uses configurable PUBLIC_URL for reverse proxy support
+// Redirect URI uses configurable PUBLIC_URL for reverse proxy support.
+// Evaluated at request time so runtime PUBLIC_URL changes take effect immediately.
 const getSpotifyRedirectUri = () => {
   // Allow environment variable override for backward compatibility
   if (process.env.SPOTIFY_REDIRECT_URI) {
@@ -16,7 +17,6 @@ const getSpotifyRedirectUri = () => {
   }
   return configService.getOAuthRedirectUrl('spotify');
 };
-const SPOTIFY_REDIRECT_URI = getSpotifyRedirectUri();
 
 // Encryption secret for Spotify tokens
 const ENCRYPTION_SECRET = process.env.SESSION_SECRET || 'default-secret-change-in-production';
@@ -87,7 +87,7 @@ router.get('/login', requireAuth, (req: Request, res: Response) => {
     const scopes = 'playlist-read-private playlist-read-collaborative user-library-read';
     
     // Log the redirect URI being used for debugging
-    logger.info('Spotify OAuth redirect URI', { redirectUri: SPOTIFY_REDIRECT_URI, userId });
+    logger.info('Spotify OAuth redirect URI', { redirectUri: getSpotifyRedirectUri(), userId });
     
     // Use authorization code flow (response_type=code)
     // This returns an authorization code that we exchange for tokens
@@ -95,7 +95,7 @@ router.get('/login', requireAuth, (req: Request, res: Response) => {
       `response_type=code&` +
       `client_id=${clientId}&` +
       `scope=${encodeURIComponent(scopes)}&` +
-      `redirect_uri=${encodeURIComponent(SPOTIFY_REDIRECT_URI)}&` +
+      `redirect_uri=${encodeURIComponent(getSpotifyRedirectUri())}&` +
       `state=${userId}&` +
       `show_dialog=true`;
     
@@ -241,7 +241,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        redirect_uri: SPOTIFY_REDIRECT_URI,
+        redirect_uri: getSpotifyRedirectUri(),
       }),
     });
     
@@ -540,45 +540,76 @@ router.get('/search', requireAuth, async (req: Request, res: Response) => {
     const userId = req.session.userId!;
     const db = (dbService as any).db;
     
-    const token = await getSpotifyToken(userId, db);
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Not connected to Spotify' });
-    }
-    
     // Search for playlists on Spotify
-    const searchResponse = await fetch(
+    // Try user OAuth token first, then fall back to Client Credentials
+    let token = await getSpotifyToken(userId, db);
+    let searchResponse = token ? await fetch(
       `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=playlist&limit=20`,
       {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       }
-    );
+    ) : null;
     
-    if (!searchResponse.ok) {
-      const errorData = await searchResponse.json();
-      logger.error('Failed to search Spotify playlists', { 
-        error: errorData,
-        userId 
-      });
-      
+    // If user token failed or wasn't available, try Client Credentials
+    if (!searchResponse || !searchResponse.ok) {
+      const ccToken = await getSpotifyClientCredentialsToken(userId, db);
+      if (ccToken) {
+        searchResponse = await fetch(
+          `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=playlist&limit=20`,
+          {
+            headers: {
+              'Authorization': `Bearer ${ccToken}`,
+            },
+          }
+        );
+      }
+    }
+    
+    if (!searchResponse || !searchResponse.ok) {
+      const status = searchResponse?.status || 401;
       let errorMessage = 'Failed to search Spotify playlists';
       let isPremiumRequired = false;
       
-      if (errorData.error?.message) {
-        errorMessage = errorData.error.message;
-        
-        // Check if it's a premium subscription error
-        if (searchResponse.status === 403 && 
-            (errorMessage.toLowerCase().includes('premium') || 
-             errorMessage.toLowerCase().includes('subscription'))) {
-          isPremiumRequired = true;
-          errorMessage = 'Spotify Premium subscription required. The Spotify app owner needs an active Premium subscription to use this feature.';
+      if (searchResponse) {
+        // Safely parse response - Spotify may return HTML instead of JSON
+        const responseText = await searchResponse.text();
+        let errorData: any = null;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch {
+          // Not JSON - check for known HTML error messages
+          if (responseText.toLowerCase().includes('premium') || 
+              responseText.toLowerCase().includes('active pre')) {
+            isPremiumRequired = true;
+            errorMessage = 'Spotify Premium subscription required. The Spotify app owner needs an active Premium subscription to use this feature.';
+          }
         }
+        
+        if (errorData?.error?.message) {
+          errorMessage = errorData.error.message;
+          
+          // Check if it's a premium subscription error
+          if (searchResponse.status === 403 && 
+              (errorMessage.toLowerCase().includes('premium') || 
+               errorMessage.toLowerCase().includes('subscription'))) {
+            isPremiumRequired = true;
+            errorMessage = 'Spotify Premium subscription required. The Spotify app owner needs an active Premium subscription to use this feature.';
+          }
+        }
+        
+        logger.error('Failed to search Spotify playlists', { 
+          status: searchResponse.status,
+          error: errorData || responseText.substring(0, 200),
+          userId 
+        });
+      } else {
+        logger.error('No Spotify token available for search', { userId });
+        errorMessage = 'Not connected to Spotify. Please connect your Spotify account or configure SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET.';
       }
       
-      return res.status(searchResponse.status).json({ 
+      return res.status(status).json({ 
         error: errorMessage,
         premiumRequired: isPremiumRequired
       });
@@ -646,10 +677,10 @@ router.get('/playlists', requireAuth, async (req: Request, res: Response) => {
         userId 
       });
       
-      // Try to parse as JSON if it looks like JSON
       let errorMessage = 'Failed to fetch playlists from Spotify';
       let isPremiumRequired = false;
       
+      // Try to parse as JSON if it looks like JSON
       if (responseText.trim().startsWith('{')) {
         try {
           const errorData = JSON.parse(responseText);
@@ -663,7 +694,16 @@ router.get('/playlists', requireAuth, async (req: Request, res: Response) => {
             errorMessage = 'Spotify Premium subscription required. The Spotify app owner needs an active Premium subscription to use this feature.';
           }
         } catch {
-          // Not JSON, use default message
+          // Not JSON, fall through to text-based detection
+        }
+      }
+      
+      // Also check plain text/HTML responses for premium errors
+      if (!isPremiumRequired && playlistsResponse.status === 403) {
+        const lowerText = responseText.toLowerCase();
+        if (lowerText.includes('premium') || lowerText.includes('active pre') || lowerText.includes('subscription')) {
+          isPremiumRequired = true;
+          errorMessage = 'Spotify Premium subscription required for the owner of the Spotify Developer app. You can still import playlists by pasting a Spotify playlist URL directly.';
         }
       }
       
@@ -942,5 +982,98 @@ router.delete('/disconnect', requireAuth, async (req: Request, res: Response) =>
     return res.status(500).json({ error: 'Failed to disconnect Spotify account' });
   }
 });
+
+// In-memory cache for Client Credentials token (shared across all users)
+let clientCredentialsCache: { token: string; expiresAt: number } | null = null;
+
+/**
+ * Get a Spotify access token using the Client Credentials flow.
+ * This does NOT require user OAuth - just a Client ID and Client Secret.
+ * It can read any PUBLIC playlist without user authorization.
+ * 
+ * Priority:
+ * 1. User's stored Client ID/Secret (if they configured Spotify credentials)
+ * 2. Server-level SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET env vars
+ * 
+ * The token is cached in memory for its validity period (typically 1 hour).
+ */
+export async function getSpotifyClientCredentialsToken(userId?: number, db?: any): Promise<string | null> {
+  // Return cached token if still valid (with 60s buffer)
+  if (clientCredentialsCache && clientCredentialsCache.expiresAt > Date.now() + 60000) {
+    logger.info('[Spotify] Using cached Client Credentials token');
+    return clientCredentialsCache.token;
+  }
+
+  let clientId: string | null = null;
+  let clientSecret: string | null = null;
+
+  // Try user's stored credentials first
+  if (userId && db) {
+    try {
+      const user = db.prepare(
+        'SELECT spotify_client_id, spotify_client_secret FROM users WHERE id = ?'
+      ).get(userId);
+      
+      if (user?.spotify_client_id && user?.spotify_client_secret) {
+        try {
+          clientId = decrypt(user.spotify_client_id, ENCRYPTION_SECRET);
+          clientSecret = decrypt(user.spotify_client_secret, ENCRYPTION_SECRET);
+        } catch {
+          // Decryption failed, will fall through to env vars
+        }
+      }
+    } catch {
+      // DB lookup failed, will fall through to env vars
+    }
+  }
+
+  // Fall back to server-level environment variables
+  if (!clientId || !clientSecret) {
+    clientId = process.env.SPOTIFY_CLIENT_ID || null;
+    clientSecret = process.env.SPOTIFY_CLIENT_SECRET || null;
+  }
+
+  if (!clientId || !clientSecret) {
+    logger.info('[Spotify] No Client ID/Secret available for Client Credentials flow');
+    return null;
+  }
+
+  try {
+    const tokenResponse = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+      },
+      body: 'grant_type=client_credentials',
+    });
+
+    if (!tokenResponse.ok) {
+      const errorData = await tokenResponse.json().catch(() => ({}));
+      logger.error('[Spotify] Client Credentials token request failed', {
+        status: tokenResponse.status,
+        error: errorData.error || tokenResponse.statusText,
+      });
+      return null;
+    }
+
+    const data = await tokenResponse.json() as SpotifyTokenResponse;
+    const { access_token, expires_in } = data;
+    
+    // Cache the token
+    clientCredentialsCache = {
+      token: access_token,
+      expiresAt: Date.now() + (expires_in * 1000),
+    };
+
+    logger.info('[Spotify] Obtained Client Credentials token', { expiresIn: expires_in });
+    return access_token;
+  } catch (error: any) {
+    logger.error('[Spotify] Client Credentials token request failed', {
+      error: error.message,
+    });
+    return null;
+  }
+}
 
 export default router;

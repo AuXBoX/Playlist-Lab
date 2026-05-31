@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../contexts/AppContext';
 import type { MatchedTrack } from '@playlist-lab/shared';
 
@@ -55,18 +55,17 @@ export const ImportPage: FC = () => {
   const [scheduleOverwriteExisting, setScheduleOverwriteExisting] = useState<boolean>(false);
   const [scheduleOverwriteCover, setScheduleOverwriteCover] = useState<boolean>(false);
   const [scheduleRunTime, setScheduleRunTime] = useState<string>('09:00');
-  const [spotifyConnected, setSpotifyConnected] = useState(false);
-  const [spotifyHasCredentials, setSpotifyHasCredentials] = useState(false);
-  const [showSpotifySetup, setShowSpotifySetup] = useState(false);
-  const [spotifyClientId, setSpotifyClientId] = useState('');
-  const [spotifyClientSecret, setSpotifyClientSecret] = useState('');
-  const [isSavingSpotify, setIsSavingSpotify] = useState(false);
-  const [spotifyPlaylists, setSpotifyPlaylists] = useState<PopularPlaylist[]>([]);
-  const [isLoadingSpotifyPlaylists, setIsLoadingSpotifyPlaylists] = useState(false);
-  const [spotifySearchQuery, setSpotifySearchQuery] = useState('');
-  const [spotifySearchResults, setSpotifySearchResults] = useState<PopularPlaylist[]>([]);
-  const [isSearchingSpotify, setIsSearchingSpotify] = useState(false);
-  const [spotifyPremiumRequired, setSpotifyPremiumRequired] = useState(false);
+  const [spotifyProfilePlaylists, setSpotifyProfilePlaylists] = useState<PopularPlaylist[]>([]);
+  const [isLoadingSpotifyProfile, setIsLoadingSpotifyProfile] = useState(false);
+  const [spotifyProfileName, setSpotifyProfileName] = useState('');
+  // Saved Spotify users state
+  const [savedSpotifyUsers, setSavedSpotifyUsers] = useState<Array<{id: number; spotify_user_id: string; display_name: string}>>([]);
+  const [newSpotifyUsername, setNewSpotifyUsername] = useState('');
+  const [isAddingSpotifyUser, setIsAddingSpotifyUser] = useState(false);
+  const [selectedSavedUser, setSelectedSavedUser] = useState<string | null>(null);
+  // Favorites state
+  const [favoritePlaylists, setFavoritePlaylists] = useState<Array<{id: number; name: string; source: string; source_url: string; description: string | null; image_url: string | null}>>([]);
+  const [favoriteUrls, setFavoriteUrls] = useState<Set<string>>(new Set());
   const [searchResults, setSearchResults] = useState<PopularPlaylist[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string>('US');
@@ -203,10 +202,242 @@ export const ImportPage: FC = () => {
     }
   }, []);
 
-  // Fetch dynamic playlists when source or country changes
+  // Load saved Spotify users when Spotify is selected
+  useEffect(() => {
+    if (activeSource === 'spotify') {
+      loadSavedSpotifyUsers();
+    }
+  }, [activeSource]);
+
+  // Load favorites on mount
+  useEffect(() => {
+    loadFavorites();
+  }, []);
+
+  const loadSavedSpotifyUsers = async () => {
+    try {
+      const response = await fetch('/api/saved-spotify-users', { credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        const users = data.users || [];
+        setSavedSpotifyUsers(users);
+        
+        // Auto-refresh display names that look invalid (e.g., "Spotify - Web Player", "Choose a language")
+        const invalidPatterns = /^(spotify[\s\-–]|web player|choose|sprache|langue|idioma)/i;
+        for (const user of users) {
+          if (invalidPatterns.test(user.display_name) || user.display_name === user.spotify_user_id) {
+            fetch(`/api/saved-spotify-users/${user.id}/refresh`, {
+              method: 'PATCH',
+              credentials: 'include',
+            }).then(res => {
+              if (res.ok) return res.json();
+              return null;
+            }).then(result => {
+              if (result?.displayName) {
+                // Update local state immediately with the resolved name
+                setSavedSpotifyUsers(prev => prev.map(u => 
+                  u.id === user.id ? { ...u, display_name: result.displayName } : u
+                ));
+                // Also update profile name if this user is currently selected
+                if (selectedSavedUser === user.spotify_user_id) {
+                  setSpotifyProfileName(result.displayName);
+                }
+              }
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load saved Spotify users', err);
+    }
+  };
+
+  const addSavedSpotifyUser = async () => {
+    if (!newSpotifyUsername.trim()) return;
+    
+    setIsAddingSpotifyUser(true);
+    setError(null);
+    try {
+      // Extract username from URL if needed
+      let username = newSpotifyUsername.trim();
+      const urlMatch = username.match(/open\.spotify\.com\/user\/([a-zA-Z0-9_-]+)/);
+      if (urlMatch) {
+        username = urlMatch[1];
+      }
+      // Remove @ prefix if present
+      username = username.replace(/^@/, '');
+      
+      const response = await fetch('/api/saved-spotify-users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ spotifyUserId: username, displayName: username }),
+      });
+      
+      if (response.ok) {
+        setNewSpotifyUsername('');
+        await loadSavedSpotifyUsers();
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData?.error?.message || 'Failed to add Spotify user');
+      }
+    } catch (err) {
+      setError('Failed to add Spotify user');
+    } finally {
+      setIsAddingSpotifyUser(false);
+    }
+  };
+
+  const removeSavedSpotifyUser = async (id: number) => {
+    try {
+      const response = await fetch(`/api/saved-spotify-users/${id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (response.ok) {
+        setSavedSpotifyUsers(prev => prev.filter(u => u.id !== id));
+        // Clear selection if removed user was selected
+        const removedUser = savedSpotifyUsers.find(u => u.id === id);
+        if (removedUser && selectedSavedUser === removedUser.spotify_user_id) {
+          setSelectedSavedUser(null);
+          setSpotifyProfilePlaylists([]);
+          setSpotifyProfileName('');
+        }
+      }
+    } catch (err) {
+      setError('Failed to remove saved user');
+    }
+  };
+
+  const selectSavedUser = async (spotifyUserId: string) => {
+    if (selectedSavedUser === spotifyUserId) {
+      // Deselect
+      setSelectedSavedUser(null);
+      setSpotifyProfilePlaylists([]);
+      setSpotifyProfileName('');
+      return;
+    }
+    
+    setSelectedSavedUser(spotifyUserId);
+    setIsLoadingSpotifyProfile(true);
+    setSpotifyProfilePlaylists([]);
+    
+    // Use the saved user's display_name immediately (not the scraper's response)
+    const savedUser = savedSpotifyUsers.find(u => u.spotify_user_id === spotifyUserId);
+    const validName = savedUser?.display_name && !/^(choose|spotify|web player|sprache|langue)/i.test(savedUser.display_name)
+      ? savedUser.display_name : spotifyUserId;
+    setSpotifyProfileName(validName);
+    setError(null);
+    
+    try {
+      const response = await fetch(
+        `/api/import/spotify/user/${encodeURIComponent(spotifyUserId)}/playlists`,
+        { credentials: 'include' }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        const playlists: PopularPlaylist[] = (data.playlists || []).map((p: any) => ({
+          name: p.name,
+          url: p.id ? `https://open.spotify.com/playlist/${p.id}` : p.url,
+          description: p.trackCount ? `${p.trackCount} tracks` : undefined,
+          imageUrl: p.coverUrl,
+        }));
+        setSpotifyProfilePlaylists(playlists);
+        // Only update name from scraper if it's valid
+        const scraperName = data.displayName;
+        if (scraperName && !/^(choose|spotify[\s\-–]|web player|sprache|langue)/i.test(scraperName)) {
+          setSpotifyProfileName(scraperName);
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData?.error?.message || 'Failed to load playlists');
+      }
+    } catch (err) {
+      setError('Failed to load playlists');
+    } finally {
+      setIsLoadingSpotifyProfile(false);
+    }
+  };
+
+  // Favorites management
+  const loadFavorites = async () => {
+    try {
+      const response = await fetch('/api/favorite-playlists', { credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        const favs = data.favorites || [];
+        setFavoritePlaylists(favs);
+        setFavoriteUrls(new Set(favs.map((f: any) => f.source_url)));
+      }
+    } catch (err) {
+      console.error('Failed to load favorites', err);
+    }
+  };
+
+  const toggleFavorite = async (playlist: PopularPlaylist) => {
+    const isFav = favoriteUrls.has(playlist.url);
+    
+    // Optimistically update
+    if (isFav) {
+      setFavoriteUrls(prev => { const next = new Set(prev); next.delete(playlist.url); return next; });
+      setFavoritePlaylists(prev => prev.filter(f => f.source_url !== playlist.url));
+    } else {
+      const tempFav = {
+        id: -1,
+        name: playlist.name,
+        source: activeSource,
+        source_url: playlist.url,
+        description: playlist.description || null,
+        image_url: playlist.imageUrl || null,
+      };
+      setFavoriteUrls(prev => new Set(prev).add(playlist.url));
+      setFavoritePlaylists(prev => [tempFav, ...prev]);
+    }
+    
+    try {
+      if (isFav) {
+        await fetch('/api/favorite-playlists', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ sourceUrl: playlist.url }),
+        });
+      } else {
+        const response = await fetch('/api/favorite-playlists', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            name: playlist.name,
+            source: activeSource,
+            sourceUrl: playlist.url,
+            description: playlist.description,
+            imageUrl: playlist.imageUrl,
+          }),
+        });
+        if (response.ok) {
+          // Update with real ID from server
+          const data = await response.json();
+          setFavoritePlaylists(prev => prev.map(f => 
+            f.source_url === playlist.url && f.id === -1 
+              ? { ...f, id: data.favorite.id } 
+              : f
+          ));
+        }
+      }
+    } catch (err) {
+      console.error('Failed to toggle favorite', err);
+      // Revert on error
+      await loadFavorites();
+    }
+  };
+
+  const isFavorited = (url: string) => favoriteUrls.has(url);
+
   useEffect(() => {
     // Only fetch for sources that support dynamic playlists
-    if (['deezer', 'youtube', 'apple'].includes(activeSource)) {
+    if (['deezer', 'youtube', 'apple', 'spotify'].includes(activeSource)) {
       fetchDynamicPlaylists();
     } else {
       setDynamicPlaylists([]);
@@ -260,7 +491,8 @@ export const ImportPage: FC = () => {
           localStorage.removeItem(cacheKey);
         }
       } else {
-        console.error('Failed to fetch dynamic playlists');
+        const errorData = await response.json().catch(() => null);
+        console.error('Failed to fetch dynamic playlists', errorData);
         setDynamicPlaylists([]);
       }
     } catch (err) {
@@ -300,107 +532,45 @@ export const ImportPage: FC = () => {
 
 
   const currentSource = sources.find(s => s.id === activeSource);
-  // Use dynamic playlists for supported sources, Spotify playlists for Spotify, empty for others
-  const currentPopular = activeSource === 'spotify' 
-    ? spotifyPlaylists
-    : (['deezer', 'youtube', 'apple'].includes(activeSource) 
+  // Use dynamic playlists for supported sources, empty for Spotify (no login)
+  const currentPopular = ['deezer', 'youtube', 'apple'].includes(activeSource) 
       ? dynamicPlaylists 
-      : []);
+      : [];
 
-  // Check Spotify connection status when Spotify is selected
-  useEffect(() => {
-    if (activeSource === 'spotify') {
-      checkSpotifyStatus();
-    }
-  }, [activeSource]);
-
-  const checkSpotifyStatus = async () => {
-    try {
-      const response = await fetch('/api/spotify/status', {
-        credentials: 'include',
-      });
-      const data = await response.json();
-      setSpotifyConnected(data.connected);
-      setSpotifyHasCredentials(data.hasCredentials);
-      
-      // If connected, fetch user's playlists
-      if (data.connected) {
-        fetchSpotifyPlaylists();
-      }
-    } catch (err) {
-      console.error('Failed to check Spotify status', err);
-      setSpotifyConnected(false);
-      setSpotifyHasCredentials(false);
-    }
-  };
-
-  const fetchSpotifyPlaylists = async () => {
-    setIsLoadingSpotifyPlaylists(true);
-    try {
-      const response = await fetch('/api/spotify/playlists', {
-        credentials: 'include',
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setSpotifyPlaylists(data.playlists || []);
-        setSpotifyPremiumRequired(false);
-      } else {
-        const errorData = await response.json();
-        console.error('Failed to fetch Spotify playlists', errorData);
-        setSpotifyPlaylists([]);
-        
-        // Check if Premium is required
-        if (errorData.premiumRequired) {
-          setSpotifyPremiumRequired(true);
-          setError(errorData.error);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch Spotify playlists', err);
-      setSpotifyPlaylists([]);
-    } finally {
-      setIsLoadingSpotifyPlaylists(false);
-    }
-  };
-
-  const searchSpotifyPlaylists = async () => {
-    if (!spotifySearchQuery.trim()) {
-      setSpotifySearchResults([]);
-      return;
-    }
-    
-    setIsSearchingSpotify(true);
+  // Load playlists from a Spotify user profile URL
+  const loadSpotifyProfilePlaylists = async (spotifyUserId: string) => {
+    setIsLoadingSpotifyProfile(true);
+    setSpotifyProfilePlaylists([]);
+    setSpotifyProfileName('');
     setError(null);
+    
     try {
       const response = await fetch(
-        `/api/spotify/search?q=${encodeURIComponent(spotifySearchQuery)}`,
+        `/api/import/spotify/user/${encodeURIComponent(spotifyUserId)}/playlists`,
         { credentials: 'include' }
       );
       
       if (response.ok) {
         const data = await response.json();
-        setSpotifySearchResults(data.playlists || []);
-        setSpotifyPremiumRequired(false);
+        const playlists: PopularPlaylist[] = (data.playlists || []).map((p: any) => ({
+          name: p.name,
+          url: p.id ? `https://open.spotify.com/playlist/${p.id}` : p.url,
+          description: p.trackCount ? `${p.trackCount} tracks` : undefined,
+          imageUrl: p.coverUrl,
+        }));
+        setSpotifyProfilePlaylists(playlists);
+        setSpotifyProfileName(data.displayName || spotifyUserId);
       } else {
-        const errorData = await response.json();
-        console.error('Failed to search Spotify playlists', errorData);
-        setSpotifySearchResults([]);
-        
-        // Check if Premium is required
-        if (errorData.premiumRequired) {
-          setSpotifyPremiumRequired(true);
-          setError(errorData.error);
-        } else {
-          setError('Failed to search Spotify playlists');
-        }
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData?.error?.message || 'Failed to load Spotify user playlists');
+        setSpotifyProfilePlaylists([]);
       }
     } catch (err) {
-      console.error('Failed to search Spotify playlists', err);
-      setError('Failed to search Spotify playlists');
-      setSpotifySearchResults([]);
+      console.error('Failed to load Spotify profile playlists', err);
+      setError('Failed to load Spotify user playlists');
+      setSpotifyProfilePlaylists([]);
     } finally {
-      setIsSearchingSpotify(false);
+      setIsLoadingSpotifyProfile(false);
     }
   };
 
@@ -410,9 +580,8 @@ export const ImportPage: FC = () => {
       return;
     }
 
-    // Spotify doesn't support search via scraping
+    // Spotify uses URL-based import (no search)
     if (activeSource === 'spotify') {
-      setError('Search is not available for Spotify. Please use the URL field to import a specific playlist or browse your playlists below.');
       return;
     }
 
@@ -950,6 +1119,19 @@ export const ImportPage: FC = () => {
     setRematchResults([]);
   };
 
+  // Track whether mousedown started on the backdrop
+  const backdropMouseDown = useRef(false);
+
+  // ESC key closes the rematch modal
+  useEffect(() => {
+    if (!rematchTrack) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleCloseRematch();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [rematchTrack]);
+
   const handleSearchRematch = async () => {
     if (!rematchQuery.trim()) return;
 
@@ -1212,29 +1394,6 @@ export const ImportPage: FC = () => {
     setScheduleRunTime('09:00'); // Reset run time
   };
 
-  const handleDisconnectSpotify = async () => {
-    if (!confirm('Disconnect Spotify? You will need to reconnect to access your playlists.')) {
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/spotify/disconnect', {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to disconnect');
-      }
-
-      setSpotifyConnected(false);
-      setShowSpotifySetup(true);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to disconnect Spotify');
-    }
-  };
-
   const handleScheduleConfirm = async () => {
     if (!schedulePlaylist) return;
     
@@ -1278,185 +1437,9 @@ export const ImportPage: FC = () => {
     }
   };
 
-  const handleSaveSpotifyCredentials = async () => {
-    // If credentials are already saved and user didn't enter new ones, just connect
-    if (spotifyHasCredentials && !spotifyClientId.trim() && !spotifyClientSecret.trim()) {
-      setIsSavingSpotify(true);
-      setError(null);
-      
-      try {
-        // Just initiate OAuth with existing credentials
-        const loginResponse = await fetch('/api/spotify/login', {
-          credentials: 'include',
-        });
-        const loginData = await loginResponse.json();
-        
-        if (loginData.authUrl) {
-          // Open OAuth in popup window instead of full redirect
-          const popup = window.open(loginData.authUrl, 'spotify_auth_popup', 'width=600,height=700,scrollbars=yes');
-          if (!popup) {
-            setError('Popup blocked. Please allow popups and try again.');
-            setIsSavingSpotify(false);
-            return;
-          }
-
-          // Listen for OAuth completion message
-          const handleMessage = (event: MessageEvent) => {
-            if (event.data?.type === 'spotify_oauth' && event.data.status === 'connected') {
-              window.removeEventListener('message', handleMessage);
-              popup.close();
-              setSpotifyConnected(true);
-              setIsSavingSpotify(false);
-              setShowSpotifySetup(false);
-              setError(null);
-              // Refresh Spotify playlists
-              if (activeSource === 'spotify') {
-                fetchSpotifyPlaylists();
-              }
-            } else if (event.data?.type === 'spotify_oauth' && event.data.status === 'error') {
-              window.removeEventListener('message', handleMessage);
-              popup.close();
-              setError(`Spotify connection failed: ${event.data.detail || 'unknown error'}`);
-              setIsSavingSpotify(false);
-            }
-          };
-          window.addEventListener('message', handleMessage);
-
-          // Poll to detect if popup was closed manually
-          const pollInterval = setInterval(() => {
-            if (popup.closed) {
-              clearInterval(pollInterval);
-              window.removeEventListener('message', handleMessage);
-              setIsSavingSpotify(false);
-            }
-          }, 500);
-        } else if (loginData.error) {
-          setError(loginData.error);
-          setIsSavingSpotify(false);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to connect to Spotify');
-        setIsSavingSpotify(false);
-      }
-      return;
-    }
-    
-    // Otherwise, validate and save new credentials
-    if (!spotifyClientId.trim()) {
-      setError('Please enter your Spotify Client ID');
-      return;
-    }
-
-    if (!spotifyClientSecret.trim()) {
-      setError('Please enter your Spotify Client Secret');
-      return;
-    }
-
-    setIsSavingSpotify(true);
-    setError(null);
-
-    try {
-      // First, test the credentials to make sure they're valid
-      const testResponse = await fetch('/api/spotify/test-credentials', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ 
-          clientId: spotifyClientId,
-          clientSecret: spotifyClientSecret 
-        }),
-      });
-
-      const testData = await testResponse.json();
-
-      if (!testData.valid) {
-        throw new Error(testData.error || 'Invalid credentials');
-      }
-
-      // Credentials are valid, now save them
-      const saveResponse = await fetch('/api/spotify/save-credentials', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ 
-          clientId: spotifyClientId,
-          clientSecret: spotifyClientSecret 
-        }),
-      });
-
-      const saveData = await saveResponse.json();
-
-      if (!saveResponse.ok) {
-        throw new Error(saveData.error || 'Failed to save credentials');
-      }
-
-      // Show success message briefly before opening popup
-      setError(null);
-      
-      // Small delay to show the "Connecting..." state
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Now initiate OAuth
-      const loginResponse = await fetch('/api/spotify/login', {
-        credentials: 'include',
-      });
-      const loginData = await loginResponse.json();
-      
-      if (loginData.authUrl) {
-        // Open OAuth in popup window instead of full redirect
-        const popup = window.open(loginData.authUrl, 'spotify_auth_popup', 'width=600,height=700,scrollbars=yes');
-        if (!popup) {
-          setError('Popup blocked. Please allow popups and try again.');
-          setIsSavingSpotify(false);
-          return;
-        }
-
-        // Listen for OAuth completion message
-        const handleMessage = (event: MessageEvent) => {
-          if (event.data?.type === 'spotify_oauth' && event.data.status === 'connected') {
-            window.removeEventListener('message', handleMessage);
-            popup.close();
-            setSpotifyConnected(true);
-            setIsSavingSpotify(false);
-            setShowSpotifySetup(false);
-            setError(null);
-            // Refresh Spotify playlists
-            if (activeSource === 'spotify') {
-              fetchSpotifyPlaylists();
-            }
-          } else if (event.data?.type === 'spotify_oauth' && event.data.status === 'error') {
-            window.removeEventListener('message', handleMessage);
-            popup.close();
-            setError(`Spotify connection failed: ${event.data.detail || 'unknown error'}`);
-            setIsSavingSpotify(false);
-          }
-        };
-        window.addEventListener('message', handleMessage);
-
-        // Poll to detect if popup was closed manually
-        const pollInterval = setInterval(() => {
-          if (popup.closed) {
-            clearInterval(pollInterval);
-            window.removeEventListener('message', handleMessage);
-            setIsSavingSpotify(false);
-          }
-        }, 500);
-      } else if (loginData.error) {
-        setError(loginData.error);
-        setIsSavingSpotify(false);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to connect to Spotify');
-      setIsSavingSpotify(false);
-    }
-  };
-
   return (
     <div className="page-container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', gap: '1rem', flexWrap: 'wrap' }}>
-        <h1 style={{ margin: 0 }}>Import Playlist</h1>
-        
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+      <div style={{ marginBottom: '2rem' }}>
           {/* Country Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
@@ -1482,261 +1465,129 @@ export const ImportPage: FC = () => {
               ))}
             </select>
           </div>
-          
-          {/* Refresh Button for Dynamic Playlists */}
-          {['deezer', 'youtube', 'apple'].includes(activeSource) && (
+      </div>
+
+      {/* Source Selection - at top of page */}
+      <div style={{ marginBottom: '2rem' }}>
+        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+          Select Source
+        </label>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {sources.map(source => (
             <button
-              className="btn btn-secondary"
-              onClick={() => fetchDynamicPlaylists(true)}
-              disabled={isLoadingDynamicPlaylists}
-              style={{
-                padding: '0.5rem 0.75rem',
-                fontSize: '0.875rem',
-                minWidth: 'auto',
+              key={source.id}
+              className={`btn ${activeSource === source.id ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => {
+                setActiveSource(source.id);
+                setUrl('');
+                setUsername('');
+                setFile(null);
+                setError(null);
+                setSearchResults([]);
               }}
-              title="Refresh popular playlists"
+              disabled={isImporting}
             >
-              {isLoadingDynamicPlaylists ? '⟳' : '↻'} Refresh
+              {source.name}
             </button>
-          )}
-          
-          {/* Spotify Connect Button */}
-          {activeSource === 'spotify' && !spotifyConnected && (
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowSpotifySetup(!showSpotifySetup)}
-              style={{ minWidth: '180px' }}
-            >
-              {showSpotifySetup ? 'Hide Setup' : 'Connect to Spotify'}
-            </button>
-          )}
-          
-          {activeSource === 'spotify' && spotifyConnected && (
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{
-                padding: '0.5rem 1rem',
-                backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                border: '1px solid var(--success)',
-                borderRadius: '4px',
-                color: 'var(--success)',
-                fontSize: '0.875rem',
-              }}>
-                ✓ Spotify Connected
-              </div>
-              <button
-                className="btn btn-secondary btn-small"
-                onClick={handleDisconnectSpotify}
-                title="Disconnect from Spotify"
-              >
-                Disconnect
-              </button>
-            </div>
-          )}
+          ))}
         </div>
       </div>
 
-      {/* Spotify Premium Requirement Notice - Always visible when Spotify is selected */}
+      {/* Spotify Saved Users Section */}
       {activeSource === 'spotify' && (
-        <div style={{
-          marginBottom: '1.5rem',
-          padding: '1rem',
-          backgroundColor: 'rgba(255, 152, 0, 0.1)',
-          border: '1px solid rgba(255, 152, 0, 0.5)',
-          borderRadius: '4px',
-          color: 'var(--text-primary)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-            <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>⚠️</span>
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                Spotify Premium Required
-              </div>
-              <div style={{ fontSize: '0.85rem', lineHeight: '1.5' }}>
-                The Spotify app owner (the account that created the Spotify Developer app) must have an active Spotify Premium subscription to browse and search playlists. Free accounts cannot access these features through the Spotify API.
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Spotify Setup Panel */}
-      {activeSource === 'spotify' && showSpotifySetup && !spotifyConnected && (
-        <div className="card" style={{ marginBottom: '2rem', backgroundColor: 'rgba(91, 155, 213, 0.05)' }}>
-          <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Setup Spotify Connection</h3>
+        <div className="card" style={{ marginBottom: '2rem' }}>
+          <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>
+            Spotify Users & Playlists
+          </h3>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+            Add Spotify usernames to browse their public playlists. No login required — just paste a username or profile URL.
+          </p>
           
-          {/* Premium Requirement Warning */}
-          <div style={{
-            marginBottom: '1.5rem',
-            padding: '1rem',
-            backgroundColor: 'rgba(255, 152, 0, 0.1)',
-            border: '1px solid rgba(255, 152, 0, 0.5)',
-            borderRadius: '4px',
-            color: 'var(--text-primary)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-              <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>⚠️</span>
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                  Spotify Premium Required
-                </div>
-                <div style={{ fontSize: '0.85rem', lineHeight: '1.5' }}>
-                  The Spotify app owner (the account that created the Spotify Developer app) must have an active Spotify Premium subscription to use this feature. Free accounts cannot access the Spotify API for playlist browsing and search.
-                </div>
-              </div>
-            </div>
+          {/* Add User Input */}
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+            <input
+              type="text"
+              value={newSpotifyUsername}
+              onChange={(e) => setNewSpotifyUsername(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  addSavedSpotifyUser();
+                }
+              }}
+              placeholder="Spotify username or profile URL"
+              disabled={isAddingSpotifyUser}
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                backgroundColor: 'var(--surface)',
+                color: 'var(--text-primary)',
+                fontSize: '0.875rem',
+              }}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={addSavedSpotifyUser}
+              disabled={isAddingSpotifyUser || !newSpotifyUsername.trim()}
+              style={{ minWidth: '100px' }}
+            >
+              {isAddingSpotifyUser ? 'Adding...' : 'Add User'}
+            </button>
           </div>
           
-          {spotifyHasCredentials && (
-            <div style={{
-              marginBottom: '1rem',
-              padding: '0.75rem',
-              backgroundColor: 'rgba(76, 175, 80, 0.1)',
-              border: '1px solid var(--success)',
-              borderRadius: '4px',
-              color: 'var(--success)',
-              fontSize: '0.875rem',
-            }}>
-              ✓ Credentials already saved. Click "Connect to Spotify" to authenticate.
+          {/* Saved Users Grid */}
+          {savedSpotifyUsers.length > 0 && (
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {savedSpotifyUsers.map(user => (
+                <div
+                  key={user.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.5rem 0.75rem',
+                    border: `1px solid ${selectedSavedUser === user.spotify_user_id ? 'var(--primary-color)' : 'var(--border-color)'}`,
+                    borderRadius: '20px',
+                    backgroundColor: selectedSavedUser === user.spotify_user_id ? 'rgba(91, 155, 213, 0.1)' : 'var(--surface)',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  onClick={() => selectSavedUser(user.spotify_user_id)}
+                  title={selectedSavedUser === user.spotify_user_id ? 'Click to deselect' : `Load playlists for ${user.display_name}`}
+                >
+                  <span style={{
+                    fontSize: '0.875rem',
+                    fontWeight: selectedSavedUser === user.spotify_user_id ? 600 : 400,
+                    color: selectedSavedUser === user.spotify_user_id ? 'var(--primary-color)' : 'var(--text-primary)',
+                  }}>
+                    {user.display_name}
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeSavedSpotifyUser(user.id);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '0 0.25rem',
+                      fontSize: '1rem',
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1,
+                    }}
+                    title="Remove user"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
           )}
           
-          <div style={{ marginBottom: '1.5rem' }}>
-            <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-              {spotifyHasCredentials ? 'Update your credentials or connect with existing ones:' : 'Follow these steps to connect your Spotify account:'}
-            </div>
-            
-            <ol style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginLeft: '1.25rem', lineHeight: '1.8' }}>
-              <li>
-                Go to <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary-color)', fontWeight: 500 }}>Spotify Developer Dashboard</a>
-              </li>
-              <li>Click <strong>"Create app"</strong> button</li>
-              <li>Fill in the form:
-                <ul style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
-                  <li>App name: <code style={{ backgroundColor: 'var(--surface)', padding: '0.125rem 0.25rem', borderRadius: '2px' }}>Playlist Lab</code></li>
-                  <li>Redirect URI: <code style={{ backgroundColor: 'var(--surface)', padding: '0.125rem 0.25rem', borderRadius: '2px', fontWeight: 'bold', color: 'var(--primary-color)' }}>http://127.0.0.1:3001/api/spotify/callback</code></li>
-                </ul>
-              </li>
-              <li>Click <strong>"Save"</strong></li>
-              <li>Click <strong>"Settings"</strong> and copy your <strong>Client ID</strong> and <strong>Client Secret</strong></li>
-              <li>Paste both values below and click <strong>"Connect"</strong></li>
-            </ol>
-            
-            <div style={{
-              marginTop: '1rem',
-              padding: '0.75rem',
-              backgroundColor: 'rgba(255, 193, 7, 0.1)',
-              border: '1px solid rgba(255, 193, 7, 0.3)',
-              borderRadius: '4px',
-              fontSize: '0.75rem',
-              color: 'var(--text-secondary)',
-            }}>
-              ⚠️ <strong>Important:</strong> The Redirect URI must be exactly <code style={{ backgroundColor: 'var(--surface)', padding: '0.125rem 0.25rem', borderRadius: '2px' }}>http://127.0.0.1:3001/api/spotify/callback</code> (not https, not localhost)
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-              Spotify Client ID
-            </label>
-            <input
-              type="text"
-              value={spotifyClientId}
-              onChange={(e) => setSpotifyClientId(e.target.value)}
-              placeholder="Paste your Client ID here"
-              disabled={isSavingSpotify}
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                backgroundColor: 'var(--surface)',
-                color: 'var(--text-primary)',
-                fontSize: '0.875rem',
-                marginBottom: '1rem',
-              }}
-            />
-            
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-              Spotify Client Secret
-            </label>
-            <input
-              type="password"
-              value={spotifyClientSecret}
-              onChange={(e) => setSpotifyClientSecret(e.target.value)}
-              placeholder="Paste your Client Secret here"
-              disabled={isSavingSpotify}
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                backgroundColor: 'var(--surface)',
-                color: 'var(--text-primary)',
-                fontSize: '0.875rem',
-              }}
-            />
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
-              🔒 Your credentials are encrypted before storage
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <button
-              className="btn btn-primary"
-              onClick={handleSaveSpotifyCredentials}
-              disabled={isSavingSpotify || (!spotifyHasCredentials && (!spotifyClientId.trim() || !spotifyClientSecret.trim()))}
-              style={{ flex: 1, minWidth: '200px' }}
-            >
-              {isSavingSpotify ? (
-                <>
-                  <span style={{ display: 'inline-block', marginRight: '0.5rem' }}>⏳</span>
-                  Connecting...
-                </>
-              ) : spotifyHasCredentials && !spotifyClientId.trim() && !spotifyClientSecret.trim() ? (
-                'Connect to Spotify'
-              ) : (
-                'Save & Connect to Spotify'
-              )}
-            </button>
-            <button
-              className="btn btn-secondary"
-              onClick={() => window.open('https://developer.spotify.com/dashboard', '_blank')}
-            >
-              Open Spotify Dashboard
-            </button>
-            {spotifyHasCredentials && (
-              <button
-                className="btn btn-secondary"
-                onClick={async () => {
-                  if (!confirm('Clear saved Spotify credentials? You will need to set them up again to use Spotify features.')) {
-                    return;
-                  }
-                  try {
-                    const response = await fetch('/api/spotify/disconnect', {
-                      method: 'DELETE',
-                      credentials: 'include',
-                    });
-                    if (!response.ok) {
-                      throw new Error('Failed to clear credentials');
-                    }
-                    setSpotifyHasCredentials(false);
-                    setSpotifyClientId('');
-                    setSpotifyClientSecret('');
-                    setShowSpotifySetup(false);
-                    setError(null);
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : 'Failed to clear credentials');
-                  }
-                }}
-                style={{ color: 'var(--error)' }}
-                title="Remove saved credentials"
-              >
-                Clear Credentials
-              </button>
-            )}
-          </div>
-          
-          {isSavingSpotify && (
+          {/* Loading Playlists Indicator */}
+          {isLoadingSpotifyProfile && selectedSavedUser && (
             <div style={{
               marginTop: '1rem',
               padding: '0.75rem',
@@ -1747,10 +1598,7 @@ export const ImportPage: FC = () => {
               fontSize: '0.875rem',
               textAlign: 'center',
             }}>
-              <div style={{ marginBottom: '0.5rem' }}>✓ Validating credentials with Spotify...</div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                This may take a few seconds
-              </div>
+              Loading playlists... This may take a moment for large profiles.
             </div>
           )}
         </div>
@@ -1758,31 +1606,96 @@ export const ImportPage: FC = () => {
 
       {!importResult ? (
         <>
-          {/* Source Selection */}
-          <div style={{ marginBottom: '2rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-              Select Source
-            </label>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              {sources.map(source => (
-                <button
-                  key={source.id}
-                  className={`btn ${activeSource === source.id ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => {
-                    setActiveSource(source.id);
-                    setUrl('');
-                    setUsername('');
-                    setFile(null);
-                    setError(null);
-                    setSearchResults([]);
-                  }}
-                  disabled={isImporting}
-                >
-                  {source.name}
-                </button>
-              ))}
+          {/* Favorites Section */}
+          {favoritePlaylists.filter(f => f.source === activeSource).length > 0 && (
+            <div style={{ marginBottom: '2rem' }}>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ color: '#f5c518' }}>★</span> Favorites
+              </h3>
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', 
+                gap: '0.75rem',
+              }}>
+                {favoritePlaylists
+                  .filter(f => f.source === activeSource)
+                  .map((fav) => {
+                    const playlist: PopularPlaylist = {
+                      name: fav.name,
+                      url: fav.source_url,
+                      description: fav.description && !/^0\s+tracks?$/.test(fav.description.trim()) ? fav.description : undefined,
+                      imageUrl: fav.image_url || undefined,
+                    };
+                    return (
+                      <div
+                        key={fav.id}
+                        className="card"
+                        style={{ 
+                          padding: '1rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          borderColor: 'rgba(245, 197, 24, 0.3)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                          <div style={{ fontWeight: 500, flex: 1, minWidth: 0 }}>{fav.name}</div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleFavorite(playlist);
+                            }}
+                            title="Remove from favorites"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontSize: '1.25rem',
+                              padding: '0 0.25rem',
+                              color: '#f5c518',
+                              lineHeight: 1,
+                              flexShrink: 0,
+                            }}
+                          >
+                            ★
+                          </button>
+                        </div>
+                        {playlist.description && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                            {playlist.description}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '0.5rem', marginTop: 'auto' }}>
+                          <button
+                            className="btn btn-primary btn-small"
+                            onClick={() => handlePopularClick(playlist)}
+                            disabled={isImporting}
+                            style={{ flex: 1 }}
+                          >
+                            Import
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-small"
+                            onClick={() => handleSchedule(playlist)}
+                            disabled={isImporting}
+                            style={{ flex: 1 }}
+                          >
+                            Schedule
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-small"
+                            onClick={() => handlePreview(playlist)}
+                            disabled={isImporting}
+                            style={{ flex: 1 }}
+                          >
+                            Preview
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Input Field - Moved to top */}
           {!['aria', 'billboard'].includes(activeSource) && (
@@ -1920,33 +1833,9 @@ export const ImportPage: FC = () => {
               </div>
             ) : !['aria', 'billboard'].includes(activeSource) ? (
               <div>
-                {/* Spotify Premium Required Warning */}
-                {activeSource === 'spotify' && spotifyConnected && spotifyPremiumRequired && (
-                  <div style={{
-                    marginBottom: '1rem',
-                    padding: '1rem',
-                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                    border: '1px solid rgba(244, 67, 54, 0.5)',
-                    borderRadius: '4px',
-                    color: 'var(--text-primary)',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-                      <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>🚫</span>
-                      <div>
-                        <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                          Spotify Premium Subscription Required
-                        </div>
-                        <div style={{ fontSize: '0.85rem', lineHeight: '1.5' }}>
-                          The Spotify app owner needs an active Premium subscription to browse and search playlists. Free accounts cannot access these features through the Spotify API.
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-                  {activeSource === 'spotify' && spotifyConnected 
-                    ? 'Search Spotify Playlists'
+                  {activeSource === 'spotify'
+                    ? 'Spotify Playlist URL'
                     : ['deezer', 'youtube'].includes(activeSource) 
                       ? `${currentSource?.name} URL or Search` 
                       : `${currentSource?.name} URL`}
@@ -1954,25 +1843,22 @@ export const ImportPage: FC = () => {
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input
                     type="text"
-                    value={activeSource === 'spotify' && spotifyConnected ? spotifySearchQuery : url}
+                    value={url}
                     onChange={(e) => {
-                      if (activeSource === 'spotify' && spotifyConnected) {
-                        setSpotifySearchQuery(e.target.value);
-                        // Clear search results when user clears input
-                        if (!e.target.value.trim()) {
-                          setSpotifySearchResults([]);
-                        }
-                      } else {
-                        setUrl(e.target.value);
-                        // Clear search results when user types
-                        if (searchResults.length > 0) {
-                          setSearchResults([]);
-                        }
+                      setUrl(e.target.value);
+                      // Clear search results when user types
+                      if (searchResults.length > 0) {
+                        setSearchResults([]);
+                      }
+                      // Clear Spotify profile playlists when URL changes
+                      if (spotifyProfilePlaylists.length > 0) {
+                        setSpotifyProfilePlaylists([]);
+                        setSpotifyProfileName('');
                       }
                     }}
                     placeholder={
-                      activeSource === 'spotify' && spotifyConnected
-                        ? 'Search for playlists on Spotify...'
+                      activeSource === 'spotify'
+                        ? 'https://open.spotify.com/playlist/...'
                         : ['deezer', 'youtube'].includes(activeSource) 
                           ? `${currentSource?.placeholder} or search for playlists` 
                           : currentSource?.placeholder
@@ -1981,8 +1867,14 @@ export const ImportPage: FC = () => {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        if (activeSource === 'spotify' && spotifyConnected && spotifySearchQuery.trim()) {
-                          searchSpotifyPlaylists();
+                        if (activeSource === 'spotify' && url.trim()) {
+                          // Check if it's a Spotify user profile URL
+                          const profileMatch = url.match(/open\.spotify\.com\/user\/([a-zA-Z0-9_-]+)/);
+                          if (profileMatch) {
+                            loadSpotifyProfilePlaylists(profileMatch[1]);
+                          } else {
+                            handleImport();
+                          }
                         } else if (['deezer', 'youtube'].includes(activeSource) && url.trim() && !url.includes('http')) {
                           handleSearch();
                         }
@@ -1997,16 +1889,6 @@ export const ImportPage: FC = () => {
                       color: 'var(--text-primary)',
                     }}
                   />
-                  {(activeSource === 'spotify' && spotifyConnected) && (
-                    <button
-                      className="btn btn-secondary"
-                      onClick={searchSpotifyPlaylists}
-                      disabled={isSearchingSpotify || !spotifySearchQuery.trim()}
-                      style={{ minWidth: '100px' }}
-                    >
-                      {isSearchingSpotify ? 'Searching...' : 'Search'}
-                    </button>
-                  )}
                   {['deezer', 'youtube'].includes(activeSource) && (
                     <button
                       className="btn btn-secondary"
@@ -2017,23 +1899,10 @@ export const ImportPage: FC = () => {
                       {isSearching ? 'Searching...' : 'Search'}
                     </button>
                   )}
-                  {activeSource === 'spotify' && spotifyConnected && (spotifySearchQuery || spotifySearchResults.length > 0) && (
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => {
-                        setSpotifySearchQuery('');
-                        setSpotifySearchResults([]);
-                      }}
-                      style={{ minWidth: '80px' }}
-                      title="Clear search"
-                    >
-                      Clear
-                    </button>
-                  )}
                 </div>
-                {activeSource === 'spotify' && spotifyConnected ? (
+                {activeSource === 'spotify' ? (
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
-                    Search Spotify's catalog for playlists by name or keywords
+                    Paste a playlist URL to import, or a user profile URL to browse their playlists
                   </div>
                 ) : ['deezer', 'youtube'].includes(activeSource) ? (
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
@@ -2044,7 +1913,7 @@ export const ImportPage: FC = () => {
             ) : null}
 
             {/* Optional Custom Playlist Name */}
-            {!['aria', 'billboard'].includes(activeSource) && !(activeSource === 'spotify' && spotifyConnected) && (
+            {!['aria', 'billboard'].includes(activeSource) && (
               <button
                 className="btn btn-primary"
                 onClick={() => handleImport()}
@@ -2791,24 +2660,20 @@ export const ImportPage: FC = () => {
 
               </div>
             </>
-          ) : (currentPopular.length > 0 || (activeSource === 'spotify' && isLoadingSpotifyPlaylists) || isLoadingDynamicPlaylists) && (
+          ) : (currentPopular.length > 0 || isLoadingDynamicPlaylists || spotifyProfilePlaylists.length > 0 || isLoadingSpotifyProfile) && (
             <>
-              {/* Spotify Search Results Section */}
-              {activeSource === 'spotify' && spotifySearchResults.length > 0 && (
+              {/* Spotify Profile Playlists Section */}
+              {activeSource === 'spotify' && (isLoadingSpotifyProfile || spotifyProfilePlaylists.length > 0) && (
                 <>
                   <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', fontWeight: 500 }}>
-                    Search Results ({spotifySearchResults.length})
+                    {isLoadingSpotifyProfile 
+                      ? `Loading playlists for ${spotifyProfileName || 'user'}...`
+                      : `${spotifyProfileName || 'User'}'s Playlists (${spotifyProfilePlaylists.length})`}
                   </h3>
                   
-                  {isSearchingSpotify ? (
-                    <div style={{ 
-                      textAlign: 'center', 
-                      padding: '2rem',
-                      color: 'var(--text-secondary)',
-                      fontSize: '0.875rem',
-                      marginBottom: '1rem',
-                    }}>
-                      Searching Spotify...
+                  {isLoadingSpotifyProfile ? (
+                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                      Loading playlists from Spotify profile (this may take a moment)...
                     </div>
                   ) : (
                     <div style={{ 
@@ -2817,7 +2682,7 @@ export const ImportPage: FC = () => {
                       gap: '0.75rem',
                       marginBottom: '2rem',
                     }}>
-                      {spotifySearchResults.map((playlist, idx) => (
+                      {spotifyProfilePlaylists.map((playlist, idx) => (
                         <div
                           key={idx}
                           className="card"
@@ -2825,23 +2690,32 @@ export const ImportPage: FC = () => {
                             padding: '1rem',
                             display: 'flex',
                             flexDirection: 'column',
-                            cursor: 'pointer',
-                            transition: 'transform 0.2s, box-shadow 0.2s',
-                          }}
-                          onClick={() => {
-                            setUrl(playlist.url);
-                            setPlaylistName(playlist.name);
-                            handleImport(playlist.url);
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.transform = 'translateY(-2px)';
-                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.transform = 'translateY(0)';
-                            e.currentTarget.style.boxShadow = '';
+                            borderColor: selectedSavedUser ? 'rgba(91, 155, 213, 0.2)' : undefined,
                           }}
                         >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                            <div style={{ fontWeight: 500, flex: 1, minWidth: 0 }}>{playlist.name}</div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleFavorite(playlist);
+                              }}
+                              title={isFavorited(playlist.url) ? 'Remove from favorites' : 'Add to favorites'}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontSize: '1.25rem',
+                                padding: '0 0.25rem',
+                                color: isFavorited(playlist.url) ? '#f5c518' : 'var(--text-secondary)',
+                                opacity: isFavorited(playlist.url) ? 1 : 0.5,
+                                lineHeight: 1,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {isFavorited(playlist.url) ? '★' : '☆'}
+                            </button>
+                          </div>
                           {playlist.imageUrl && (
                             <img 
                               src={playlist.imageUrl} 
@@ -2851,19 +2725,40 @@ export const ImportPage: FC = () => {
                                 aspectRatio: '1', 
                                 objectFit: 'cover', 
                                 borderRadius: '4px',
-                                marginBottom: '0.75rem',
+                                marginBottom: '0.5rem',
                               }}
                             />
                           )}
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 500, marginBottom: '0.25rem', fontSize: '0.9rem' }}>
-                              {playlist.name}
+                          {playlist.description && (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                              {playlist.description}
                             </div>
-                            {playlist.description && (
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                {playlist.description}
-                              </div>
-                            )}
+                          )}
+                          <div style={{ display: 'flex', gap: '0.5rem', marginTop: 'auto', flexWrap: 'wrap' }}>
+                            <button
+                              className="btn btn-secondary btn-small"
+                              onClick={() => handlePreview(playlist)}
+                              disabled={isImporting}
+                              style={{ flex: 1, minWidth: '60px' }}
+                            >
+                              Preview
+                            </button>
+                            <button
+                              className="btn btn-primary btn-small"
+                              onClick={() => handlePopularClick(playlist)}
+                              disabled={isImporting}
+                              style={{ flex: 1, minWidth: '60px' }}
+                            >
+                              Import
+                            </button>
+                            <button
+                              className="btn btn-secondary btn-small"
+                              onClick={() => handleSchedule(playlist)}
+                              disabled={isImporting}
+                              style={{ flex: 1, minWidth: '70px' }}
+                            >
+                              Schedule
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -2872,124 +2767,139 @@ export const ImportPage: FC = () => {
                 </>
               )}
 
-              {/* User Playlists Section */}
-              <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', fontWeight: 500 }}>
-                {activeSource === 'spotify' 
-                  ? `Your Spotify Playlists (${spotifyPlaylists.length})`
-                  : 'Popular Playlists'}
-              </h3>
-              
-              {(isLoadingSpotifyPlaylists || isLoadingDynamicPlaylists) ? (
-                <div style={{ 
-                  textAlign: 'center', 
-                  padding: '2rem',
-                  color: 'var(--text-secondary)',
-                  fontSize: '0.875rem',
-                  marginBottom: '1rem',
-                }}>
-                  Loading playlists...
-                </div>
-              ) : currentPopular.length === 0 && activeSource === 'spotify' ? (
-                <div style={{ 
-                  textAlign: 'center', 
-                  padding: '2rem',
-                  color: 'var(--text-secondary)',
-                  fontSize: '0.875rem',
-                  marginBottom: '1rem',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '4px',
-                }}>
-                  No playlists found in your Spotify account
-                </div>
-              ) : currentPopular.length === 0 && ['amazon', 'apple'].includes(activeSource) ? (
-                <div style={{ 
-                  textAlign: 'center', 
-                  padding: '2rem',
-                  color: 'var(--text-secondary)',
-                  fontSize: '0.875rem',
-                  marginBottom: '1rem',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '4px',
-                  backgroundColor: 'rgba(255, 193, 7, 0.05)',
-                }}>
-                  <div style={{ marginBottom: '0.5rem', fontWeight: 500 }}>
-                    {activeSource === 'amazon' ? 'Amazon Music' : 'Apple Music'} popular playlists are not available
-                  </div>
-                  <div>
-                    These services require browser automation to access. You can still import playlists by pasting a direct URL above.
-                  </div>
-                </div>
-              ) : currentPopular.length === 0 ? (
-                <div style={{ 
-                  textAlign: 'center', 
-                  padding: '2rem',
-                  color: 'var(--text-secondary)',
-                  fontSize: '0.875rem',
-                  marginBottom: '1rem',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '4px',
-                }}>
-                  No popular playlists found. Try refreshing or selecting a different country.
-                </div>
-              ) : (
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', 
-                  gap: '0.75rem',
-                  marginBottom: '1rem',
-                }}>
-                  {currentPopular.map((playlist, idx) => (
-                      <div
-                        key={`${activeSource}-${playlist.url}-${idx}`}
-                        className="card"
-                        style={{ 
-                          padding: '1rem',
-                          display: 'flex',
-                          flexDirection: 'column',
-                        }}
-                      >
-                        <div style={{ flex: 1, marginBottom: '0.75rem' }}>
-                          <div style={{ fontWeight: 500, marginBottom: '0.5rem' }}>{playlist.name}</div>
-                          {playlist.description && (
-                            <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-                              {playlist.description}
-                            </div>
-                          )}
-                          {(playlist.videoCount || playlist.count || playlist.trackCount) && (
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                              {playlist.videoCount || playlist.count || playlist.trackCount} tracks
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                          <button
-                            className="btn btn-secondary btn-small"
-                            onClick={() => handlePreview(playlist)}
-                            disabled={isImporting}
-                            style={{ flex: 1, minWidth: '60px' }}
-                          >
-                            Preview
-                          </button>
-                          <button
-                            className="btn btn-primary btn-small"
-                            onClick={() => handlePopularClick(playlist)}
-                            disabled={isImporting}
-                            style={{ flex: 1, minWidth: '60px' }}
-                          >
-                            Import
-                          </button>
-                          <button
-                            className="btn btn-secondary btn-small"
-                            onClick={() => handleSchedule(playlist)}
-                            disabled={isImporting}
-                            style={{ flex: 1, minWidth: '70px' }}
-                          >
-                            Schedule
-                          </button>
-                        </div>
+              {/* Popular Playlists Section - only for non-Spotify sources */}
+              {activeSource !== 'spotify' && (
+                <>
+                  <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', fontWeight: 500 }}>
+                    Popular Playlists
+                  </h3>
+                                
+                  {isLoadingDynamicPlaylists ? (
+                    <div style={{ 
+                      textAlign: 'center', 
+                      padding: '2rem',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.875rem',
+                      marginBottom: '1rem',
+                    }}>
+                      Loading playlists...
+                    </div>
+                  ) : currentPopular.length === 0 && ['amazon', 'apple'].includes(activeSource) ? (
+                    <div style={{ 
+                      textAlign: 'center', 
+                      padding: '2rem',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.875rem',
+                      marginBottom: '1rem',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '4px',
+                      backgroundColor: 'rgba(255, 193, 7, 0.05)',
+                    }}>
+                      <div style={{ marginBottom: '0.5rem', fontWeight: 500 }}>
+                        {activeSource === 'amazon' ? 'Amazon Music' : 'Apple Music'} popular playlists are not available
                       </div>
-                    ))}
-                </div>
+                      <div>
+                        These services require browser automation to access. You can still import playlists by pasting a direct URL above.
+                      </div>
+                    </div>
+                  ) : currentPopular.length === 0 ? (
+                    <div style={{ 
+                      textAlign: 'center', 
+                      padding: '2rem',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.875rem',
+                      marginBottom: '1rem',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '4px',
+                    }}>
+                      No popular playlists found. Try refreshing or selecting a different country.
+                    </div>
+                  ) : (
+                    <div style={{ 
+                      display: 'grid', 
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', 
+                      gap: '0.75rem',
+                      marginBottom: '1rem',
+                    }}>
+                      {currentPopular.map((playlist, idx) => (
+                          <div
+                            key={`${activeSource}-${playlist.url}-${idx}`}
+                            className="card"
+                            style={{ 
+                              padding: '1rem',
+                              display: 'flex',
+                              flexDirection: 'column',
+                            }}
+                          >
+                            <div style={{ flex: 1, marginBottom: '0.75rem' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                                <div style={{ fontWeight: 500, marginBottom: '0.5rem', flex: 1, minWidth: 0 }}>{playlist.name}</div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleFavorite(playlist);
+                                  }}
+                                  title={isFavorited(playlist.url) ? 'Remove from favorites' : 'Add to favorites'}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontSize: '1.25rem',
+                                    padding: '0 0.25rem',
+                                    color: isFavorited(playlist.url) ? '#f5c518' : 'var(--text-secondary)',
+                                    opacity: isFavorited(playlist.url) ? 1 : 0.4,
+                                    transition: 'opacity 0.2s, color 0.2s',
+                                    lineHeight: 1,
+                                    flexShrink: 0,
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.opacity = isFavorited(playlist.url) ? '1' : '0.4'; }}
+                                >
+                                  {isFavorited(playlist.url) ? '★' : '☆'}
+                                </button>
+                              </div>
+                              {playlist.description && (
+                                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                                  {playlist.description}
+                                </div>
+                              )}
+                              {(playlist.videoCount || playlist.count || playlist.trackCount) && (
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                  {playlist.videoCount || playlist.count || playlist.trackCount} tracks
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <button
+                                className="btn btn-secondary btn-small"
+                                onClick={() => handlePreview(playlist)}
+                                disabled={isImporting}
+                                style={{ flex: 1, minWidth: '60px' }}
+                              >
+                                Preview
+                              </button>
+                              <button
+                                className="btn btn-primary btn-small"
+                                onClick={() => handlePopularClick(playlist)}
+                                disabled={isImporting}
+                                style={{ flex: 1, minWidth: '60px' }}
+                              >
+                                Import
+                              </button>
+                              <button
+                                className="btn btn-secondary btn-small"
+                                onClick={() => handleSchedule(playlist)}
+                                disabled={isImporting}
+                                style={{ flex: 1, minWidth: '70px' }}
+                              >
+                                Schedule
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -3578,14 +3488,17 @@ export const ImportPage: FC = () => {
           justifyContent: 'center',
           zIndex: 1000,
           padding: '1rem',
-        }}>
+        }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) backdropMouseDown.current = true; }}
+          onMouseUp={(e) => { if (e.target === e.currentTarget && backdropMouseDown.current) handleCloseRematch(); backdropMouseDown.current = false; }}
+        >
           <div className="card" style={{
-            maxWidth: '800px',
+            maxWidth: '950px',
             width: '100%',
             maxHeight: '80vh',
             display: 'flex',
             flexDirection: 'column',
-          }}>
+          }} onMouseDown={(e) => { backdropMouseDown.current = false; e.stopPropagation(); }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h2 style={{ margin: 0 }}>Manual Rematch</h2>
               <button

@@ -1152,6 +1152,274 @@ export async function scrapeBillboardChart(url: string, progressEmitter?: EventE
 
 
 /**
+ * Scrape Spotify playlist using Puppeteer with DOM scrolling
+ * Extracts up to ~1000+ tracks by loading the main playlist page and scrolling through the track list.
+ * No login required for public playlists.
+ * 
+ * Strategy:
+ * 1. Load main playlist page with a tall viewport (renders ~82 tracks initially)
+ * 2. Extract track names/artists from DOM aria-labels
+ * 3. Scroll the track list to trigger lazy-loading of more tracks
+ * 4. Repeat until no new tracks appear
+ */
+export async function scrapeSpotifyWithBrowser(url: string, progressEmitter?: EventEmitter): Promise<ExternalPlaylist> {
+  debugLog('[Spotify Browser] ========== SCRAPING STARTED ==========');
+  debugLog('[Spotify Browser] URL:', url);
+  logger.info(`[Spotify Browser] Scraping: ${url}`);
+  
+  progressEmitter?.emit('progress', {
+    type: 'progress',
+    phase: 'scraping',
+    current: 0,
+    total: 0,
+    currentTrackName: 'Loading Spotify playlist...'
+  });
+  
+  // Extract playlist ID from URL
+  const playlistMatch = url.match(/playlist\/([a-zA-Z0-9]+)/);
+  if (!playlistMatch) {
+    throw new Error('Invalid Spotify playlist URL');
+  }
+  const playlistId = playlistMatch[1];
+  
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+  
+  try {
+    // Set user agent to avoid detection
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    // Use a tall viewport to render more tracks initially (~82 vs ~30 with default)
+    await page.setViewport({ width: 1920, height: 4000 });
+    
+    // Navigate to the main playlist page (not embed - embed caps at 100)
+    const mainUrl = `https://open.spotify.com/playlist/${playlistId}`;
+    await page.goto(mainUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+    
+    // Wait for track list to render
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Get playlist name from page title
+    const pageTitle = await page.title();
+    const playlistName = pageTitle.replace(/ - playlist by .+ \| Spotify$/, '') || 'Spotify Playlist';
+    logger.info(`[Spotify Browser] Page title: ${pageTitle}`);
+    
+    // Extract tracks from DOM using aria-labels on the "more options" and "play" buttons
+    const extractVisibleTracks = async () => {
+      return await page.evaluate(() => {
+        const tracks: Array<{ title: string; artist: string }> = [];
+        const rows = document.querySelectorAll('[data-testid="tracklist-row"]');
+        rows.forEach(row => {
+          // Try "More options for X by Y" aria-label
+          const moreBtn = row.querySelector('[aria-label*="More options for"]');
+          if (moreBtn) {
+            const label = moreBtn.getAttribute('aria-label') || '';
+            const match = label.match(/More options for (.+) by (.+)/);
+            if (match) {
+              tracks.push({ title: match[1], artist: match[2] });
+              return;
+            }
+          }
+          // Fallback: "Play X by Y" aria-label
+          const playBtn = row.querySelector('[aria-label*="Play "]');
+          if (playBtn) {
+            const label = playBtn.getAttribute('aria-label') || '';
+            const match = label.match(/Play (.+) by (.+)/);
+            if (match) {
+              tracks.push({ title: match[1], artist: match[2] });
+            }
+          }
+        });
+        return tracks;
+      });
+    };
+    
+    // Use a Map to deduplicate tracks (keyed by title|artist)
+    const allTracks = new Map<string, { title: string; artist: string }>();
+    
+    // Extract initial tracks
+    const initialTracks = await extractVisibleTracks() as Array<{ title: string; artist: string }>;
+    initialTracks.forEach((t: { title: string; artist: string }) => allTracks.set(`${t.title}|${t.artist}`, t));
+    logger.info(`[Spotify Browser] Initial tracks: ${allTracks.size}`);
+    
+    progressEmitter?.emit('progress', {
+      type: 'progress',
+      phase: 'scraping',
+      current: allTracks.size,
+      total: 0,
+      currentTrackName: `Found ${allTracks.size} tracks, scrolling for more...`
+    });
+    
+    // Scroll through the track list to load more
+    let lastCount = allTracks.size;
+    let noProgressCount = 0;
+    
+    for (let scroll = 0; scroll < 150; scroll++) {
+      // Scroll all scrollable containers
+      await page.evaluate(() => {
+        document.querySelectorAll('div').forEach(el => {
+          if (el.scrollHeight > el.clientHeight + 100) {
+            el.scrollBy(0, 800);
+          }
+        });
+        window.scrollBy(0, 800);
+      });
+      
+      // Small delay for lazy-loading
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Extract newly visible tracks
+      const visible = await extractVisibleTracks() as Array<{ title: string; artist: string }>;
+      visible.forEach((t: { title: string; artist: string }) => allTracks.set(`${t.title}|${t.artist}`, t));
+      
+      // Progress update every 10 scrolls
+      if (scroll % 10 === 9) {
+        logger.info(`[Spotify Browser] Scroll ${scroll + 1}: ${allTracks.size} unique tracks`);
+        progressEmitter?.emit('progress', {
+          type: 'progress',
+          phase: 'scraping',
+          current: allTracks.size,
+          total: 0,
+          currentTrackName: `Found ${allTracks.size} tracks...`
+        });
+        
+        if (allTracks.size === lastCount) {
+          noProgressCount++;
+          if (noProgressCount >= 2) {
+            logger.info('[Spotify Browser] No new tracks after 20 scrolls, stopping');
+            break;
+          }
+        } else {
+          noProgressCount = 0;
+        }
+        lastCount = allTracks.size;
+      }
+    }
+    
+    // Try to get cover art from the page
+    let coverUrl: string | undefined;
+    try {
+      coverUrl = await page.evaluate(() => {
+        const img = document.querySelector('[data-testid="playlist-image"] img') || 
+                    document.querySelector('img[alt*="playlist"]') ||
+                    document.querySelector('[data-encore-id="playlist"] img');
+        return img?.getAttribute('src') || undefined;
+      });
+    } catch {}
+    
+    const tracks = Array.from(allTracks.values());
+    
+    logger.info(`[Spotify Browser] Successfully scraped ${tracks.length} tracks from ${playlistName}`);
+    progressEmitter?.emit('progress', {
+      type: 'progress',
+      phase: 'scraping',
+      current: tracks.length,
+      total: tracks.length,
+      currentTrackName: `Found ${tracks.length} tracks`
+    });
+    
+    return {
+      id: `spotify-${playlistId}`,
+      name: playlistName,
+      description: '',
+      source: 'spotify',
+      tracks,
+      coverUrl,
+    };
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+
+/**
+ * Scrape all public playlists from a Spotify user profile
+ * Navigates to /user/{userId}/playlists with a tall viewport to load all playlists at once.
+ * No login required.
+ */
+export async function scrapeSpotifyUserPlaylists(userId: string): Promise<Array<{ name: string; url: string; imageUrl?: string }>> {
+  debugLog('[Spotify Browser] Scraping user playlists for:', userId);
+  logger.info(`[Spotify Browser] Scraping user playlists: ${userId}`);
+  
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+  
+  try {
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setViewport({ width: 1920, height: 4000 });
+    
+    const profileUrl = `https://open.spotify.com/user/${encodeURIComponent(userId)}/playlists`;
+    await page.goto(profileUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Check if page loaded successfully
+    const pageTitle = await page.title();
+    if (pageTitle.includes('Page not found') || pageTitle.includes('404')) {
+      throw new Error(`Spotify user "${userId}" not found`);
+    }
+    
+    // Extract all playlist links
+    const playlists = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll('a[href*="/playlist/"]')).map(a => {
+        const el = a as HTMLAnchorElement;
+        return {
+          href: el.getAttribute('href') || '',
+          name: (el.innerText || '').trim().split('\n')[0] || '',
+        };
+      }).filter(l => l.name && l.href && !l.href.includes('?'));
+      
+      // Deduplicate by href
+      const seen = new Set<string>();
+      return links.filter(l => {
+        if (seen.has(l.href)) return false;
+        seen.add(l.href);
+        return true;
+      }).map(l => ({
+        name: l.name,
+        url: l.href.startsWith('/') ? `https://open.spotify.com${l.href}` : l.href,
+      }));
+    }) as Array<{ name: string; url: string }>;
+    
+    // Scroll a bit to load any lazily-loaded playlists
+    if (playlists.length < 10) {
+      await page.evaluate(() => {
+        document.querySelectorAll('div').forEach(el => {
+          if (el.scrollHeight > el.clientHeight + 100) el.scrollBy(0, 600);
+        });
+      });
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
+    // Re-extract after potential scroll
+    const allPlaylists = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll('a[href*="/playlist/"]')).map(a => {
+        const el = a as HTMLAnchorElement;
+        return {
+          href: el.getAttribute('href') || '',
+          name: (el.innerText || '').trim().split('\n')[0] || '',
+        };
+      }).filter(l => l.name && l.href && !l.href.includes('?'));
+      
+      const seen = new Set<string>();
+      return links.filter(l => {
+        if (seen.has(l.href)) return false;
+        seen.add(l.href);
+        return true;
+      }).map(l => ({
+        name: l.name,
+        url: l.href.startsWith('/') ? `https://open.spotify.com${l.href}` : l.href,
+      }));
+    }) as Array<{ name: string; url: string }>;
+    
+    logger.info(`[Spotify Browser] Found ${allPlaylists.length} playlists for user ${userId}`);
+    return allPlaylists;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+
+/**
  * Clean up browser instance
  */
 export async function closeBrowser() {

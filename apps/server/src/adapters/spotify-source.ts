@@ -80,15 +80,16 @@ async function fetchUserPlaylistsUnauthenticated(userId: string): Promise<{ disp
     const playlistsUrl = `https://open.spotify.com/user/${userId}/playlists`;
     logger.info('[SpotifySourceAdapter] Launching browser to fetch playlists', { userId, url: playlistsUrl });
     
-    // Launch headless browser
+    // Launch headless browser (Puppeteer 24+ uses new headless by default)
     browser = await puppeteer.default.launch({
-      headless: true,
+      headless: 'shell' as any,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
+        '--lang=en-US,en',
       ],
     });
     
@@ -97,213 +98,400 @@ async function fetchUserPlaylistsUnauthenticated(userId: string): Promise<{ disp
     // Set a realistic user agent
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
-    // Navigate to the playlists page
+    // Set locale headers
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+    });
+    
+    // Use a standard viewport
+    await page.setViewport({ width: 1920, height: 1080 });
+    
+    // Override browser locale to English (prevents Spotify language dialog)
+    await page.evaluateOnNewDocument(`
+      Object.defineProperty(navigator, 'language', { get: function() { return 'en-US'; } });
+      Object.defineProperty(navigator, 'languages', { get: function() { return ['en-US', 'en']; } });
+    `);
+    
+    // Step 1: Visit Spotify homepage first to establish locale cookies
+    // This prevents the "Choose a language" overlay on subsequent pages
+    logger.info('[SpotifySourceAdapter] Visiting homepage to establish locale cookies');
+    await page.goto('https://open.spotify.com/', { 
+      waitUntil: 'domcontentloaded',
+      timeout: 15000 
+    }).catch(() => {
+      logger.warn('[SpotifySourceAdapter] Homepage load failed, continuing anyway');
+    });
+    
+    // Wait for homepage to render
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Dismiss language dialog on homepage if present (clicks English)
+    await page.evaluate(`
+      (function() {
+        var all = document.querySelectorAll('button, a, [role="button"], [role="option"], li, span');
+        for (var i = 0; i < all.length; i++) {
+          var t = (all[i].textContent || '').trim();
+          if (/^english/i.test(t) && t.length < 30) { all[i].click(); return; }
+        }
+      })()
+    `);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Step 2: Set locale cookies explicitly
+    await page.setCookie(
+      { name: 'sp_lg', value: 'en', domain: '.spotify.com', path: '/' },
+      { name: 'sp_locale', value: 'en', domain: '.spotify.com', path: '/' },
+      { name: 'sp_m', value: 'en', domain: '.spotify.com', path: '/' },
+    );
+    
+    // Step 3: Navigate to the user's playlists page
     await page.goto(playlistsUrl, { 
-      waitUntil: 'networkidle2',
+      waitUntil: 'domcontentloaded',
       timeout: 30000 
     });
     
+    // Wait for Spotify's JS to render the page (including any language dialog)
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Step 4: Check for "Choose a language" dialog and force-dismiss it
+    const pageTitle = await page.title();
+    logger.info('[SpotifySourceAdapter] Page loaded', { userId, title: pageTitle });
+    
+    // Diagnostic: log page structure to understand what's rendered
+    const pageDiag = await page.evaluate(`
+      (function() {
+        var r = {};
+        r.title = document.title;
+        var h1s = document.querySelectorAll('h1');
+        r.h1s = [];
+        for (var i = 0; i < h1s.length; i++) r.h1s.push((h1s[i].textContent || '').trim().substring(0, 100));
+        var btns = document.querySelectorAll('button');
+        r.btnCount = btns.length;
+        r.btnTexts = [];
+        for (var i = 0; i < Math.min(15, btns.length); i++) r.btnTexts.push((btns[i].textContent || '').trim().substring(0, 50));
+        r.bodyLen = (document.body.textContent || '').length;
+        r.hasChoose = (document.body.textContent || '').indexOf('Choose') !== -1;
+        r.hasLanguage = (document.body.textContent || '').indexOf('language') !== -1;
+        r.visibleText = (document.body.textContent || '').replace(/\\s+/g, ' ').trim().substring(0, 500);
+        return r;
+      })()
+    `);
+    logger.info('[SpotifySourceAdapter] Page diagnostics', { diag: pageDiag });
+    
+    // Check for language dialog using multiple methods
+    const hasLangDialog = await page.evaluate(`
+      (function() {
+        var t = document.body.textContent || '';
+        if (t.indexOf('Choose a language') !== -1) return true;
+        if (t.indexOf('choose a language') !== -1) return true;
+        if (t.indexOf('Sprache') !== -1) return true;
+        if (t.indexOf('langue') !== -1) return true;
+        var h1s = document.querySelectorAll('h1');
+        for (var i = 0; i < h1s.length; i++) {
+          var h = (h1s[i].textContent || '').trim().toLowerCase();
+          if (h === 'choose a language' || h.indexOf('choose a language') !== -1 || h === 'sprache wählen') return true;
+        }
+        return false;
+      })()
+    `) as boolean;
+    
+    logger.info('[SpotifySourceAdapter] Language dialog check', { hasLangDialog });
+    
+    if (hasLangDialog) {
+      logger.info('[SpotifySourceAdapter] Language selector detected, attempting to dismiss');
+      
+      // Try to click English button
+      const dismissResult = await page.evaluate(`
+        (function() {
+          var results = [];
+          var allClickable = document.querySelectorAll('button, a, [role="button"], [role="option"], [role="menuitem"], li, span');
+          for (var i = 0; i < allClickable.length; i++) {
+            var text = (allClickable[i].textContent || '').trim();
+            if (/^english(\\s*\\(.*\\))?$/i.test(text) || text.toLowerCase() === 'english') {
+              allClickable[i].click();
+              results.push('clicked: ' + text);
+              return results;
+            }
+          }
+          for (var i = 0; i < allClickable.length; i++) {
+            var text = (allClickable[i].textContent || '').trim().toLowerCase();
+            if (text.indexOf('english') !== -1 && text.length < 30) {
+              allClickable[i].click();
+              results.push('partial: ' + text);
+              return results;
+            }
+          }
+          results.push('no english button found, total clickable: ' + allClickable.length);
+          return results;
+        })()
+      `) as string[];
+      
+      logger.info('[SpotifySourceAdapter] Language dismiss attempt', { results: dismissResult });
+      
+      // Wait for navigation after clicking
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+      
+      // Set locale cookies and API call
+      await page.evaluate(`try{fetch('https://spclient.wg.spotify.com/user-customization-service/v1/customization',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({preferred_language:'en'}),credentials:'include'}).catch(function(){})}catch(e){};document.cookie='sp_lg=en;domain=.spotify.com;path=/;max-age=31536000';document.cookie='sp_locale=en;domain=.spotify.com;path=/;max-age=31536000';`);
+      
+      // Re-navigate to the playlists page
+      await page.goto(playlistsUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+    
+    // Force-remove any remaining overlay/modal elements that might block scrolling
+    await page.evaluate(`
+      (function() {
+        // Remove elements that look like full-page overlays or modals
+        var allDivs = document.querySelectorAll('div');
+        for (var i = 0; i < allDivs.length; i++) {
+          var el = allDivs[i];
+          var style = getComputedStyle(el);
+          var text = (el.textContent || '').substring(0, 200);
+          // Check if it's a full-page overlay containing language selection text
+          if ((style.position === 'fixed' || style.position === 'absolute') &&
+              style.zIndex && parseInt(style.zIndex) > 100 &&
+              el.clientHeight > window.innerHeight * 0.5 &&
+              (text.indexOf('Choose') !== -1 || text.indexOf('language') !== -1 || text.indexOf('Sprache') !== -1)) {
+            el.remove();
+          }
+        }
+      })()
+    `);
+    
     // Wait for the page to load playlists
     await page.waitForSelector('a[href*="/playlist/"]', { 
-      timeout: 10000 
+      timeout: 15000 
     }).catch(() => {
-      logger.warn('[SpotifySourceAdapter] Playlist links not found, page may be empty or private', { userId });
+      logger.warn('[SpotifySourceAdapter] Playlist links not found after language handling', { userId });
     });
+
+    // Extract display name from the page title
+    const displayName = await page.evaluate(`
+      (function() {
+        var t = document.querySelector('title');
+        if (t && t.textContent) {
+          var m1 = t.textContent.match(/^(.+?)'s Playlists/);
+          if (m1) return m1[1];
+          var m2 = t.textContent.match(/^(.+?)\\s+on\\s+Spotify$/i);
+          if (m2) return m2[1];
+        }
+        var h1s = document.querySelectorAll('h1');
+        for (var i = 0; i < h1s.length; i++) {
+          var txt = (h1s[i].textContent || '').trim();
+          if (txt && txt !== 'Public Playlists' && txt !== 'Your Library' && txt !== 'Playlists' && txt.indexOf('Spotify') === -1 && txt.length > 0 && txt.length < 100) return txt;
+        }
+        return '';
+      })()
+    `) as string;
     
-    // Scroll to load all playlists (Spotify uses lazy loading)
-    logger.info('[SpotifySourceAdapter] Scrolling to load all playlists', { userId });
+    logger.info('[SpotifySourceAdapter] Display name', { userId, displayName });
     
-    let previousCount = 0;
+    // If display name is "Choose a language" or similar, the dialog is still blocking the page
+    if (displayName && /choose|language|sprache|langue|idioma/i.test(displayName)) {
+      logger.warn('[SpotifySourceAdapter] Dialog still present after dismissal attempts, force-removing');
+      
+      // Try clicking any element containing "English" text
+      const forceClick = await page.evaluate(`
+        (function() {
+          var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+          while (walker.nextNode()) {
+            if (/english/i.test(walker.currentNode.textContent)) {
+              var el = walker.currentNode.parentElement;
+              while (el && el.tagName !== 'BUTTON' && el.tagName !== 'A' && el.tagName !== 'LI') el = el.parentElement;
+              if (el) { el.click(); return 'clicked parent: ' + el.tagName; }
+              walker.currentNode.parentElement.click();
+              return 'clicked text parent';
+            }
+          }
+          return 'no english text found';
+        })()
+      `) as string;
+      logger.info('[SpotifySourceAdapter] Force click result', { forceClick });
+      
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Aggressively remove ALL fixed/absolute positioned elements with high z-index
+      await page.evaluate(`
+        (function() {
+          var removed = [];
+          var all = document.querySelectorAll('*');
+          for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            var s = getComputedStyle(el);
+            if ((s.position === 'fixed' || s.position === 'absolute') && parseInt(s.zIndex || '0') > 50 && el.tagName !== 'HTML' && el.tagName !== 'BODY') {
+              removed.push(el.tagName + '.' + (el.className || '').toString().substring(0, 40));
+              el.style.display = 'none';
+            }
+          }
+          // Also try to re-enable scrolling on the body
+          document.body.style.overflow = 'auto';
+          document.documentElement.style.overflow = 'auto';
+          return removed;
+        })()
+      `);
+      
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Re-navigate one more time
+      logger.info('[SpotifySourceAdapter] Re-navigating after force removal');
+      await page.goto(playlistsUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      // Remove overlays again
+      await page.evaluate(`
+        (function() {
+          var all = document.querySelectorAll('*');
+          for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            var s = getComputedStyle(el);
+            if ((s.position === 'fixed' || s.position === 'absolute') && parseInt(s.zIndex || '0') > 50 && el.tagName !== 'HTML' && el.tagName !== 'BODY') {
+              var t = (el.textContent || '').substring(0, 200).toLowerCase();
+              if (t.indexOf('language') !== -1 || t.indexOf('choose') !== -1) {
+                el.style.display = 'none';
+              }
+            }
+          }
+          document.body.style.overflow = 'auto';
+          document.documentElement.style.overflow = 'auto';
+        })()
+      `);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    // Spotify uses virtual scrolling - only ~24 items exist in the DOM at any time.
+    // We must ACCUMULATE playlists across scroll positions, not just read at the end.
+    
+        // IMPORTANT: tsx/esbuild injects __name helpers into arrow functions, which causes
+    // "ReferenceError: __name is not defined" when Puppeteer serializes them to the browser.
+    // Solution: inject JS helpers as strings, then call them via string-based evaluate.
+    
+    // Inject scroll helper into the page
+    await page.evaluate(`window.__plScrollStep=function(step){function tryScroll(el){var b=el.scrollTop;el.scrollTop=el.scrollTop+step;return el.scrollTop!==b}var sels=['[data-testid="main-scroll-container"]','[data-scroll-container]','#main','main','[role="main"]','.main-view-container','.os-viewport','.main-view-container__scroll-node'];for(var i=0;i<sels.length;i++){var el=document.querySelector(sels[i]);if(el&&el.scrollHeight>el.clientHeight+100&&tryScroll(el))return true}var a=document.querySelectorAll('div,main,section');var c=[];for(var i=0;i<a.length;i++){var s=getComputedStyle(a[i]);if((s.overflowY==='auto'||s.overflowY==='scroll'||s.overflow==='auto'||s.overflow==='scroll')&&a[i].scrollHeight>a[i].clientHeight+200)c.push(a[i])}c.sort(function(x,y){return y.scrollHeight-x.scrollHeight});for(var i=0;i<c.length;i++){if(tryScroll(c[i]))return true}var by=window.scrollY;window.scrollBy(0,step);if(window.scrollY!==by)return true;for(var i=0;i<a.length;i++){if(a[i].scrollHeight>a[i].clientHeight+100&&tryScroll(a[i]))return true}return false}`);
+    
+    // Diagnose scroll containers
+    const scrollDiag = await page.evaluate(`
+      (function() {
+        var r = {};
+        var sels = ['[data-testid="main-scroll-container"]','[data-scroll-container]','#main','main','[role="main"]','.main-view-container','.os-viewport'];
+        for (var i = 0; i < sels.length; i++) {
+          var el = document.querySelector(sels[i]);
+          if (el) r[sels[i]] = {sh: el.scrollHeight, ch: el.clientHeight, oy: getComputedStyle(el).overflowY};
+        }
+        var a = document.querySelectorAll('div,main,section');
+        var scrollables = [];
+        for (var i = 0; i < a.length; i++) {
+          var s = getComputedStyle(a[i]);
+          if ((s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflow === 'auto' || s.overflow === 'scroll') && a[i].scrollHeight > a[i].clientHeight + 50) {
+            scrollables.push({tag: a[i].tagName, cls: (a[i].className||'').substring(0,80), sh: a[i].scrollHeight, ch: a[i].clientHeight, oy: s.overflowY});
+          }
+        }
+        r._scrollables = scrollables.slice(0, 5);
+        r._winScrollH = document.documentElement.scrollHeight;
+        r._winClientH = document.documentElement.clientHeight;
+        return r;
+      })()
+    `);
+    logger.info('[SpotifySourceAdapter] Scroll diagnostics', { diag: scrollDiag });
+    
+    const scrollContainer = async (step: number): Promise<boolean> => {
+      return page.evaluate('window.__plScrollStep(' + step + ')') as Promise<boolean>;
+    };
+    
+    // Inject playlist extraction helper as string
+    await page.evaluate(`window.__plExtractPlaylists=function(){var links=document.querySelectorAll('a[href*="/playlist/"]');var results=[];var seen={};for(var i=0;i<links.length;i++){var href=links[i].getAttribute('href');if(!href)continue;var m=href.match(/\\/playlist\\/([A-Za-z0-9]+)/);if(!m)continue;var pid=m[1];if(seen[pid])continue;seen[pid]=true;var card=links[i].closest('[data-testid="playlist-card"]')||links[i].closest('div[role="gridcell"]')||links[i].closest('article')||links[i];var name='';var tsels=['[data-testid="card-title"]','div[data-encore-id="text"]','span','div'];for(var j=0;j<tsels.length;j++){var el=card.querySelector(tsels[j]);if(el){var t=(el.textContent||'').trim();if(t&&t.length<200&&t.indexOf('songs')===-1){name=t;break}}}if(!name){var lt=(links[i].textContent||'').trim();name=(lt&&lt.length<200)?lt:'Untitled Playlist'}var tc=0;var tcm=(card.textContent||'').match(/(\\d+)\\s+songs?/i);if(tcm)tc=parseInt(tcm[1],10);var img=card.querySelector('img');var cover=img?(img.getAttribute('src')||undefined):undefined;results.push({id:pid,name:name,trackCount:tc,coverUrl:cover})}return results}`);
+    
+    const extractVisiblePlaylists = async (): Promise<Array<{ id: string; name: string; trackCount: number; coverUrl?: string }>> => {
+      return page.evaluate('window.__plExtractPlaylists()') as Promise<Array<{ id: string; name: string; trackCount: number; coverUrl?: string }>>;
+    };
+    // Accumulate playlists in a Map keyed by playlist ID
+    const allPlaylists = new Map<string, PlaylistInfo>();
+    
+    // Helper to add visible playlists to the accumulated map
+    const collectVisible = async () => {
+      const visible = await extractVisiblePlaylists();
+      let newCount = 0;
+      for (const p of visible) {
+        if (!allPlaylists.has(p.id)) {
+          allPlaylists.set(p.id, { id: p.id, name: p.name, trackCount: p.trackCount, coverUrl: p.coverUrl });
+          newCount++;
+        }
+      }
+      return newCount;
+    };
+    
+    // First extract at initial scroll position
+    await collectVisible();
+    logger.info('[SpotifySourceAdapter] Initial playlists visible', { userId, count: allPlaylists.size });
+    
+    // Scroll incrementally, collecting playlists at each position
+    let noNewCount = 0;
     let scrollAttempts = 0;
-    const maxScrollAttempts = 50;
-    let noChangeCount = 0;
+    const maxScrollAttempts = 200;
+    const scrollStep = 600;
     
-    while (scrollAttempts < maxScrollAttempts && noChangeCount < 2) {
-      // Count current playlists
-      const currentCount = await page.evaluate(() => {
-        return document.querySelectorAll('a[href*="/playlist/"]').length;
-      });
+    while (scrollAttempts < maxScrollAttempts && noNewCount < 5) {
+      const didScroll = await scrollContainer(scrollStep);
+      await new Promise(resolve => setTimeout(resolve, 700));
       
-      logger.info('[SpotifySourceAdapter] Scroll attempt', { 
-        userId, 
-        attempt: scrollAttempts,
-        playlistCount: currentCount 
-      });
+      const newCount = await collectVisible();
       
-      // If count hasn't changed, increment counter
-      if (currentCount === previousCount && scrollAttempts > 0) {
-        noChangeCount++;
+      if (newCount === 0) {
+        noNewCount++;
       } else {
-        noChangeCount = 0;
+        noNewCount = 0;
       }
       
-      previousCount = currentCount;
-      
-      // Scroll to bottom
-      await page.evaluate(() => {
-        window.scrollTo(0, document.body.scrollHeight);
-      });
-      
-      // Wait for new content to load (reduced from 1500ms to 800ms)
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
       scrollAttempts++;
+      
+      if (scrollAttempts % 10 === 0) {
+        logger.info('[SpotifySourceAdapter] Scroll progress', { 
+          userId, 
+          attempt: scrollAttempts, 
+          totalCollected: allPlaylists.size,
+          newInBatch: newCount,
+          didScroll,
+        });
+      }
+      
+      // If we couldn't scroll and haven't found new items, we're done
+      if (!didScroll && noNewCount >= 2) {
+        logger.info('[SpotifySourceAdapter] Cannot scroll further, stopping', { userId, scrollAttempts });
+        break;
+      }
     }
     
     logger.info('[SpotifySourceAdapter] Finished scrolling', { 
       userId, 
       scrollAttempts,
-      finalPlaylistCount: previousCount 
-    });
-    
-    // Extract data from the page
-    const data = await page.evaluate(() => {
-      // Try to get display name from the page
-      let displayName = '';
-      
-      // On the /playlists page, look for the profile name in specific locations
-      // Try to find it in the page title or header
-      const titleElement = document.querySelector('title');
-      if (titleElement?.textContent) {
-        // Title format is usually "Username's Playlists | Spotify" or "Public Playlists | Spotify"
-        const titleMatch = titleElement.textContent.match(/^(.+?)'s Playlists/);
-        if (titleMatch) {
-          displayName = titleMatch[1];
-        }
-      }
-      
-      // If not found in title, try h1 elements but be more selective
-      if (!displayName) {
-        const h1Elements = Array.from(document.querySelectorAll('h1'));
-        for (const h1 of h1Elements) {
-          const text = h1.textContent?.trim() || '';
-          // Skip common UI text
-          if (text && 
-              text !== 'Public Playlists' && 
-              text !== 'Your Library' &&
-              text !== 'Playlists' &&
-              !text.includes('Spotify') &&
-              text.length > 0 &&
-              text.length < 100) {
-            displayName = text;
-            break;
-          }
-        }
-      }
-      
-      console.log(`Extracted display name: "${displayName}"`);
-      
-      // Find all playlist cards - look for links to playlists
-      const playlistLinks = Array.from(document.querySelectorAll('a[href*="/playlist/"]'));
-      
-      console.log(`Found ${playlistLinks.length} playlist links`);
-      
-      const playlistsMap = new Map();
-      
-      playlistLinks.forEach(link => {
-        const href = link.getAttribute('href');
-        if (!href) return;
-        
-        const playlistId = href.match(/\/playlist\/([A-Za-z0-9]+)/)?.[1];
-        if (!playlistId || playlistsMap.has(playlistId)) return;
-        
-        // Get the card container (parent elements)
-        const card = link.closest('[data-testid="playlist-card"]') || 
-                    link.closest('.playlist-card') ||
-                    link.closest('div[role="gridcell"]') ||
-                    link.closest('article') ||
-                    link;
-        
-        // Extract playlist name - look in the link or card
-        let name = '';
-        const titleSelectors = [
-          '[data-testid="card-title"]',
-          '.card-title',
-          'div[data-encore-id="text"]',
-          'span',
-          'div',
-        ];
-        
-        for (const selector of titleSelectors) {
-          const el = card.querySelector(selector);
-          const text = el?.textContent?.trim();
-          if (text && text.length > 0 && text.length < 200 && !text.includes('songs')) {
-            name = text;
-            break;
-          }
-        }
-        
-        if (!name) {
-          // Try getting text from the link itself
-          const linkText = link.textContent?.trim();
-          if (linkText && linkText.length > 0 && linkText.length < 200) {
-            name = linkText;
-          } else {
-            name = 'Untitled Playlist';
-          }
-        }
-        
-        // Extract track count from subtitle or description
-        let trackCount = 0;
-        
-        // Look for "X songs" text in the card
-        const textContent = card.textContent || '';
-        const songMatch = textContent.match(/(\d+)\s+songs?/i);
-        if (songMatch) {
-          trackCount = parseInt(songMatch[1], 10);
-        }
-        
-        // If not found, try specific subtitle elements
-        if (trackCount === 0) {
-          const subtitleEl = card.querySelector('[data-testid="card-subtitle"]') ||
-                            card.querySelector('.card-subtitle') ||
-                            card.querySelector('[data-encore-id="text"]');
-          if (subtitleEl) {
-            const text = subtitleEl.textContent || '';
-            const match = text.match(/(\d+)\s+songs?/i);
-            if (match) {
-              trackCount = parseInt(match[1], 10);
-            }
-          }
-        }
-        
-        // Extract cover image
-        const imgEl = card.querySelector('img');
-        const coverUrl = imgEl?.getAttribute('src') || undefined;
-        
-        playlistsMap.set(playlistId, {
-          id: playlistId,
-          name,
-          trackCount,
-          coverUrl,
-        });
-      });
-      
-      const playlists = Array.from(playlistsMap.values());
-      console.log(`Extracted ${playlists.length} unique playlists`);
-      
-      return { displayName, playlists };
+      totalPlaylistsCollected: allPlaylists.size,
     });
     
     await browser.close();
     browser = undefined;
     
+    const playlists = Array.from(allPlaylists.values());
+    
     logger.info('[SpotifySourceAdapter] Fetched user playlists with Puppeteer', {
       userId,
-      displayName: data.displayName || userId,
-      playlistCount: data.playlists.length,
+      displayName: displayName || userId,
+      playlistCount: playlists.length,
     });
     
     return {
-      displayName: data.displayName || userId,
-      playlists: data.playlists as PlaylistInfo[],
+      displayName: displayName || userId,
+      playlists,
     };
     
   } catch (error) {
     if (browser) {
       await browser.close().catch(() => {});
     }
-    logger.error('[SpotifySourceAdapter] Failed to fetch user playlists with Puppeteer', { error, userId });
+    logger.error('[SpotifySourceAdapter] Failed to fetch user playlists with Puppeteer', { 
+      error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : error, 
+      userId 
+    });
     throw new Error(`Unable to fetch playlists for user ${userId}. The profile may be private or the user ID may be invalid.`);
   }
 }
@@ -667,7 +855,14 @@ export const spotifySourceAdapter: SourceAdapter = {
    * When searching for a user ID, returns { displayName, playlists }, otherwise returns playlists array.
    */
   async searchPlaylists(query: string, userId: number, db: any): Promise<PlaylistInfo[] | { displayName: string; playlists: PlaylistInfo[] }> {
-    const token = await getSpotifyToken(userId, db);
+    let token: string | null = null;
+    try {
+      if (db) {
+        token = await getSpotifyToken(userId, db);
+      }
+    } catch {
+      // Ignore token lookup errors - will fall back to unauthenticated
+    }
     
     // Check if query is a user ID (for fetching user playlists)
     const userIdMatch = query.match(/^([A-Za-z0-9_-]+)$/);

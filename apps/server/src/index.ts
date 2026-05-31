@@ -92,6 +92,7 @@ import crossImportRoutes from './routes/cross-import';
 import mixTemplatesRoutes from './routes/mix-templates';
 import youtubeConfigRoutes from './routes/youtube-config';
 import savedSpotifyUsersRoutes from './routes/saved-spotify-users';
+import favoritePlaylistsRoutes from './routes/favorite-playlists';
 import plexHomeRoutes from './routes/plex-home';
 import exportRoutes from './routes/export';
 import configRoutes from './routes/config';
@@ -675,6 +676,7 @@ app.use('/api/cross-import', crossImportRoutes);
 app.use('/api/mix-templates', mixTemplatesRoutes);
 app.use('/api/youtube-config', youtubeConfigRoutes);
 app.use('/api/saved-spotify-users', savedSpotifyUsersRoutes);
+app.use('/api/favorite-playlists', favoritePlaylistsRoutes);
 app.use('/api/plex-home', plexHomeRoutes);
 
 // Serve static files from the web app (in production)

@@ -306,3 +306,20 @@ CREATE INDEX IF NOT EXISTS idx_import_queue_user_id ON import_queue(user_id);
 CREATE INDEX IF NOT EXISTS idx_import_queue_status ON import_queue(status);
 CREATE INDEX IF NOT EXISTS idx_import_queue_session_id ON import_queue(session_id);
 
+-- Favorite playlists table
+-- Stores playlists that users have favorited for quick access
+CREATE TABLE IF NOT EXISTS favorite_playlists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  source TEXT NOT NULL,           -- 'spotify', 'deezer', 'apple', etc.
+  source_url TEXT NOT NULL,       -- Original playlist URL
+  description TEXT,
+  image_url TEXT,
+  favorited_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(user_id, source_url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_favorite_playlists_user_id ON favorite_playlists(user_id);
+

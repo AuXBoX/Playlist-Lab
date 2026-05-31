@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import './LoginPage.css';
@@ -11,12 +11,30 @@ export const LoginPage: FC = () => {
   const [_pinId, setPinId] = useState<number | null>(null);
   const navigate = useNavigate();
   const { isAuthenticated, checkAuth } = useAuth();
+  const authPopupRef = useRef<Window | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) {
       navigate('/', { replace: true });
     }
   }, [isAuthenticated, navigate]);
+
+  // Listen for the auth-complete message from the popup callback page
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === 'plex-auth-complete') {
+        // Popup's callback page fired this - the poll will pick up auth momentarily.
+        // Close the popup if it's still open.
+        if (authPopupRef.current && !authPopupRef.current.closed) {
+          authPopupRef.current.close();
+          authPopupRef.current = null;
+        }
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   const startPlexAuth = async () => {
     setIsLoading(true);
@@ -35,7 +53,18 @@ export const LoginPage: FC = () => {
       const data = await response.json();
       setPinCode(data.code);
       setPinId(data.id);
-      window.open(data.authUrl, '_blank');
+
+      // Open a popup window instead of a new tab (like Seerr and similar apps)
+      const width = 600;
+      const height = 700;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      authPopupRef.current = window.open(
+        data.authUrl,
+        'plex-auth',
+        `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes,resizable=yes`
+      );
+
       pollForAuth(data.id, data.code);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');
@@ -84,6 +113,11 @@ export const LoginPage: FC = () => {
         }
 
         if (data.authenticated) {
+          // Close the popup if it's still open
+          if (authPopupRef.current && !authPopupRef.current.closed) {
+            authPopupRef.current.close();
+            authPopupRef.current = null;
+          }
           await new Promise(resolve => setTimeout(resolve, 1000));
           const meResponse = await fetch('/api/auth/me', { credentials: 'include' });
           
@@ -106,6 +140,10 @@ export const LoginPage: FC = () => {
 
     (window as any).__cancelPlexAuth = () => {
       cancelled = true;
+      if (authPopupRef.current && !authPopupRef.current.closed) {
+        authPopupRef.current.close();
+        authPopupRef.current = null;
+      }
       setIsLoading(false);
       setPinCode(null);
       setPinId(null);
@@ -134,12 +172,12 @@ export const LoginPage: FC = () => {
         {pinCode && (
           <div className="login-pin-box">
             <div className="login-pin-spinner" />
-            <p className="login-pin-text">A new tab has opened. Please sign in to Plex and authorize this app.</p>
+            <p className="login-pin-text">A sign-in window has opened. Please sign in to Plex and authorize this app.</p>
             <p className="login-pin-code">{pinCode}</p>
             <p className="login-pin-hint">Enter this code if prompted</p>
             <p className="login-pin-info">
               <strong>After authorizing in Plex:</strong><br/>
-              Close the Plex tab and return here. You'll be logged in automatically within moments.
+              The window will close automatically and you'll be signed in.
             </p>
             <button className="login-btn-cancel" onClick={cancelAuth}>Cancel</button>
           </div>

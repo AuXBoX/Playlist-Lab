@@ -37,6 +37,8 @@ const countryNames: Record<string, string> = {
  */
 router.get('/:source/:country', requireAuth, async (req, res) => {
   const { source, country } = req.params;
+  const userId = req.session.userId!;
+  const db = (req.dbService as any)?.db;
   
   try {
     const countryName = countryNames[country] || country;
@@ -57,6 +59,17 @@ router.get('/:source/:country', requireAuth, async (req, res) => {
         break;
       case 'apple':
         playlists = await scrapers.searchAppleMusicPlaylists(country);
+        break;
+      case 'spotify':
+        playlists = await scrapers.getSpotifyPopularPlaylists(country, userId, db);
+        // Check if Spotify returned a premium-required signal
+        if (playlists.length === 1 && (playlists[0] as any).premiumRequired) {
+          return res.status(403).json({ 
+            error: 'Spotify Premium subscription required for the app owner to browse playlists.',
+            premiumRequired: true,
+            playlists: [],
+          });
+        }
         break;
       default:
         return res.status(400).json({ error: `Unsupported source: ${source}` });

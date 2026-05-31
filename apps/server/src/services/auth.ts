@@ -226,15 +226,20 @@ export class AuthService {
   }
 
   /**
-   * Get auth URL for user to visit
-   * User will authorize the app at this URL
+   * Get auth URL for user to visit.
+   * User will authorize the app at this URL.
+   * forwardUrl: URL Plex redirects to after sign-in (e.g. our /auth/callback page in a popup).
    */
-  getAuthUrl(code: string): string {
+  getAuthUrl(code: string, forwardUrl?: string): string {
     const params = new URLSearchParams({
       clientID: this.clientId,
       code,
       'context[device][product]': this.productName
     });
+
+    if (forwardUrl) {
+      params.set('forwardUrl', forwardUrl);
+    }
 
     return `https://app.plex.tv/auth#?${params.toString()}`;
   }
