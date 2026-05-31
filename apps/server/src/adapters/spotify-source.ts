@@ -83,7 +83,7 @@ function fetchSpotifyHtml(url: string): Promise<{ html: string; status: number }
       '-w', '\n%{http_code}',
       '--max-time', '15',
       url,
-    ], { timeout: 20000 }, (error, stdout, stderr) => {
+    ], { timeout: 20000 }, (error, stdout) => {
       if (error) {
         reject(new Error(`curl failed: ${error.message}`));
         return;
