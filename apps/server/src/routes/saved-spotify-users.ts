@@ -277,7 +277,7 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
 
       res.status(201).json({ user: savedUser });
     } catch (dbError: any) {
-      if (dbError.code === 'SQLITE_CONSTRAINT') {
+      if (dbError.code && dbError.code.startsWith('SQLITE_CONSTRAINT')) {
         res.status(409).json({ 
           error: { message: 'This Spotify user is already saved' } 
         });

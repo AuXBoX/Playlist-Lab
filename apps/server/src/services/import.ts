@@ -32,8 +32,6 @@ import { logImportDebug } from '../utils/import-debug-logger';
 import { EventEmitter } from 'events';
 import { debugLog } from '../utils/debug-logger';
 
-const CACHE_MAX_AGE_HOURS = parseInt(process.env.CACHE_MAX_AGE_HOURS || '24', 10);
-
 export interface ImportResult {
   playlistId: string;
   playlistName: string;
@@ -75,163 +73,96 @@ export async function importPlaylist(
     debugLog(`[Import ${importId}] Has progressEmitter:`, !!progressEmitter);
     logger.info(`[Import ${importId}] Starting import from ${source}: ${sourceIdentifier}`);
   
-  // Step 1: Check cache first
-  debugLog(`[Import ${importId}] Checking cache...`);
-  const cached = db.getCachedPlaylist(source, sourceIdentifier);
-  debugLog(`[Import ${importId}] Cache result:`, cached ? 'found' : 'not found');
+  // Step 1: Always scrape fresh (no cache-first)
+  debugLog(`[Import ${importId}] Starting fresh scrape`);
+  logger.info(`[Import ${importId}] Scraping ${source}: ${sourceIdentifier}`);
   
-  const now = Math.floor(Date.now() / 1000);
-  const isCacheFresh = cached && (now - cached.scraped_at) < (CACHE_MAX_AGE_HOURS * 3600);
-  debugLog(`[Import ${importId}] Cache fresh:`, isCacheFresh);
+  // Check cache for fallback only (if scraping fails)
+  const cached = db.getCachedPlaylist(source, sourceIdentifier);
   
   let externalPlaylist: ExternalPlaylist;
   let usedCache = false;
   
-  if (isCacheFresh && cached) {
-    // Step 2: Use cached data if fresh
-    debugLog('[Import] Using cached data - STEP 1');
+  // Emit initial scraping progress
+  if (progressEmitter) {
+    progressEmitter.emit('progress', {
+      type: 'progress',
+      phase: 'scraping',
+      current: 0,
+      total: 0,
+      currentTrackName: 'Fetching playlist from ' + source + '...',
+    });
+  }
+  
+  debugLog('[Import] ========== STARTING SCRAPE ==========');
+  
+  try {
+    externalPlaylist = await scrapePlaylist(source, sourceIdentifier, progressEmitter, options.userId, db, options);
+    debugLog('[Import] scrapePlaylist returned successfully');
     
-    debugLog('[Import] Using cached data - STEP 2 - about to call logger.info');
-    logger.info(`[Import] Using fresh cache for ${source}:${sourceIdentifier}`);
-    debugLog('[Import] Using cached data - STEP 3 - logger.info complete');
+    logImportDebug('=== SCRAPING COMPLETE ===', {
+      playlistName: externalPlaylist.name,
+      trackCount: externalPlaylist.tracks.length,
+      coverUrl: externalPlaylist.coverUrl,
+      hasCoverUrl: !!externalPlaylist.coverUrl
+    });
     
-    debugLog('[Import] Using cached data - STEP 4 - creating externalPlaylist');
-    externalPlaylist = {
-      id: cached.source_id,
-      name: cached.name,
-      description: cached.description || '',
-      source: cached.source,
-      tracks: cached.tracks,
-      coverUrl: cached.cover_url, // Use cached cover URL
-    };
-    debugLog('[Import] Using cached data - STEP 5 - externalPlaylist created');
-    debugLog('[Import] Cached cover URL:', cached.cover_url || 'NONE');
-    usedCache = true;
-    debugLog('[Import] Using cached data - STEP 6 - usedCache set to true');
+    logger.info(`[Import] Scraping complete. Playlist: ${externalPlaylist.name}, Tracks: ${externalPlaylist.tracks.length}, Cover: ${externalPlaylist.coverUrl || 'none'}`);
     
-    debugLog('[Import] Using cached data - STEP 7 - COMPLETE');
-  } else {
-    // Step 3: Scrape if cache miss or stale
-    debugLog('[Import] Cache miss or stale, will scrape');
-    logger.info(`[Import] Cache ${cached ? 'stale' : 'miss'}, scraping ${source}:${sourceIdentifier}`);
-    
-    // Emit initial scraping progress
+    // Emit progress with cover URL and playlist name after scraping completes
     if (progressEmitter) {
-      progressEmitter.emit('progress', {
+      const scrapingCompleteEvent = {
         type: 'progress',
         phase: 'scraping',
-        current: 0,
-        total: 0,
-        currentTrackName: 'Fetching playlist from ' + source + '...',
-      });
+        current: externalPlaylist.tracks.length,
+        total: externalPlaylist.tracks.length,
+        currentTrackName: `Found ${externalPlaylist.tracks.length} tracks`,
+        coverUrl: externalPlaylist.coverUrl,
+        playlistName: externalPlaylist.name
+      };
+      
+      progressEmitter.emit('progress', scrapingCompleteEvent);
+      
+      // Brief wait to ensure frontend receives update before matching starts
+      await new Promise(resolve => setTimeout(resolve, 500));
+      logger.info(`[Import] Starting matching phase...`);
     }
     
-    debugLog('[Import] ========== STARTING SCRAPE ==========');
-    debugLog('[Import] About to call scrapePlaylist function');
-    
+    // Store scraped data in cache (for fallback if future scrapes fail)
     try {
-      debugLog('[Import] Calling scrapePlaylist...');
-      externalPlaylist = await scrapePlaylist(source, sourceIdentifier, progressEmitter, options.userId, db, options);
-      debugLog('[Import] scrapePlaylist returned successfully');
-      
-      logImportDebug('=== SCRAPING COMPLETE ===', {
-        playlistName: externalPlaylist.name,
-        trackCount: externalPlaylist.tracks.length,
-        coverUrl: externalPlaylist.coverUrl,
-        hasCoverUrl: !!externalPlaylist.coverUrl
+      db.saveCachedPlaylist(
+        source,
+        sourceIdentifier,
+        externalPlaylist.name,
+        externalPlaylist.description,
+        externalPlaylist.tracks,
+        externalPlaylist.coverUrl
+      );
+      logger.info(`[Import] Cached ${externalPlaylist.tracks.length} tracks for ${source}:${sourceIdentifier}`);
+    } catch (cacheError: any) {
+      logger.error(`[Import] Failed to save to cache`, { error: cacheError.message });
+    }
+  } catch (error: any) {
+    debugLog('[Import] Scraping error:', error.message);
+    
+    // If scraping fails and we have stale cache, use it as fallback
+    if (cached) {
+      logger.warn(`[Import] Scraping failed, using stale cache for ${source}:${sourceIdentifier}`, { 
+        error: error.message,
       });
-      
-      debugLog('[Import] ========== SCRAPING COMPLETE ==========');
-      debugLog('[Import] Playlist:', externalPlaylist.name);
-      debugLog('[Import] Tracks:', externalPlaylist.tracks.length);
-      debugLog('[Import] Cover URL:', externalPlaylist.coverUrl || 'NONE');
-      debugLog('[Import] =======================================');
-      
-      logger.info(`[Import] Scraping complete. Playlist: ${externalPlaylist.name}, Tracks: ${externalPlaylist.tracks.length}, Cover: ${externalPlaylist.coverUrl || 'none'}`);
-      
-      // Emit progress with cover URL and playlist name after scraping completes
-      if (progressEmitter) {
-        const scrapingCompleteEvent = {
-          type: 'progress',
-          phase: 'scraping',
-          current: externalPlaylist.tracks.length,
-          total: externalPlaylist.tracks.length,
-          currentTrackName: `Found ${externalPlaylist.tracks.length} tracks`,
-          coverUrl: externalPlaylist.coverUrl,
-          playlistName: externalPlaylist.name
-        };
-        
-        debugLog('[Import] ========== EMITTING SCRAPING COMPLETE EVENT ==========');
-        debugLog('[Import] Event data:', JSON.stringify(scrapingCompleteEvent, null, 2));
-        debugLog('[Import] =========================================================');
-        
-        logImportDebug('=== EMITTING SCRAPING COMPLETE EVENT ===', scrapingCompleteEvent);
-        
-        logger.info(`[Import] Emitting scraping complete event: ${JSON.stringify(scrapingCompleteEvent)}`);
-        progressEmitter.emit('progress', scrapingCompleteEvent);
-        
-        // Wait a moment to ensure the frontend receives this update before matching starts
-        debugLog('[Import] ========== WAITING 1.5 SECONDS ==========');
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        debugLog('[Import] ========== WAIT COMPLETE ==========');
-        logger.info(`[Import] Starting matching phase...`);
-      }
-      
-      // Step 4: Store scraped data in cache
-      debugLog('[Import] ========== SAVING TO CACHE ==========');
-      debugLog('[Import] Source:', source);
-      debugLog('[Import] Identifier:', sourceIdentifier);
-      debugLog('[Import] Playlist name:', externalPlaylist.name);
-      debugLog('[Import] Track count:', externalPlaylist.tracks.length);
-      
-      try {
-        db.saveCachedPlaylist(
-          source,
-          sourceIdentifier,
-          externalPlaylist.name,
-          externalPlaylist.description,
-          externalPlaylist.tracks,
-          externalPlaylist.coverUrl
-        );
-        debugLog('[Import] ========== CACHE SAVE COMPLETE ==========');
-        logger.info(`[Import] Cached ${externalPlaylist.tracks.length} tracks for ${source}:${sourceIdentifier} with cover URL: ${externalPlaylist.coverUrl || 'none'}`);
-      } catch (cacheError: any) {
-        debugLog('[Import] ========== CACHE SAVE ERROR ==========');
-        debugLog('[Import] Cache error:', cacheError.message);
-        debugLog('[Import] Cache stack:', cacheError.stack);
-        debugLog('[Import] ==========================================');
-        logger.error(`[Import] Failed to save to cache`, { error: cacheError.message, stack: cacheError.stack });
-        // Don't throw - continue with matching even if cache save fails
-      }
-    } catch (error: any) {
-      debugLog('[Import] ========== SCRAPING ERROR ==========');
-      debugLog('[Import] Error message:', error.message);
-      debugLog('[Import] Error stack:', error.stack);
-      debugLog('[Import] Error name:', error.name);
-      debugLog('[Import] Full error:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
-      debugLog('[Import] ====================================');
-      
-      // If scraping fails and we have stale cache, use it as fallback
-      if (cached) {
-        logger.warn(`[Import] Scraping failed, using stale cache for ${source}:${sourceIdentifier}`, { 
-          error: error.message,
-          stack: error.stack 
-        });
-        externalPlaylist = {
-          id: cached.source_id,
-          name: cached.name,
-          description: cached.description || '',
-          source: cached.source,
-          tracks: cached.tracks,
-        };
-        usedCache = true;
-      } else {
-        logger.error(`[Import] Scraping failed and no cache available for ${source}:${sourceIdentifier}`, { 
-          error: error.message,
-          stack: error.stack 
-        });
-        throw error;
-      }
+      externalPlaylist = {
+        id: cached.source_id,
+        name: cached.name,
+        description: cached.description || '',
+        source: cached.source,
+        tracks: cached.tracks,
+      };
+      usedCache = true;
+    } else {
+      logger.error(`[Import] Scraping failed and no cache available for ${source}:${sourceIdentifier}`, { 
+        error: error.message,
+      });
+      throw error;
     }
   }
   

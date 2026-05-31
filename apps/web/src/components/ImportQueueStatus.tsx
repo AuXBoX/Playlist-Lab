@@ -55,8 +55,8 @@ export const ImportQueueStatus: FC = () => {
     // Check immediately
     checkQueue();
 
-    // Poll every 2 seconds
-    const interval = setInterval(checkQueue, 2000);
+    // Poll every 10 seconds
+    const interval = setInterval(checkQueue, 10000);
 
     return () => clearInterval(interval);
   }, []);

@@ -166,21 +166,29 @@ export async function scrapeSpotifyPlaylist(url: string, progressEmitter?: Event
     
     const playlistId = match[1];
     
-    // Method 1: Embed page scraping (no auth needed, works for any public playlist)
+    // Method 1: Embed page scraping via curl (no auth needed, fastest method)
     // The embed page returns __NEXT_DATA__ with full track data in the initial HTML - no lazy loading
     try {
       const embedUrl = `https://open.spotify.com/embed/playlist/${playlistId}`;
-      console.log('[Spotify] Trying embed page scraping for playlist', playlistId);
+      console.log('[Spotify] Fetching embed page via curl for playlist', playlistId);
       
-      const response = await axios.get(embedUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-        }
+      const html = await new Promise<string>((resolve, reject) => {
+        const curlBin = process.platform === 'win32'
+          ? 'C:\\Windows\\System32\\curl.exe'
+          : 'curl';
+        const { execFile } = require('child_process');
+        execFile(curlBin, [
+          '-s', '-L', '--http1.1',
+          '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          '-H', 'Accept: text/html',
+          '--max-time', '15',
+          embedUrl,
+        ], { timeout: 20000 }, (error: any, stdout: string) => {
+          if (error) reject(new Error(`curl failed: ${error.message}`));
+          else resolve(stdout);
+        });
       });
       
-      const html = response.data;
       const jsonMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.+?)<\/script>/s);
       
       if (jsonMatch) {

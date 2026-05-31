@@ -143,8 +143,8 @@ export const SavedSpotifyUsers: FC<SavedSpotifyUsersProps> = ({ onSelectPlaylist
     setError(null);
     
     try {
-      // Use the new endpoint to fetch user's public playlists
-      const response = await fetch(`/api/import/spotify/user/${encodeURIComponent(user.spotify_user_id)}/playlists`, {
+      // Use the new endpoint to fetch user's public playlists (cache-bust for fresh data)
+      const response = await fetch(`/api/import/spotify/user/${encodeURIComponent(user.spotify_user_id)}/playlists?t=${Date.now()}`, {
         credentials: 'include',
       });
       
@@ -197,8 +197,8 @@ export const SavedSpotifyUsers: FC<SavedSpotifyUsersProps> = ({ onSelectPlaylist
     setError(null);
     
     try {
-      // Fetch playlist tracks from the server
-      const response = await fetch(`/api/import/spotify/playlist/${playlist.id}/tracks`, {
+      // Fetch playlist tracks from the server (cache-bust to always get fresh data)
+      const response = await fetch(`/api/import/spotify/playlist/${playlist.id}/tracks?t=${Date.now()}`, {
         credentials: 'include',
       });
       

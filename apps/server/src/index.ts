@@ -147,13 +147,17 @@ app.use(compression({
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10), // 1 minute
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '5000', 10), // 5000 requests per window
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '15000', 10), // 15000 requests per window
   message: { error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests, please try again later', statusCode: 429 } },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (_req) => {
+  skip: (req) => {
     // Skip rate limiting in development mode
-    return process.env.NODE_ENV === 'development';
+    if (process.env.NODE_ENV === 'development') return true;
+    // Skip health checks, schedule polling, and queue polling (internal noise)
+    if (req.path === '/health' || req.path === '/api/schedules/executions/running') return true;
+    if (req.path === '/api/import/queue' || req.path.startsWith('/api/import/status/') || req.path.startsWith('/api/import/progress/')) return true;
+    return false;
   }
 });
 app.use('/api/', limiter);

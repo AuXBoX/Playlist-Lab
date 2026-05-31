@@ -9,6 +9,7 @@
 import { SourceAdapter, PlaylistInfo, TrackInfo, ServiceMeta } from './types';
 import { getSpotifyToken } from '../routes/spotify-auth';
 import { logger } from '../utils/logger';
+import { execFile } from 'child_process';
 
 /** Extract a Spotify playlist ID from a URL or return the value as-is if it's already an ID */
 function extractPlaylistId(urlOrId: string): string {
@@ -67,434 +68,258 @@ async function searchPlaylistsUnauthenticated(query: string): Promise<PlaylistIn
 }
 
 /**
+ * Fetch a Spotify user's profile HTML via curl (HTTP/1.1 + short User-Agent).
+ * Returns SSR HTML that contains playlist data in the initialState script tag.
+ */
+function fetchSpotifyHtml(url: string): Promise<{ html: string; status: number }> {
+  return new Promise((resolve, reject) => {
+    const curlBin = process.platform === 'win32'
+      ? 'C:\\Windows\\System32\\curl.exe'
+      : 'curl';
+    execFile(curlBin, [
+      '-s', '-L', '--http1.1',
+      '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      '-H', 'Accept: text/html',
+      '-w', '\n%{http_code}',
+      '--max-time', '15',
+      url,
+    ], { timeout: 20000 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(`curl failed: ${error.message}`));
+        return;
+      }
+      const lines = stdout.split('\n');
+      const status = parseInt(lines[lines.length - 1].trim(), 10) || 0;
+      const html = lines.slice(0, -1).join('\n');
+      resolve({ html, status });
+    });
+  });
+}
+
+/**
+ * Fetch a Client Credentials token from Spotify.
+ * Returns null if credentials are not configured.
+ */
+async function getClientCredentialsToken(): Promise<string | null> {
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return null;
+
+  try {
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    });
+    if (!res.ok) {
+      logger.warn('[SpotifySourceAdapter] Client credentials token request failed', { status: res.status });
+      return null;
+    }
+    const data = await res.json() as any;
+    return data.access_token || null;
+  } catch (e) {
+    logger.warn('[SpotifySourceAdapter] Failed to get client credentials token', { error: (e as Error).message });
+    return null;
+  }
+}
+
+/**
+ * Fetch all public playlists for a user via the Spotify Web API (paginated).
+ * Returns null if token is invalid or API call fails.
+ */
+async function fetchAllPlaylistsViaApi(token: string, spotifyUserId: string): Promise<PlaylistInfo[] | null> {
+  try {
+    const allPlaylists: PlaylistInfo[] = [];
+    let url: string | null = `https://api.spotify.com/v1/users/${spotifyUserId}/playlists?limit=50&offset=0`;
+
+    while (url) {
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        logger.warn('[SpotifySourceAdapter] Spotify API playlist fetch failed', { status: res.status, url });
+        return null;
+      }
+      const data = await res.json() as any;
+      for (const p of (data.items || [])) {
+        if (p.id) {
+          allPlaylists.push({
+            id: p.id,
+            name: p.name || 'Untitled Playlist',
+            trackCount: p.tracks?.total || 0,
+            coverUrl: p.images?.[0]?.url || undefined,
+          });
+        }
+      }
+      url = data.next || null;
+    }
+
+    return allPlaylists;
+  } catch (e) {
+    logger.warn('[SpotifySourceAdapter] API playlist fetch error', { error: (e as Error).message });
+    return null;
+  }
+}
+
+/**
+ * Fetch all playlists from a Spotify user profile using the existing browser scraper.
+ * Uses tall viewport (4000px) and puppeteer-extra with stealth plugin.
+ */
+async function fetchAllPlaylistsViaPuppeteer(userId: string, _displayName: string): Promise<PlaylistInfo[] | null> {
+  try {
+    const { scrapeSpotifyUserPlaylists } = await import('../services/browser-scrapers');
+    logger.info('[SpotifySourceAdapter] Using existing browser scraper for playlists', { userId });
+    
+    const playlists = await scrapeSpotifyUserPlaylists(userId);
+    
+    if (!playlists || playlists.length === 0) {
+      logger.warn('[SpotifySourceAdapter] Browser scraper returned no playlists', { userId });
+      return null;
+    }
+    
+    // Convert to PlaylistInfo format
+    const result: PlaylistInfo[] = playlists.map(p => {
+      const urlMatch = p.url.match(/\/playlist\/([A-Za-z0-9]+)/);
+      return {
+        id: urlMatch ? urlMatch[1] : '',
+        name: p.name,
+        trackCount: 0, // Will be fetched later when importing
+        coverUrl: p.imageUrl || undefined,
+      };
+    }).filter(p => p.id); // Filter out any without valid ID
+    
+    logger.info('[SpotifySourceAdapter] Browser scraper complete', { userId, playlistCount: result.length });
+    return result.length > 0 ? result : null;
+  } catch (error: any) {
+    logger.warn('[SpotifySourceAdapter] Browser scraper failed', { userId, error: error.message });
+    return null;
+  }
+}
+
+/**
  * Fetch public playlists from a Spotify user without authentication.
- * Uses Puppeteer to render the JavaScript-heavy Spotify page.
+ * Strategy:
+ *   1. Get display name + first ~10 playlists from SSR HTML (fast curl, ~1s)
+ *   2. If Spotify Client Credentials are configured → use Spotify Web API for ALL playlists (paginated, ~2s)
+ *   3. Otherwise → use Puppeteer to scroll and collect ALL playlists (~10-15s)
  */
 async function fetchUserPlaylistsUnauthenticated(userId: string): Promise<{ displayName: string; playlists: PlaylistInfo[] }> {
-  let browser;
   try {
-    // Dynamic import to avoid loading Puppeteer unless needed
-    const puppeteer = await import('puppeteer');
-    
-    // Use the /playlists URL to get the grid view with all playlists
-    const playlistsUrl = `https://open.spotify.com/user/${userId}/playlists`;
-    logger.info('[SpotifySourceAdapter] Launching browser to fetch playlists', { userId, url: playlistsUrl });
-    
-    // Launch headless browser (Puppeteer 24+ uses new headless by default)
-    browser = await puppeteer.default.launch({
-      headless: 'shell' as any,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
-        '--lang=en-US,en',
-      ],
-    });
-    
-    const page = await browser.newPage();
-    
-    // Set a realistic user agent
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    
-    // Set locale headers
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9',
-    });
-    
-    // Use a standard viewport
-    await page.setViewport({ width: 1920, height: 1080 });
-    
-    // Override browser locale to English (prevents Spotify language dialog)
-    await page.evaluateOnNewDocument(`
-      Object.defineProperty(navigator, 'language', { get: function() { return 'en-US'; } });
-      Object.defineProperty(navigator, 'languages', { get: function() { return ['en-US', 'en']; } });
-    `);
-    
-    // Step 1: Visit Spotify homepage first to establish locale cookies
-    // This prevents the "Choose a language" overlay on subsequent pages
-    logger.info('[SpotifySourceAdapter] Visiting homepage to establish locale cookies');
-    await page.goto('https://open.spotify.com/', { 
-      waitUntil: 'domcontentloaded',
-      timeout: 15000 
-    }).catch(() => {
-      logger.warn('[SpotifySourceAdapter] Homepage load failed, continuing anyway');
-    });
-    
-    // Wait for homepage to render
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    // Dismiss language dialog on homepage if present (clicks English)
-    await page.evaluate(`
-      (function() {
-        var all = document.querySelectorAll('button, a, [role="button"], [role="option"], li, span');
-        for (var i = 0; i < all.length; i++) {
-          var t = (all[i].textContent || '').trim();
-          if (/^english/i.test(t) && t.length < 30) { all[i].click(); return; }
-        }
-      })()
-    `);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Step 2: Set locale cookies explicitly
-    await page.setCookie(
-      { name: 'sp_lg', value: 'en', domain: '.spotify.com', path: '/' },
-      { name: 'sp_locale', value: 'en', domain: '.spotify.com', path: '/' },
-      { name: 'sp_m', value: 'en', domain: '.spotify.com', path: '/' },
-    );
-    
-    // Step 3: Navigate to the user's playlists page
-    await page.goto(playlistsUrl, { 
-      waitUntil: 'domcontentloaded',
-      timeout: 30000 
-    });
-    
-    // Wait for Spotify's JS to render the page (including any language dialog)
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    
-    // Step 4: Check for "Choose a language" dialog and force-dismiss it
-    const pageTitle = await page.title();
-    logger.info('[SpotifySourceAdapter] Page loaded', { userId, title: pageTitle });
-    
-    // Diagnostic: log page structure to understand what's rendered
-    const pageDiag = await page.evaluate(`
-      (function() {
-        var r = {};
-        r.title = document.title;
-        var h1s = document.querySelectorAll('h1');
-        r.h1s = [];
-        for (var i = 0; i < h1s.length; i++) r.h1s.push((h1s[i].textContent || '').trim().substring(0, 100));
-        var btns = document.querySelectorAll('button');
-        r.btnCount = btns.length;
-        r.btnTexts = [];
-        for (var i = 0; i < Math.min(15, btns.length); i++) r.btnTexts.push((btns[i].textContent || '').trim().substring(0, 50));
-        r.bodyLen = (document.body.textContent || '').length;
-        r.hasChoose = (document.body.textContent || '').indexOf('Choose') !== -1;
-        r.hasLanguage = (document.body.textContent || '').indexOf('language') !== -1;
-        r.visibleText = (document.body.textContent || '').replace(/\\s+/g, ' ').trim().substring(0, 500);
-        return r;
-      })()
-    `);
-    logger.info('[SpotifySourceAdapter] Page diagnostics', { diag: pageDiag });
-    
-    // Check for language dialog using multiple methods
-    const hasLangDialog = await page.evaluate(`
-      (function() {
-        var t = document.body.textContent || '';
-        if (t.indexOf('Choose a language') !== -1) return true;
-        if (t.indexOf('choose a language') !== -1) return true;
-        if (t.indexOf('Sprache') !== -1) return true;
-        if (t.indexOf('langue') !== -1) return true;
-        var h1s = document.querySelectorAll('h1');
-        for (var i = 0; i < h1s.length; i++) {
-          var h = (h1s[i].textContent || '').trim().toLowerCase();
-          if (h === 'choose a language' || h.indexOf('choose a language') !== -1 || h === 'sprache wählen') return true;
-        }
-        return false;
-      })()
-    `) as boolean;
-    
-    logger.info('[SpotifySourceAdapter] Language dialog check', { hasLangDialog });
-    
-    if (hasLangDialog) {
-      logger.info('[SpotifySourceAdapter] Language selector detected, attempting to dismiss');
-      
-      // Try to click English button
-      const dismissResult = await page.evaluate(`
-        (function() {
-          var results = [];
-          var allClickable = document.querySelectorAll('button, a, [role="button"], [role="option"], [role="menuitem"], li, span');
-          for (var i = 0; i < allClickable.length; i++) {
-            var text = (allClickable[i].textContent || '').trim();
-            if (/^english(\\s*\\(.*\\))?$/i.test(text) || text.toLowerCase() === 'english') {
-              allClickable[i].click();
-              results.push('clicked: ' + text);
-              return results;
-            }
-          }
-          for (var i = 0; i < allClickable.length; i++) {
-            var text = (allClickable[i].textContent || '').trim().toLowerCase();
-            if (text.indexOf('english') !== -1 && text.length < 30) {
-              allClickable[i].click();
-              results.push('partial: ' + text);
-              return results;
-            }
-          }
-          results.push('no english button found, total clickable: ' + allClickable.length);
-          return results;
-        })()
-      `) as string[];
-      
-      logger.info('[SpotifySourceAdapter] Language dismiss attempt', { results: dismissResult });
-      
-      // Wait for navigation after clicking
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
-      
-      // Set locale cookies and API call
-      await page.evaluate(`try{fetch('https://spclient.wg.spotify.com/user-customization-service/v1/customization',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({preferred_language:'en'}),credentials:'include'}).catch(function(){})}catch(e){};document.cookie='sp_lg=en;domain=.spotify.com;path=/;max-age=31536000';document.cookie='sp_locale=en;domain=.spotify.com;path=/;max-age=31536000';`);
-      
-      // Re-navigate to the playlists page
-      await page.goto(playlistsUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await new Promise(resolve => setTimeout(resolve, 5000));
-    }
-    
-    // Force-remove any remaining overlay/modal elements that might block scrolling
-    await page.evaluate(`
-      (function() {
-        // Remove elements that look like full-page overlays or modals
-        var allDivs = document.querySelectorAll('div');
-        for (var i = 0; i < allDivs.length; i++) {
-          var el = allDivs[i];
-          var style = getComputedStyle(el);
-          var text = (el.textContent || '').substring(0, 200);
-          // Check if it's a full-page overlay containing language selection text
-          if ((style.position === 'fixed' || style.position === 'absolute') &&
-              style.zIndex && parseInt(style.zIndex) > 100 &&
-              el.clientHeight > window.innerHeight * 0.5 &&
-              (text.indexOf('Choose') !== -1 || text.indexOf('language') !== -1 || text.indexOf('Sprache') !== -1)) {
-            el.remove();
-          }
-        }
-      })()
-    `);
-    
-    // Wait for the page to load playlists
-    await page.waitForSelector('a[href*="/playlist/"]', { 
-      timeout: 15000 
-    }).catch(() => {
-      logger.warn('[SpotifySourceAdapter] Playlist links not found after language handling', { userId });
-    });
+    const url = `https://open.spotify.com/user/${userId}?locale=en-US`;
+    logger.info('[SpotifySourceAdapter] Fetching user profile via curl', { userId, url });
 
-    // Extract display name from the page title
-    const displayName = await page.evaluate(`
-      (function() {
-        var t = document.querySelector('title');
-        if (t && t.textContent) {
-          var m1 = t.textContent.match(/^(.+?)'s Playlists/);
-          if (m1) return m1[1];
-          var m2 = t.textContent.match(/^(.+?)\\s+on\\s+Spotify$/i);
-          if (m2) return m2[1];
-        }
-        var h1s = document.querySelectorAll('h1');
-        for (var i = 0; i < h1s.length; i++) {
-          var txt = (h1s[i].textContent || '').trim();
-          if (txt && txt !== 'Public Playlists' && txt !== 'Your Library' && txt !== 'Playlists' && txt.indexOf('Spotify') === -1 && txt.length > 0 && txt.length < 100) return txt;
-        }
-        return '';
-      })()
-    `) as string;
-    
-    logger.info('[SpotifySourceAdapter] Display name', { userId, displayName });
-    
-    // If display name is "Choose a language" or similar, the dialog is still blocking the page
-    if (displayName && /choose|language|sprache|langue|idioma/i.test(displayName)) {
-      logger.warn('[SpotifySourceAdapter] Dialog still present after dismissal attempts, force-removing');
-      
-      // Try clicking any element containing "English" text
-      const forceClick = await page.evaluate(`
-        (function() {
-          var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-          while (walker.nextNode()) {
-            if (/english/i.test(walker.currentNode.textContent)) {
-              var el = walker.currentNode.parentElement;
-              while (el && el.tagName !== 'BUTTON' && el.tagName !== 'A' && el.tagName !== 'LI') el = el.parentElement;
-              if (el) { el.click(); return 'clicked parent: ' + el.tagName; }
-              walker.currentNode.parentElement.click();
-              return 'clicked text parent';
-            }
-          }
-          return 'no english text found';
-        })()
-      `) as string;
-      logger.info('[SpotifySourceAdapter] Force click result', { forceClick });
-      
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Aggressively remove ALL fixed/absolute positioned elements with high z-index
-      await page.evaluate(`
-        (function() {
-          var removed = [];
-          var all = document.querySelectorAll('*');
-          for (var i = 0; i < all.length; i++) {
-            var el = all[i];
-            var s = getComputedStyle(el);
-            if ((s.position === 'fixed' || s.position === 'absolute') && parseInt(s.zIndex || '0') > 50 && el.tagName !== 'HTML' && el.tagName !== 'BODY') {
-              removed.push(el.tagName + '.' + (el.className || '').toString().substring(0, 40));
-              el.style.display = 'none';
-            }
-          }
-          // Also try to re-enable scrolling on the body
-          document.body.style.overflow = 'auto';
-          document.documentElement.style.overflow = 'auto';
-          return removed;
-        })()
-      `);
-      
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Re-navigate one more time
-      logger.info('[SpotifySourceAdapter] Re-navigating after force removal');
-      await page.goto(playlistsUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      // Remove overlays again
-      await page.evaluate(`
-        (function() {
-          var all = document.querySelectorAll('*');
-          for (var i = 0; i < all.length; i++) {
-            var el = all[i];
-            var s = getComputedStyle(el);
-            if ((s.position === 'fixed' || s.position === 'absolute') && parseInt(s.zIndex || '0') > 50 && el.tagName !== 'HTML' && el.tagName !== 'BODY') {
-              var t = (el.textContent || '').substring(0, 200).toLowerCase();
-              if (t.indexOf('language') !== -1 || t.indexOf('choose') !== -1) {
-                el.style.display = 'none';
-              }
-            }
-          }
-          document.body.style.overflow = 'auto';
-          document.documentElement.style.overflow = 'auto';
-        })()
-      `);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    const { html, status } = await fetchSpotifyHtml(url);
+    logger.info('[SpotifySourceAdapter] Profile response', { userId, status, htmlLen: html.length });
+
+    if (status !== 200 || html.length < 1000) {
+      throw new Error(`Failed to fetch profile page (status: ${status}, size: ${html.length})`);
     }
 
-    // Spotify uses virtual scrolling - only ~24 items exist in the DOM at any time.
-    // We must ACCUMULATE playlists across scroll positions, not just read at the end.
-    
-        // IMPORTANT: tsx/esbuild injects __name helpers into arrow functions, which causes
-    // "ReferenceError: __name is not defined" when Puppeteer serializes them to the browser.
-    // Solution: inject JS helpers as strings, then call them via string-based evaluate.
-    
-    // Inject scroll helper into the page
-    await page.evaluate(`window.__plScrollStep=function(step){function tryScroll(el){var b=el.scrollTop;el.scrollTop=el.scrollTop+step;return el.scrollTop!==b}var sels=['[data-testid="main-scroll-container"]','[data-scroll-container]','#main','main','[role="main"]','.main-view-container','.os-viewport','.main-view-container__scroll-node'];for(var i=0;i<sels.length;i++){var el=document.querySelector(sels[i]);if(el&&el.scrollHeight>el.clientHeight+100&&tryScroll(el))return true}var a=document.querySelectorAll('div,main,section');var c=[];for(var i=0;i<a.length;i++){var s=getComputedStyle(a[i]);if((s.overflowY==='auto'||s.overflowY==='scroll'||s.overflow==='auto'||s.overflow==='scroll')&&a[i].scrollHeight>a[i].clientHeight+200)c.push(a[i])}c.sort(function(x,y){return y.scrollHeight-x.scrollHeight});for(var i=0;i<c.length;i++){if(tryScroll(c[i]))return true}var by=window.scrollY;window.scrollBy(0,step);if(window.scrollY!==by)return true;for(var i=0;i<a.length;i++){if(a[i].scrollHeight>a[i].clientHeight+100&&tryScroll(a[i]))return true}return false}`);
-    
-    // Diagnose scroll containers
-    const scrollDiag = await page.evaluate(`
-      (function() {
-        var r = {};
-        var sels = ['[data-testid="main-scroll-container"]','[data-scroll-container]','#main','main','[role="main"]','.main-view-container','.os-viewport'];
-        for (var i = 0; i < sels.length; i++) {
-          var el = document.querySelector(sels[i]);
-          if (el) r[sels[i]] = {sh: el.scrollHeight, ch: el.clientHeight, oy: getComputedStyle(el).overflowY};
-        }
-        var a = document.querySelectorAll('div,main,section');
-        var scrollables = [];
-        for (var i = 0; i < a.length; i++) {
-          var s = getComputedStyle(a[i]);
-          if ((s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflow === 'auto' || s.overflow === 'scroll') && a[i].scrollHeight > a[i].clientHeight + 50) {
-            scrollables.push({tag: a[i].tagName, cls: (a[i].className||'').substring(0,80), sh: a[i].scrollHeight, ch: a[i].clientHeight, oy: s.overflowY});
-          }
-        }
-        r._scrollables = scrollables.slice(0, 5);
-        r._winScrollH = document.documentElement.scrollHeight;
-        r._winClientH = document.documentElement.clientHeight;
-        return r;
-      })()
-    `);
-    logger.info('[SpotifySourceAdapter] Scroll diagnostics', { diag: scrollDiag });
-    
-    const scrollContainer = async (step: number): Promise<boolean> => {
-      return page.evaluate('window.__plScrollStep(' + step + ')') as Promise<boolean>;
-    };
-    
-    // Inject playlist extraction helper as string
-    await page.evaluate(`window.__plExtractPlaylists=function(){var links=document.querySelectorAll('a[href*="/playlist/"]');var results=[];var seen={};for(var i=0;i<links.length;i++){var href=links[i].getAttribute('href');if(!href)continue;var m=href.match(/\\/playlist\\/([A-Za-z0-9]+)/);if(!m)continue;var pid=m[1];if(seen[pid])continue;seen[pid]=true;var card=links[i].closest('[data-testid="playlist-card"]')||links[i].closest('div[role="gridcell"]')||links[i].closest('article')||links[i];var name='';var tsels=['[data-testid="card-title"]','div[data-encore-id="text"]','span','div'];for(var j=0;j<tsels.length;j++){var el=card.querySelector(tsels[j]);if(el){var t=(el.textContent||'').trim();if(t&&t.length<200&&t.indexOf('songs')===-1){name=t;break}}}if(!name){var lt=(links[i].textContent||'').trim();name=(lt&&lt.length<200)?lt:'Untitled Playlist'}var tc=0;var tcm=(card.textContent||'').match(/(\\d+)\\s+songs?/i);if(tcm)tc=parseInt(tcm[1],10);var img=card.querySelector('img');var cover=img?(img.getAttribute('src')||undefined):undefined;results.push({id:pid,name:name,trackCount:tc,coverUrl:cover})}return results}`);
-    
-    const extractVisiblePlaylists = async (): Promise<Array<{ id: string; name: string; trackCount: number; coverUrl?: string }>> => {
-      return page.evaluate('window.__plExtractPlaylists()') as Promise<Array<{ id: string; name: string; trackCount: number; coverUrl?: string }>>;
-    };
-    // Accumulate playlists in a Map keyed by playlist ID
-    const allPlaylists = new Map<string, PlaylistInfo>();
-    
-    // Helper to add visible playlists to the accumulated map
-    const collectVisible = async () => {
-      const visible = await extractVisiblePlaylists();
-      let newCount = 0;
-      for (const p of visible) {
-        if (!allPlaylists.has(p.id)) {
-          allPlaylists.set(p.id, { id: p.id, name: p.name, trackCount: p.trackCount, coverUrl: p.coverUrl });
-          newCount++;
-        }
+    // Extract displayName from title tag: "Mike on Spotify"
+    let displayName = '';
+    const titleMatch = html.match(/<title>([^<]+)<\/title>/);
+    if (titleMatch) {
+      const title = titleMatch[1];
+      const nameMatch = title.match(/^(.+?)\s+on\s+Spotify$/i);
+      if (nameMatch) displayName = nameMatch[1].trim();
+    }
+    // Fallback to og:title
+    if (!displayName) {
+      const ogMatch = html.match(/property="og:title"\s+content="([^"]+)"/);
+      if (ogMatch && !/choose|language|sprache/i.test(ogMatch[1])) {
+        displayName = ogMatch[1].trim();
       }
-      return newCount;
-    };
-    
-    // First extract at initial scroll position
-    await collectVisible();
-    logger.info('[SpotifySourceAdapter] Initial playlists visible', { userId, count: allPlaylists.size });
-    
-    // Scroll incrementally, collecting playlists at each position
-    let noNewCount = 0;
-    let scrollAttempts = 0;
-    const maxScrollAttempts = 200;
-    const scrollStep = 600;
-    
-    while (scrollAttempts < maxScrollAttempts && noNewCount < 5) {
-      const didScroll = await scrollContainer(scrollStep);
-      await new Promise(resolve => setTimeout(resolve, 700));
-      
-      const newCount = await collectVisible();
-      
-      if (newCount === 0) {
-        noNewCount++;
+    }
+
+    // Parse SSR playlists as initial data
+    let ssrPlaylists: PlaylistInfo[] = [];
+    let ssrTotalCount = 0;
+    const stateMatch = html.match(/id="initialState"[^>]*>([^<]+)</);
+    if (stateMatch) {
+      try {
+        const initialState = JSON.parse(Buffer.from(stateMatch[1], 'base64').toString());
+        const items = initialState?.entities?.items || {};
+        const userKey = Object.keys(items).find(k => k.includes(userId) || k.includes('user'));
+        if (userKey) {
+          const userEntity = items[userKey];
+          if (!displayName && userEntity?.name) displayName = userEntity.name;
+          const publicPlaylists = userEntity?.publicPlaylistsV2;
+          if (publicPlaylists?.items) {
+            ssrTotalCount = publicPlaylists.totalCount || publicPlaylists.items.length;
+            ssrPlaylists = publicPlaylists.items.map((item: any) => {
+              const data = item?.data || {};
+              const id = (item?._uri || '').replace('spotify:playlist:', '');
+              const name = data?.name || 'Untitled Playlist';
+              const coverUrl = data?.images?.items?.[0]?.sources?.[0]?.url || undefined;
+              return { id, name, trackCount: 0, coverUrl };
+            }).filter((p: PlaylistInfo) => p.id);
+          }
+        }
+      } catch (e) {
+        logger.warn('[SpotifySourceAdapter] Failed to parse initialState', { userId, error: (e as Error).message });
+      }
+    }
+
+    // Note: We intentionally do NOT early-return when SSR reports "all playlists".
+    // Spotify's SSR totalCount can under-report (e.g. says 9 when user has 20+).
+    // The SSR also returns incomplete metadata (trackCount: 0, sometimes missing covers).
+    // Always verify with Puppeteer to ensure we have all playlists with full metadata.
+    if (ssrPlaylists.length >= ssrTotalCount && ssrTotalCount > 0) {
+      logger.info('[SpotifySourceAdapter] SSR reports all playlists, will verify with Puppeteer', {
+        userId, displayName: displayName || userId, ssrPlaylistCount: ssrPlaylists.length, ssrTotalCount
+      });
+    }
+
+    // Try Client Credentials API (fastest full fetch, ~2s)
+    const apiToken = await getClientCredentialsToken();
+    if (apiToken) {
+      logger.info('[SpotifySourceAdapter] Client credentials available, fetching all playlists via API', { userId });
+      const apiPlaylists = await fetchAllPlaylistsViaApi(apiToken, userId);
+      if (apiPlaylists && apiPlaylists.length > 0) {
+        logger.info('[SpotifySourceAdapter] Fetched all user playlists via API', {
+          userId, displayName: displayName || userId, playlistCount: apiPlaylists.length,
+        });
+        return { displayName: displayName || userId, playlists: apiPlaylists };
+      }
+    }
+
+    // Fall back to Puppeteer for full list
+    logger.info('[SpotifySourceAdapter] Using Puppeteer to fetch all playlists', {
+      userId, ssrCount: ssrPlaylists.length, totalFromServer: ssrTotalCount
+    });
+    const puppeteerPlaylists = await fetchAllPlaylistsViaPuppeteer(userId, displayName || userId);
+    if (puppeteerPlaylists && puppeteerPlaylists.length > 0) {
+      if (puppeteerPlaylists.length > ssrPlaylists.length) {
+        logger.info('[SpotifySourceAdapter] Puppeteer found more playlists than SSR', {
+          userId, displayName: displayName || userId,
+          puppeteerCount: puppeteerPlaylists.length, ssrCount: ssrPlaylists.length
+        });
       } else {
-        noNewCount = 0;
-      }
-      
-      scrollAttempts++;
-      
-      if (scrollAttempts % 10 === 0) {
-        logger.info('[SpotifySourceAdapter] Scroll progress', { 
-          userId, 
-          attempt: scrollAttempts, 
-          totalCollected: allPlaylists.size,
-          newInBatch: newCount,
-          didScroll,
+        logger.info('[SpotifySourceAdapter] Puppeteer confirmed playlist count, using Puppeteer data (better metadata)', {
+          userId, displayName: displayName || userId,
+          puppeteerCount: puppeteerPlaylists.length, ssrCount: ssrPlaylists.length
         });
       }
-      
-      // If we couldn't scroll and haven't found new items, we're done
-      if (!didScroll && noNewCount >= 2) {
-        logger.info('[SpotifySourceAdapter] Cannot scroll further, stopping', { userId, scrollAttempts });
-        break;
-      }
+      return { displayName: displayName || userId, playlists: puppeteerPlaylists };
     }
-    
-    logger.info('[SpotifySourceAdapter] Finished scrolling', { 
-      userId, 
-      scrollAttempts,
-      totalPlaylistsCollected: allPlaylists.size,
+
+    // Final fallback: SSR playlists
+    logger.info('[SpotifySourceAdapter] Returning SSR playlists (no additional playlists found)', {
+      userId, displayName: displayName || userId, playlistCount: ssrPlaylists.length, totalFromServer: ssrTotalCount,
     });
-    
-    await browser.close();
-    browser = undefined;
-    
-    const playlists = Array.from(allPlaylists.values());
-    
-    logger.info('[SpotifySourceAdapter] Fetched user playlists with Puppeteer', {
-      userId,
-      displayName: displayName || userId,
-      playlistCount: playlists.length,
-    });
-    
-    return {
-      displayName: displayName || userId,
-      playlists,
-    };
-    
+    return { displayName: displayName || userId, playlists: ssrPlaylists };
   } catch (error) {
-    if (browser) {
-      await browser.close().catch(() => {});
-    }
-    logger.error('[SpotifySourceAdapter] Failed to fetch user playlists with Puppeteer', { 
-      error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : error, 
-      userId 
+    logger.error('[SpotifySourceAdapter] Failed to fetch user playlists', {
+      error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : error,
+      userId,
     });
     throw new Error(`Unable to fetch playlists for user ${userId}. The profile may be private or the user ID may be invalid.`);
   }
 }
+
 
 /**
  * Fetch tracks from a public Spotify playlist without user authentication.
@@ -855,6 +680,16 @@ export const spotifySourceAdapter: SourceAdapter = {
    * When searching for a user ID, returns { displayName, playlists }, otherwise returns playlists array.
    */
   async searchPlaylists(query: string, userId: number, db: any): Promise<PlaylistInfo[] | { displayName: string; playlists: PlaylistInfo[] }> {
+    // Check if query is a user ID (for fetching user playlists)
+    const userIdMatch = query.match(/^([A-Za-z0-9_-]+)$/);
+    const isUserId = userIdMatch && !query.includes('spotify:') && !query.includes('http');
+    
+    // For user ID queries, skip token entirely and use fast curl-based method
+    if (isUserId) {
+      logger.info('[SpotifySourceAdapter] User ID detected, using unauthenticated fetch', { query });
+      return fetchUserPlaylistsUnauthenticated(query);
+    }
+    
     let token: string | null = null;
     try {
       if (db) {
@@ -864,19 +699,9 @@ export const spotifySourceAdapter: SourceAdapter = {
       // Ignore token lookup errors - will fall back to unauthenticated
     }
     
-    // Check if query is a user ID (for fetching user playlists)
-    const userIdMatch = query.match(/^([A-Za-z0-9_-]+)$/);
-    const isUserId = userIdMatch && !query.includes('spotify:') && !query.includes('http');
-    
     // If no token, try unauthenticated search via public API
     if (!token) {
       logger.info('[SpotifySourceAdapter] No token available, attempting unauthenticated search', { query });
-      
-      // If it's a user ID, fetch user playlists and return full result
-      if (isUserId) {
-        return fetchUserPlaylistsUnauthenticated(query);
-      }
-      
       const playlists = await searchPlaylistsUnauthenticated(query);
       return playlists;
     }
@@ -890,12 +715,6 @@ export const spotifySourceAdapter: SourceAdapter = {
         db.prepare(`UPDATE users SET spotify_access_token = NULL, spotify_refresh_token = NULL, spotify_token_expires_at = NULL WHERE id = ?`).run(userId);
         // Fall back to unauthenticated search
         logger.info('[SpotifySourceAdapter] Auth failed, falling back to unauthenticated search', { query });
-        
-        // If it's a user ID, fetch user playlists and return full result
-        if (isUserId) {
-          return fetchUserPlaylistsUnauthenticated(query);
-        }
-        
         const playlists = await searchPlaylistsUnauthenticated(query);
         return playlists;
       }

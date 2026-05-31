@@ -405,8 +405,92 @@ ipcMain.handle('search-track', async (_, { serverUrl, query }) => {
             return artistData.MediaContainer?.Metadata || [];
           }
         } catch {
-          // Fall through to return empty
+          // Fall through to library search fallback
         }
+      }
+    }
+    
+    // FALLBACK: Library search by track title
+    // Hub search only searches by album artist (grandparentTitle), so compilation tracks
+    // where the album artist is "Various Artists" won't be found. This fallback searches
+    // the library directly by track title, allowing the matching logic to check both
+    // track artist (originalTitle) and album artist (grandparentTitle) client-side.
+    if (tracks.length === 0) {
+      try {
+        // Get music library sections
+        const sectionsUrl = `${serverUrl}/library/sections?X-Plex-Token=${token}`;
+        const sectionsResp = await fetch(sectionsUrl, { headers: PLEX_HEADERS });
+        if (sectionsResp.ok) {
+          const sectionsData = await sectionsResp.json();
+          const musicSections = (sectionsData.MediaContainer?.Directory || [])
+            .filter((d: any) => d.type === 'artist')
+            .map((d: any) => d.key);
+          
+          if (musicSections.length > 0) {
+            // Extract potential track titles from the query
+            // Query is typically "Artist Title" or "Artist - Title" or just "Title"
+            const titleCandidates: string[] = [];
+            
+            // If query has " - " separator, the part after is the title
+            if (query.includes(' - ')) {
+              const parts = query.split(' - ');
+              if (parts.length >= 2) {
+                const titleCandidate = parts.slice(1).join(' - ').trim();
+                if (titleCandidate.length >= 2) titleCandidates.push(titleCandidate);
+              }
+            }
+            
+            // Also try last 2-4 words as potential title (handles "Artist Song Name" format)
+            const words = cleanQuery.split(/\s+/).filter((w: string) => w.length > 1);
+            if (words.length >= 2) {
+              // Last 3 words or last 2 words as title
+              if (words.length >= 4) {
+                titleCandidates.push(words.slice(-4).join(' '));
+              }
+              if (words.length >= 3) {
+                titleCandidates.push(words.slice(-3).join(' '));
+              }
+              titleCandidates.push(words.slice(-2).join(' '));
+            }
+            
+            // Also try the full query as-is (for title-only searches)
+            if (cleanQuery.length >= 2) {
+              titleCandidates.push(cleanQuery);
+            }
+            
+            // Deduplicate candidates
+            const uniqueCandidates = [...new Set(titleCandidates)];
+            
+            for (const sectionId of musicSections) {
+              for (const titleCandidate of uniqueCandidates) {
+                try {
+                  const libUrl = `${serverUrl}/library/sections/${sectionId}/all?type=10&track.title=${encodeURIComponent(titleCandidate)}&X-Plex-Container-Size=50&X-Plex-Token=${token}`;
+                  const libResp = await fetch(libUrl, { headers: PLEX_HEADERS });
+                  if (libResp.ok) {
+                    const libData = await libResp.json();
+                    const libTracks = libData.MediaContainer?.Metadata || [];
+                    for (const t of libTracks) {
+                      if (!tracks.some((existing: any) => existing.ratingKey === t.ratingKey)) {
+                        tracks.push(t);
+                      }
+                    }
+                  }
+                } catch {
+                  // Continue to next candidate
+                }
+              }
+              
+              // If we found tracks from this library, don't search others
+              if (tracks.length > 0) break;
+            }
+            
+            if (tracks.length > 0) {
+              console.log(`[search-track] Library search fallback found ${tracks.length} tracks`);
+            }
+          }
+        }
+      } catch (err: any) {
+        console.log(`[search-track] Library search fallback error: ${err.message}`);
       }
     }
     

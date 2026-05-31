@@ -47,7 +47,7 @@ export function attachDatabase(dbService: DatabaseService) {
  */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   // Skip verbose logging for frequently polled endpoints
-  const isPolling = req.path.startsWith('/status/') || req.path.startsWith('/progress/');
+  const isPolling = req.path.startsWith('/status/') || req.path.startsWith('/progress/') || req.path === '/queue' || req.path.startsWith('/queue/');
   
   if (!isPolling) {
     console.log(`[Auth] Checking authentication for ${req.method} ${req.path}`);

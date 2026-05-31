@@ -1358,13 +1358,15 @@ export async function scrapeSpotifyUserPlaylists(userId: string): Promise<Array<
       throw new Error(`Spotify user "${userId}" not found`);
     }
     
-    // Extract all playlist links
+    // Extract all playlist links with cover images
     const playlists = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll('a[href*="/playlist/"]')).map(a => {
         const el = a as HTMLAnchorElement;
+        const img = el.querySelector('img');
         return {
           href: el.getAttribute('href') || '',
           name: (el.innerText || '').trim().split('\n')[0] || '',
+          imageUrl: img ? (img.src || img.getAttribute('src') || '') : '',
         };
       }).filter(l => l.name && l.href && !l.href.includes('?'));
       
@@ -1377,8 +1379,9 @@ export async function scrapeSpotifyUserPlaylists(userId: string): Promise<Array<
       }).map(l => ({
         name: l.name,
         url: l.href.startsWith('/') ? `https://open.spotify.com${l.href}` : l.href,
+        imageUrl: l.imageUrl || undefined,
       }));
-    }) as Array<{ name: string; url: string }>;
+    }) as Array<{ name: string; url: string; imageUrl?: string }>;
     
     // Scroll a bit to load any lazily-loaded playlists
     if (playlists.length < 10) {
@@ -1390,13 +1393,15 @@ export async function scrapeSpotifyUserPlaylists(userId: string): Promise<Array<
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
     
-    // Re-extract after potential scroll
+    // Re-extract after potential scroll with cover images
     const allPlaylists = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll('a[href*="/playlist/"]')).map(a => {
         const el = a as HTMLAnchorElement;
+        const img = el.querySelector('img');
         return {
           href: el.getAttribute('href') || '',
           name: (el.innerText || '').trim().split('\n')[0] || '',
+          imageUrl: img ? (img.src || img.getAttribute('src') || '') : '',
         };
       }).filter(l => l.name && l.href && !l.href.includes('?'));
       
@@ -1408,8 +1413,9 @@ export async function scrapeSpotifyUserPlaylists(userId: string): Promise<Array<
       }).map(l => ({
         name: l.name,
         url: l.href.startsWith('/') ? `https://open.spotify.com${l.href}` : l.href,
+        imageUrl: l.imageUrl || undefined,
       }));
-    }) as Array<{ name: string; url: string }>;
+    }) as Array<{ name: string; url: string; imageUrl?: string }>;
     
     logger.info(`[Spotify Browser] Found ${allPlaylists.length} playlists for user ${userId}`);
     return allPlaylists;

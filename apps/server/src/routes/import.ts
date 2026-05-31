@@ -1010,6 +1010,70 @@ router.post('/plex/search', async (req: Request, res: Response, next: NextFuncti
       logger.info(`[Plex Search] Using regular search for: ${query}`);
       rawTracks = await plexClient.searchTrack(query, searchLibraryId);
     }
+    
+    // FALLBACK: Library search by track title for compilation tracks
+    // Hub search only searches by album artist (grandparentTitle), so compilation tracks
+    // where album artist is "Various Artists" won't be found. This searches the library
+    // directly by track title, returning tracks regardless of album artist.
+    if (rawTracks.length === 0 && searchLibraryId) {
+      logger.info(`[Plex Search] Regular search found nothing, trying library title search fallback`);
+      try {
+        // Extract potential title candidates from the query
+        const titleCandidates: string[] = [];
+        
+        // If query has " - " separator, the part after is the title
+        if (query.includes(' - ')) {
+          const parts = query.split(' - ');
+          if (parts.length >= 2) {
+            const titlePart = parts.slice(1).join(' - ').trim();
+            if (titlePart.length >= 2) titleCandidates.push(titlePart);
+          }
+        }
+        
+        // Try first few words and last few words as potential title
+        const queryWords = query.split(/\s+/).filter((w: string) => w.length > 1);
+        if (queryWords.length >= 3) {
+          titleCandidates.push(queryWords.slice(0, 4).join(' '));
+          titleCandidates.push(queryWords.slice(0, 3).join(' '));
+        }
+        
+        // Also try the full query as-is
+        if (query.trim().length >= 2) {
+          titleCandidates.push(query.trim());
+        }
+        
+        const uniqueCandidates = [...new Set(titleCandidates)];
+        
+        for (const candidate of uniqueCandidates) {
+          const trackSearchResponse = await plexClient.client.get(
+            `/library/sections/${searchLibraryId}/all`,
+            {
+              params: {
+                type: 10,
+                'track.title': candidate,
+              }
+            }
+          );
+          const libTracks = trackSearchResponse.data.MediaContainer?.Metadata || [];
+          logger.info(`[Plex Search] Library title search for "${candidate}": ${libTracks.length} tracks`);
+          
+          for (const t of libTracks) {
+            if (!rawTracks.some((existing: any) => existing.ratingKey === t.ratingKey)) {
+              rawTracks.push(t);
+            }
+          }
+          
+          // If we found tracks, stop trying other candidates
+          if (rawTracks.length > 0) break;
+        }
+        
+        if (rawTracks.length > 0) {
+          logger.info(`[Plex Search] Library title search fallback found ${rawTracks.length} tracks`);
+        }
+      } catch (err: any) {
+        logger.warn(`[Plex Search] Library title search fallback failed: ${err.message}`);
+      }
+    }
 
     logger.info(`[Plex Search] Found ${rawTracks.length} raw tracks for query: ${query}`);
 
@@ -1077,7 +1141,10 @@ router.post('/plex/search', async (req: Request, res: Response, next: NextFuncti
     
     const tracksWithScores = enrichedTracks.map((track: any) => {
       const titleLower = (track.title || '').toLowerCase();
-      const artistLower = (track.grandparentTitle || track.originalTitle || '').toLowerCase();
+      // Check both album artist and track artist for better compilation support
+      const albumArtistLower = (track.grandparentTitle || '').toLowerCase();
+      const trackArtistLower = (track.originalTitle || '').toLowerCase();
+      const artistLower = albumArtistLower || trackArtistLower;
       const albumLower = (track.parentTitle || '').toLowerCase();
       
       // Extract media info
@@ -1131,6 +1198,11 @@ router.post('/plex/search', async (req: Request, res: Response, next: NextFuncti
         for (const word of queryWords) {
           if (artistLower.includes(word)) {
             score += 20;
+          }
+          // Also check track artist (originalTitle) for compilations
+          // e.g. album artist = "Various Artists" but track artist = "Lindiwe Mkhize"
+          if (trackArtistLower && trackArtistLower.includes(word) && !artistLower.includes(word)) {
+            score += 30; // Slightly higher than album artist word match since it's more specific
           }
         }
       }
@@ -1295,21 +1367,9 @@ router.post('/preview', async (req: Request, res: Response, next: NextFunction) 
       return next(createValidationError('url is required and must be a string'));
     }
 
-    // Check cache first (same as import logic)
+    // Always fetch fresh data for Spotify playlists - cache is only used as fallback if scraping fails
+    // This ensures playlist changes (added/removed tracks) are always reflected
     const dbService = req.dbService!;
-    const cached = dbService.getCachedPlaylist(source, url);
-    const now = Math.floor(Date.now() / 1000);
-    const CACHE_MAX_AGE_HOURS = 24;
-    const isCacheFresh = cached && (now - cached.scraped_at) < (CACHE_MAX_AGE_HOURS * 3600);
-
-    // If we have fresh cache, use it
-    if (isCacheFresh && cached) {
-      logger.info(`[Preview] Using fresh cache for ${source}:${url}`);
-      return res.json({
-        name: cached.name,
-        tracks: cached.tracks,
-      });
-    }
 
     // Import the scraper functions
     const scrapers = await import('../services/scrapers');
@@ -1804,6 +1864,10 @@ router.get('/spotify/user/:userId/playlists', async (req: Request, res: Response
 
     logger.info('[Spotify User Playlists] Fetching playlists', { spotifyUserId, userId });
 
+    // Prevent browser caching so playlist list changes are always reflected
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+
     // Import the adapter
     const { adapterRegistry } = await import('../adapters');
     const adapter = adapterRegistry.getSource('spotify');
@@ -1896,6 +1960,10 @@ router.get('/spotify/playlist/:playlistId/tracks', async (req: Request, res: Res
     const db = (req.dbService as any).db; // Get the actual database instance
 
     logger.info('[Spotify Playlist Tracks] Fetching tracks', { playlistId, userId });
+
+    // Prevent browser caching so playlist changes are always reflected
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
 
     // Import the adapter
     const { adapterRegistry } = await import('../adapters');
