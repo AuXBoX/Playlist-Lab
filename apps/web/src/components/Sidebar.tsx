@@ -15,12 +15,35 @@ export const Sidebar: FC = () => {
     location.pathname.startsWith('/playlists/') || location.pathname === '/playlists'
   );
 
-  // Fetch version on mount
+  // Fetch version on mount and poll for changes (detects post-update server restart)
   useEffect(() => {
-    fetch('/api/version', { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => setVersion(data.version))
-      .catch(() => setVersion(''));
+    let initialVersion = '';
+    
+    const fetchVersion = async () => {
+      try {
+        const res = await fetch('/api/version', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          if (!initialVersion) {
+            initialVersion = data.version;
+            setVersion(data.version);
+          } else if (data.version !== initialVersion) {
+            // Version changed - server was updated, reload to get new frontend
+            console.log(`[Update] Version changed from ${initialVersion} to ${data.version}, reloading...`);
+            window.location.reload();
+          }
+        }
+      } catch {
+        // Silently fail - server might be restarting
+      }
+    };
+    
+    fetchVersion();
+    
+    // Poll every 30 seconds to detect server updates
+    const interval = setInterval(fetchVersion, 30 * 1000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   // Check for updates on mount and periodically

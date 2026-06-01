@@ -698,9 +698,15 @@ if (NODE_ENV === 'production') {
   } else {
     logger.info(`Web app path exists, serving static files`);
     
-    app.use(express.static(webAppPath));
+    // Serve static assets (JS, CSS, images) - these have content-hashed filenames from Vite
+    // so they can be cached long-term. index.html is handled separately below.
+    app.use(express.static(webAppPath, {
+      // Don't serve index.html from static middleware - we handle it with no-cache below
+      index: false,
+    }));
     
-    // Serve index.html for all non-API routes (SPA fallback)
+    // Serve index.html with no-cache headers for all non-API routes (SPA fallback)
+    // This ensures the browser always gets the latest HTML which references the new hashed assets
     app.get('*', (req: Request, res: Response, next: NextFunction): void => {
       // Skip API routes
       if (req.path.startsWith('/api/')) {
@@ -709,6 +715,10 @@ if (NODE_ENV === 'production') {
       }
       const indexPath = path.join(webAppPath, 'index.html');
       logger.info(`Serving index.html for path: ${req.path}`);
+      // Prevent caching so browser always loads the latest app version after updates
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
       res.sendFile(indexPath);
     });
   }
