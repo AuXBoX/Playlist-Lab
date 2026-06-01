@@ -490,6 +490,7 @@ app.get('/api/update/check', async (_req: Request, res: Response): Promise<void>
 
 // Trigger update endpoint
 app.post('/api/update/install', async (_req: Request, res: Response): Promise<void> => {
+  logger.info('[Update] Install request received');
   try {
     const https = require('https');
     const fs = require('fs');
@@ -500,6 +501,7 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
     const GITHUB_REPO = 'AuXBoX/Playlist-Lab';
     
     // Get latest release
+    logger.info('[Update] Fetching latest release from GitHub');
     const options = {
       hostname: 'api.github.com',
       path: `/repos/${GITHUB_REPO}/releases/latest`,
@@ -526,9 +528,12 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
             );
             
             if (!windowsInstaller) {
+              logger.error('[Update] No installer found in release assets');
               res.status(404).json({ error: 'No installer found for this platform' });
               return;
             }
+            
+            logger.info(`[Update] Found installer: ${windowsInstaller.name}`);
             
             // Download installer
             const dataDir = os.platform() === 'win32' 
@@ -538,6 +543,7 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
             fs.mkdirSync(dataDir, { recursive: true });
             
             const installerPath = path.join(dataDir, `PlaylistLabServer-Setup-${release.tag_name}.exe`);
+            logger.info(`[Update] Downloading installer to: ${installerPath}`);
             const file = fs.createWriteStream(installerPath);
             
             https.get(windowsInstaller.browser_download_url, (downloadResponse: any): void => {
@@ -548,6 +554,7 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
                   
                   file.on('finish', (): void => {
                     file.close();
+                    logger.info('[Update] Download complete (redirect), launching installer...');
                     
                     // Send response FIRST before launching installer
                     res.json({ 
@@ -563,15 +570,23 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
                       // /NORESTART = don't restart system (we handle app restart)
                       // /LOG = log installation for debugging
                       const logPath = path.join(dataDir, 'update-install.log');
+                      logger.info(`[Update] Spawning installer (redirect path): ${installerPath}`);
+                      
                       const installer = spawn(installerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
                         detached: true,
                         stdio: 'ignore'
                       });
                       
+                      installer.on('error', (err: Error): void => {
+                        logger.error(`[Update] Installer spawn error (redirect path): ${err.message}`);
+                      });
+                      
                       installer.unref();
+                      logger.info('[Update] Installer spawned (redirect path), exiting server in 3 seconds...');
                       
                       // Exit after a delay to allow installer to start
                       setTimeout((): void => {
+                        logger.info('[Update] Exiting server process (redirect path)');
                         process.exit(0);
                       }, 3000);
                     });
@@ -584,6 +599,7 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
               
               file.on('finish', (): void => {
                 file.close();
+                logger.info('[Update] Download complete, launching installer...');
                 
                 // Send response FIRST before launching installer
                 res.json({ 
@@ -599,26 +615,44 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
                   // /NORESTART = don't restart system (we handle app restart)
                   // /LOG = log installation for debugging
                   const logPath = path.join(dataDir, 'update-install.log');
+                  logger.info(`[Update] Spawning installer: ${installerPath}`);
+                  logger.info(`[Update] Log path: ${logPath}`);
+                  
                   const installer = spawn(installerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
                     detached: true,
                     stdio: 'ignore'
                   });
                   
+                  installer.on('error', (err: Error): void => {
+                    logger.error(`[Update] Installer spawn error: ${err.message}`);
+                  });
+                  
                   installer.unref();
+                  logger.info('[Update] Installer spawned, exiting server in 3 seconds...');
                   
                   // Exit after a delay to allow installer to start
                   setTimeout((): void => {
+                    logger.info('[Update] Exiting server process');
                     process.exit(0);
                   }, 3000);
                 });
               });
+              
+              file.on('error', (err: Error): void => {
+                logger.error(`[Update] File write error: ${err.message}`);
+                if (!res.headersSent) {
+                  res.status(500).json({ error: `Failed to save installer: ${err.message}` });
+                }
+              });
             });
             return; // Explicit return after async operation
           } catch (err) {
+            logger.error(`[Update] Parse error: ${err instanceof Error ? err.message : 'Unknown'}`);
             res.status(500).json({ error: 'Failed to process update' });
             return;
           }
         } else {
+          logger.error(`[Update] GitHub API returned status: ${response.statusCode}`);
           res.status(response.statusCode).json({ error: 'Failed to fetch release info' });
           return;
         }
@@ -626,7 +660,10 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
     });
 
     request.on('error', (err: Error): void => {
-      res.status(500).json({ error: err.message });
+      logger.error(`[Update] Request error: ${err.message}`);
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
     request.end();

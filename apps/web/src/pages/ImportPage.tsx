@@ -1927,12 +1927,43 @@ export const ImportPage: FC = () => {
                   <>
                     <button
                       className="btn btn-secondary"
-                      onClick={() => {
+                      onClick={async () => {
+                        // First fetch preview to get the actual playlist name
                         const playlistId = url.match(/playlist\/([a-zA-Z0-9]+)/)?.[1];
-                        handleSchedule({ 
+                        const playlist: PopularPlaylist = { 
                           name: playlistName || `Spotify Playlist ${playlistId || ''}`.trim(), 
                           url: url.trim() 
-                        });
+                        };
+                        await handlePreview(playlist);
+                      }}
+                      disabled={isImporting || isLoadingPreview}
+                      style={{ flex: 1, minWidth: '80px' }}
+                    >
+                      {isLoadingPreview ? 'Loading...' : 'Preview'}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={async () => {
+                        // Use preview name if available, otherwise fetch it first
+                        let name = playlistName;
+                        if (!name) {
+                          const playlistId = url.match(/playlist\/([a-zA-Z0-9]+)/)?.[1];
+                          name = `Spotify Playlist ${playlistId || ''}`.trim();
+                          // Try to fetch the actual name
+                          try {
+                            const response = await fetch('/api/import/preview', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              credentials: 'include',
+                              body: JSON.stringify({ source: 'spotify', url: url.trim() }),
+                            });
+                            if (response.ok) {
+                              const data = await response.json();
+                              if (data.playlistName) name = data.playlistName;
+                            }
+                          } catch { /* Use fallback name */ }
+                        }
+                        handleSchedule({ name, url: url.trim() });
                       }}
                       disabled={isImporting}
                       style={{ flex: 1, minWidth: '80px' }}
@@ -1941,10 +1972,28 @@ export const ImportPage: FC = () => {
                     </button>
                     <button
                       className="btn btn-secondary"
-                      onClick={() => {
+                      onClick={async () => {
+                        // Use preview name if available, otherwise fetch it first
+                        let name = playlistName;
                         const playlistId = url.match(/playlist\/([a-zA-Z0-9]+)/)?.[1];
+                        if (!name) {
+                          name = `Spotify Playlist ${playlistId || ''}`.trim();
+                          // Try to fetch the actual name
+                          try {
+                            const response = await fetch('/api/import/preview', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              credentials: 'include',
+                              body: JSON.stringify({ source: 'spotify', url: url.trim() }),
+                            });
+                            if (response.ok) {
+                              const data = await response.json();
+                              if (data.playlistName) name = data.playlistName;
+                            }
+                          } catch { /* Use fallback name */ }
+                        }
                         toggleFavorite({ 
-                          name: playlistName || `Spotify Playlist ${playlistId || ''}`.trim(), 
+                          name, 
                           url: url.trim(),
                           description: playlistId ? `Spotify playlist ${playlistId}` : undefined,
                         });
