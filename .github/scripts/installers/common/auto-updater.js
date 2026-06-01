@@ -279,30 +279,61 @@ class AutoUpdater {
     }
 
     return new Promise((resolve, reject) => {
-      // Run installer with proper silent flags
-      // /VERYSILENT = completely silent (no UI at all)
-      // /SUPPRESSMSGBOXES = suppress message boxes
-      // /NORESTART = don't restart system (installer handles app restart)
-      // /TASKS=launchnow = auto-launch after install
+      // Create a batch file to launch the installer
+      // This ensures the installer is completely detached from the node process
       const logPath = path.join(this.dataDir, 'update-install.log');
-      const installer = spawn(installerPath, [
-        '/VERYSILENT',
-        '/SUPPRESSMSGBOXES',
-        '/NORESTART',
-        '/TASKS=launchnow',
-        `/LOG=${logPath}`
-      ], {
-        detached: true,
-        stdio: 'ignore'
-      });
+      const batchPath = path.join(this.dataDir, 'run-installer.bat');
+      const batchContent = [
+        '@echo off',
+        'timeout /t 2 /nobreak > nul',  // Wait 2 seconds for tray/server to exit
+        `start "" /b "${installerPath}" /SILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=launchnow "/LOG=${logPath}"`,
+        'del "%~f0"'  // Delete this batch file after running
+      ].join('\r\n');
 
-      installer.unref();
+      try {
+        fs.writeFileSync(batchPath, batchContent);
+        this.log(`Created batch file: ${batchPath}`);
 
-      // Give installer time to start
-      setTimeout(() => {
-        this.log('Installer launched, exiting application...');
-        resolve();
-      }, 2000);
+        // Launch the batch file (it will launch installer after we exit)
+        const batch = spawn('cmd.exe', ['/c', batchPath], {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true
+        });
+
+        batch.on('error', (err) => {
+          this.log(`Batch spawn error: ${err.message}`);
+        });
+
+        batch.unref();
+
+        // Give batch time to start
+        setTimeout(() => {
+          this.log('Batch file launched, exiting application...');
+          resolve();
+        }, 1000);
+      } catch (err) {
+        this.log(`Failed to create batch file: ${err.message}, using fallback`);
+        
+        // Fallback to direct spawn
+        const installer = spawn(installerPath, [
+          '/SILENT',
+          '/SUPPRESSMSGBOXES',
+          '/NORESTART',
+          '/TASKS=launchnow',
+          `/LOG=${logPath}`
+        ], {
+          detached: true,
+          stdio: 'ignore'
+        });
+
+        installer.unref();
+
+        setTimeout(() => {
+          this.log('Installer launched (fallback), exiting application...');
+          resolve();
+        }, 2000);
+      }
     });
   }
 

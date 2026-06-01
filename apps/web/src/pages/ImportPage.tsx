@@ -1959,7 +1959,7 @@ export const ImportPage: FC = () => {
                             });
                             if (response.ok) {
                               const data = await response.json();
-                              if (data.playlistName) name = data.playlistName;
+                              if (data.name) name = data.name;
                             }
                           } catch { /* Use fallback name */ }
                         }
@@ -1988,7 +1988,7 @@ export const ImportPage: FC = () => {
                             });
                             if (response.ok) {
                               const data = await response.json();
-                              if (data.playlistName) name = data.playlistName;
+                              if (data.name) name = data.name;
                             }
                           } catch { /* Use fallback name */ }
                         }

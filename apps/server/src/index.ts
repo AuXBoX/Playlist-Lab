@@ -565,30 +565,58 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
                     // Wait for response to be sent, then launch installer and exit
                     res.on('finish', (): void => {
                       // Launch installer with proper silent flags
-                      // /VERYSILENT = completely silent (no UI at all)
-                      // /SUPPRESSMSGBOXES = suppress message boxes
-                      // /NORESTART = don't restart system (we handle app restart)
-                      // /LOG = log installation for debugging
                       const logPath = path.join(dataDir, 'update-install.log');
                       logger.info(`[Update] Spawning installer (redirect path): ${installerPath}`);
                       
-                      const installer = spawn(installerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
-                        detached: true,
-                        stdio: 'ignore'
-                      });
+                      // Create a batch file to launch the installer
+                      const batchPath = path.join(dataDir, 'run-installer.bat');
+                      const batchContent = [
+                        '@echo off',
+                        'timeout /t 2 /nobreak > nul',
+                        `start "" /b "${installerPath}" /SILENT /SUPPRESSMSGBOXES /NORESTART "/LOG=${logPath}"`,
+                        'del "%~f0"'
+                      ].join('\r\n');
                       
-                      installer.on('error', (err: Error): void => {
-                        logger.error(`[Update] Installer spawn error (redirect path): ${err.message}`);
-                      });
-                      
-                      installer.unref();
-                      logger.info('[Update] Installer spawned (redirect path), exiting server in 3 seconds...');
-                      
-                      // Exit after a delay to allow installer to start
-                      setTimeout((): void => {
-                        logger.info('[Update] Exiting server process (redirect path)');
-                        process.exit(0);
-                      }, 3000);
+                      try {
+                        fs.writeFileSync(batchPath, batchContent);
+                        logger.info(`[Update] Created batch file: ${batchPath}`);
+                        
+                        const batch = spawn('cmd.exe', ['/c', batchPath], {
+                          detached: true,
+                          stdio: 'ignore',
+                          windowsHide: true
+                        });
+                        
+                        batch.on('error', (err: Error): void => {
+                          logger.error(`[Update] Batch spawn error: ${err.message}`);
+                        });
+                        
+                        batch.unref();
+                        logger.info('[Update] Batch file launched, exiting server in 1 second...');
+                        
+                        setTimeout((): void => {
+                          logger.info('[Update] Exiting server process');
+                          process.exit(0);
+                        }, 1000);
+                      } catch (err) {
+                        logger.error(`[Update] Failed to create batch file: ${err instanceof Error ? err.message : 'Unknown'}`);
+                        const installer = spawn(installerPath, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
+                          detached: true,
+                          stdio: 'ignore'
+                        });
+                        
+                        installer.on('error', (err: Error): void => {
+                          logger.error(`[Update] Installer spawn error: ${err.message}`);
+                        });
+                        
+                        installer.unref();
+                        logger.info('[Update] Installer spawned (fallback), exiting server in 3 seconds...');
+                        
+                        setTimeout((): void => {
+                          logger.info('[Update] Exiting server process');
+                          process.exit(0);
+                        }, 3000);
+                      }
                     });
                   });
                 });
@@ -618,23 +646,59 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
                   logger.info(`[Update] Spawning installer: ${installerPath}`);
                   logger.info(`[Update] Log path: ${logPath}`);
                   
-                  const installer = spawn(installerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
-                    detached: true,
-                    stdio: 'ignore'
-                  });
+                  // Create a batch file to launch the installer
+                  // This ensures the installer is completely detached from the node process
+                  const batchPath = path.join(dataDir, 'run-installer.bat');
+                  const batchContent = [
+                    '@echo off',
+                    'timeout /t 2 /nobreak > nul',  // Wait 2 seconds for server to exit
+                    `start "" /b "${installerPath}" /SILENT /SUPPRESSMSGBOXES /NORESTART "/LOG=${logPath}"`,
+                    'del "%~f0"'  // Delete this batch file after running
+                  ].join('\r\n');
                   
-                  installer.on('error', (err: Error): void => {
-                    logger.error(`[Update] Installer spawn error: ${err.message}`);
-                  });
-                  
-                  installer.unref();
-                  logger.info('[Update] Installer spawned, exiting server in 3 seconds...');
-                  
-                  // Exit after a delay to allow installer to start
-                  setTimeout((): void => {
-                    logger.info('[Update] Exiting server process');
-                    process.exit(0);
-                  }, 3000);
+                  try {
+                    fs.writeFileSync(batchPath, batchContent);
+                    logger.info(`[Update] Created batch file: ${batchPath}`);
+                    
+                    // Launch the batch file (it will launch installer after server exits)
+                    const batch = spawn('cmd.exe', ['/c', batchPath], {
+                      detached: true,
+                      stdio: 'ignore',
+                      windowsHide: true
+                    });
+                    
+                    batch.on('error', (err: Error): void => {
+                      logger.error(`[Update] Batch spawn error: ${err.message}`);
+                    });
+                    
+                    batch.unref();
+                    logger.info('[Update] Batch file launched, exiting server in 1 second...');
+                    
+                    // Exit quickly - the batch file will wait and then launch the installer
+                    setTimeout((): void => {
+                      logger.info('[Update] Exiting server process');
+                      process.exit(0);
+                    }, 1000);
+                  } catch (err) {
+                    logger.error(`[Update] Failed to create batch file: ${err instanceof Error ? err.message : 'Unknown'}`);
+                    // Fallback to direct spawn
+                    const installer = spawn(installerPath, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
+                      detached: true,
+                      stdio: 'ignore'
+                    });
+                    
+                    installer.on('error', (err: Error): void => {
+                      logger.error(`[Update] Installer spawn error: ${err.message}`);
+                    });
+                    
+                    installer.unref();
+                    logger.info('[Update] Installer spawned (fallback), exiting server in 3 seconds...');
+                    
+                    setTimeout((): void => {
+                      logger.info('[Update] Exiting server process');
+                      process.exit(0);
+                    }, 3000);
+                  }
                 });
               });
               
