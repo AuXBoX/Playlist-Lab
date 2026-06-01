@@ -1914,14 +1914,49 @@ export const ImportPage: FC = () => {
 
             {/* Optional Custom Playlist Name */}
             {!['aria', 'billboard'].includes(activeSource) && (
-              <button
-                className="btn btn-primary"
-                onClick={() => handleImport()}
-                disabled={isImporting || (!url && !username && !file && !aiPrompt) || (activeSource === 'ai' && !hasGeminiApiKey && !geminiApiKey)}
-                style={{ marginTop: '1rem', width: '100%' }}
-              >
-                {isImporting ? 'Importing...' : activeSource === 'ai' ? 'Generate Playlist' : 'Import Playlist'}
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => handleImport()}
+                  disabled={isImporting || (!url && !username && !file && !aiPrompt) || (activeSource === 'ai' && !hasGeminiApiKey && !geminiApiKey)}
+                  style={{ flex: 2 }}
+                >
+                  {isImporting ? 'Importing...' : activeSource === 'ai' ? 'Generate Playlist' : 'Import Playlist'}
+                </button>
+                {activeSource === 'spotify' && url.trim() && url.includes('open.spotify.com/playlist/') && (
+                  <>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        const playlistId = url.match(/playlist\/([a-zA-Z0-9]+)/)?.[1];
+                        handleSchedule({ 
+                          name: playlistName || `Spotify Playlist ${playlistId || ''}`.trim(), 
+                          url: url.trim() 
+                        });
+                      }}
+                      disabled={isImporting}
+                      style={{ flex: 1, minWidth: '80px' }}
+                    >
+                      Schedule
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        const playlistId = url.match(/playlist\/([a-zA-Z0-9]+)/)?.[1];
+                        toggleFavorite({ 
+                          name: playlistName || `Spotify Playlist ${playlistId || ''}`.trim(), 
+                          url: url.trim(),
+                          description: playlistId ? `Spotify playlist ${playlistId}` : undefined,
+                        });
+                      }}
+                      disabled={isImporting}
+                      style={{ flex: 1, minWidth: '80px' }}
+                    >
+                      {isFavorited(url.trim()) ? '★ Favorited' : '☆ Favorite'}
+                    </button>
+                  </>
+                )}
+              </div>
             )}
             </div>
           )}

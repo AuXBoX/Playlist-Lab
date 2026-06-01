@@ -279,12 +279,18 @@ class AutoUpdater {
     }
 
     return new Promise((resolve, reject) => {
-      // Run installer with silent flag and restart applications
+      // Run installer with proper silent flags
+      // /VERYSILENT = completely silent (no UI at all)
+      // /SUPPRESSMSGBOXES = suppress message boxes
+      // /NORESTART = don't restart system (installer handles app restart)
+      // /TASKS=launchnow = auto-launch after install
+      const logPath = path.join(this.dataDir, 'update-install.log');
       const installer = spawn(installerPath, [
-        '/SILENT',
-        '/CLOSEAPPLICATIONS',
-        '/RESTARTAPPLICATIONS',
-        '/TASKS=launchnow' // Auto-launch after install
+        '/VERYSILENT',
+        '/SUPPRESSMSGBOXES',
+        '/NORESTART',
+        '/TASKS=launchnow',
+        `/LOG=${logPath}`
       ], {
         detached: true,
         stdio: 'ignore'
