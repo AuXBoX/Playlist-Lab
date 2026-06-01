@@ -557,8 +557,13 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
                     
                     // Wait for response to be sent, then launch installer and exit
                     res.on('finish', (): void => {
-                      // Launch installer
-                      const installer = spawn(installerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
+                      // Launch installer with proper silent flags
+                      // /VERYSILENT = completely silent (no UI at all)
+                      // /SUPPRESSMSGBOXES = suppress message boxes
+                      // /NORESTART = don't restart system (we handle app restart)
+                      // /LOG = log installation for debugging
+                      const logPath = path.join(dataDir, 'update-install.log');
+                      const installer = spawn(installerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
                         detached: true,
                         stdio: 'ignore'
                       });
@@ -588,8 +593,13 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
                 
                 // Wait for response to be sent, then launch installer and exit
                 res.on('finish', (): void => {
-                  // Launch installer
-                  const installer = spawn(installerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
+                  // Launch installer with proper silent flags
+                  // /VERYSILENT = completely silent (no UI at all)
+                  // /SUPPRESSMSGBOXES = suppress message boxes
+                  // /NORESTART = don't restart system (we handle app restart)
+                  // /LOG = log installation for debugging
+                  const logPath = path.join(dataDir, 'update-install.log');
+                  const installer = spawn(installerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
                     detached: true,
                     stdio: 'ignore'
                   });
