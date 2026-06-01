@@ -42,9 +42,10 @@ router.get('/', requireAuth, (req: Request, res: Response): void => {
  * Resolve a Spotify user's display name by scraping their profile page title
  */
 async function resolveSpotifyDisplayName(spotifyUserId: string): Promise<string | null> {
-  // Known generic titles that don't contain user info
+  // Known generic titles that don't contain user info (language dialogs, generic pages)
+  // Note: 'Spotify' alone is a valid display name for the official Spotify profile
   const genericTitles = [
-    'spotify', 'spotify - web player', 'web player', 'spotify web player',
+    'spotify - web player', 'web player', 'spotify web player',
     'spotify – web player', 'spotify – listen to web player',
     'spotify – free music streaming', 'spotify – music for everyone',
   ];
@@ -52,7 +53,8 @@ async function resolveSpotifyDisplayName(spotifyUserId: string): Promise<string 
   const isGeneric = (text: string): boolean => {
     if (!text) return true;
     const lower = text.toLowerCase().trim();
-    return genericTitles.includes(lower) || /^(spotify|web player|choose|sprache|langue|idioma)/i.test(lower);
+    // 'spotify' alone is valid (official profile), but language dialog keywords are not
+    return genericTitles.includes(lower) || /^(choose|sprache|langue|idioma)/i.test(lower);
   };
   
   const extractName = (raw: string): string | null => {
@@ -106,7 +108,7 @@ async function resolveSpotifyDisplayName(spotifyUserId: string): Promise<string 
     let h1m;
     while ((h1m = h1Regex.exec(html)) !== null) {
       const h1 = h1m[1].trim();
-      if (h1 && h1.length > 0 && h1.length < 100 && !isGeneric(h1) && !/spotify|web player/i.test(h1)) {
+      if (h1 && h1.length > 0 && h1.length < 100 && !isGeneric(h1)) {
         return h1;
       }
     }
@@ -222,8 +224,9 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Reject known invalid/generic user IDs
-    const invalidUserIds = ['spotify', 'choose', 'language', 'web player', 'webplayer'];
+    // Reject known invalid/generic user IDs (language dialog keywords)
+    // Note: 'spotify' is a valid user ID (Spotify's official profile) and should NOT be blocked
+    const invalidUserIds = ['choose', 'language', 'web player', 'webplayer'];
     const trimmedId = spotifyUserId.trim().toLowerCase();
     if (invalidUserIds.includes(trimmedId) || trimmedId.length < 3) {
       res.status(400).json({ 
@@ -359,8 +362,9 @@ router.patch('/:id/refresh', requireAuth, async (req: Request, res: Response): P
       return;
     }
 
-    // Skip resolution for known invalid user IDs
-    const invalidIds = ['spotify', 'choose', 'language', 'web player', 'webplayer'];
+    // Skip resolution for known invalid user IDs (language dialog keywords)
+    // Note: 'spotify' is a valid user ID (Spotify's official profile)
+    const invalidIds = ['choose', 'language', 'web player', 'webplayer'];
     if (invalidIds.includes(existing.spotify_user_id.trim().toLowerCase()) || existing.spotify_user_id.trim().length < 3) {
       res.json({ displayName: null, message: 'Invalid Spotify user ID, skipping resolution' });
       return;
