@@ -278,62 +278,40 @@ class AutoUpdater {
       throw new Error('Installer file not found');
     }
 
-    return new Promise((resolve, reject) => {
-      // Create a batch file to launch the installer
-      // This ensures the installer is completely detached from the node process
+    return new Promise((resolve) => {
+      // Spawn installer directly - no batch file to avoid antivirus false positives
+      // /SILENT = show progress window but no user interaction
+      // /SUPPRESSMSGBOXES = suppress message boxes
+      // /NORESTART = don't restart system (we handle app restart)
+      // /TASKS=launchnow = launch app after install
+      // /LOG = log installation for debugging
       const logPath = path.join(this.dataDir, 'update-install.log');
-      const batchPath = path.join(this.dataDir, 'run-installer.bat');
-      const batchContent = [
-        '@echo off',
-        'timeout /t 2 /nobreak > nul',  // Wait 2 seconds for tray/server to exit
-        `start "" /b "${installerPath}" /SILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=launchnow "/LOG=${logPath}"`,
-        'del "%~f0"'  // Delete this batch file after running
-      ].join('\r\n');
+      
+      this.log(`Spawning installer: ${installerPath}`);
+      
+      const installer = spawn(installerPath, [
+        '/SILENT',
+        '/SUPPRESSMSGBOXES',
+        '/NORESTART',
+        '/TASKS=launchnow',
+        `/LOG=${logPath}`
+      ], {
+        detached: true,
+        stdio: 'ignore'
+      });
 
-      try {
-        fs.writeFileSync(batchPath, batchContent);
-        this.log(`Created batch file: ${batchPath}`);
+      installer.on('error', (err) => {
+        this.log(`Installer spawn error: ${err.message}`);
+      });
 
-        // Launch the batch file (it will launch installer after we exit)
-        const batch = spawn('cmd.exe', ['/c', batchPath], {
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: true
-        });
+      installer.unref();
 
-        batch.on('error', (err) => {
-          this.log(`Batch spawn error: ${err.message}`);
-        });
-
-        batch.unref();
-
-        // Give batch time to start
-        setTimeout(() => {
-          this.log('Batch file launched, exiting application...');
-          resolve();
-        }, 1000);
-      } catch (err) {
-        this.log(`Failed to create batch file: ${err.message}, using fallback`);
-        
-        // Fallback to direct spawn
-        const installer = spawn(installerPath, [
-          '/SILENT',
-          '/SUPPRESSMSGBOXES',
-          '/NORESTART',
-          '/TASKS=launchnow',
-          `/LOG=${logPath}`
-        ], {
-          detached: true,
-          stdio: 'ignore'
-        });
-
-        installer.unref();
-
-        setTimeout(() => {
-          this.log('Installer launched (fallback), exiting application...');
-          resolve();
-        }, 2000);
-      }
+      // Wait 3 seconds for installer to start and pass PrepareToInstall
+      // which kills node.exe processes before we exit
+      setTimeout(() => {
+        this.log('Installer launched, exiting application...');
+        resolve();
+      }, 3000);
     });
   }
 
