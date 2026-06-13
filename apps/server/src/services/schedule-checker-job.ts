@@ -171,6 +171,26 @@ async function executePlaylistRefreshSchedules(db: DatabaseService): Promise<{ e
         trackUris
       );
 
+      // Upload cover art if available and overwriteCover is enabled
+      const overwriteCover = config.overwriteCover !== undefined ? config.overwriteCover : true;
+      if (result.coverUrl && overwriteCover) {
+        try {
+          logger.info('Uploading cover art for scheduled import', {
+            scheduleId: schedule.id,
+            playlistName,
+            coverUrl: result.coverUrl
+          });
+          await plex.uploadPlaylistPoster(newPlaylist.ratingKey, result.coverUrl);
+        } catch (coverError: any) {
+          logger.warn('Failed to upload cover art for scheduled import', {
+            scheduleId: schedule.id,
+            playlistName,
+            error: coverError.message
+          });
+          // Continue - cover upload failure shouldn't fail the whole import
+        }
+      }
+
       // Get or create playlist record in database
       let playlistDbId = schedule.playlist_id;
       

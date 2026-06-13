@@ -32,6 +32,8 @@ export const QueuePage: FC = () => {
   const [rematchResults, setRematchResults] = useState<any[]>([]);
   const [isSearchingRematch, setIsSearchingRematch] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [overwriteExisting, setOverwriteExisting] = useState(false);
+  const [overwriteCover, setOverwriteCover] = useState(true);
 
   // Track whether mousedown started on the backdrop
   const backdropMouseDown = useRef(false);
@@ -197,7 +199,9 @@ export const QueuePage: FC = () => {
           artist: t.artist,
           album: t.album,
         })),
-        coverUrl: selectedImport.coverUrl,
+        overwriteExisting,
+        keepExistingCover: false,
+        coverUrl: overwriteCover ? selectedImport.coverUrl : undefined,
       });
 
       await fetch(`/api/import/queue/completed/${selectedImport.id}`, {
@@ -259,7 +263,8 @@ export const QueuePage: FC = () => {
           sourceUrl: selectedImport.url || '',
           tracks: unmatchedWithPositions,
           matchedTracks: matchedTracksData,
-          coverUrl: selectedImport.coverUrl,
+          coverUrl: overwriteCover ? selectedImport.coverUrl : undefined,
+          overwriteExisting,
         });
       } else if (matchedTracks.length > 0) {
         // Only matched tracks, create playlist normally
@@ -570,6 +575,25 @@ export const QueuePage: FC = () => {
                     <span className="stat-matched">{getMatchStats().matched} matched</span>
                     <span className="stat-unmatched">{getMatchStats().unmatched} unmatched</span>
                     <span className="stat-total">{getMatchStats().total} total</span>
+                  </div>
+
+                  <div className="queue-overwrite-options" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      <input
+                        type="checkbox"
+                        checked={overwriteExisting}
+                        onChange={(e) => setOverwriteExisting(e.target.checked)}
+                      />
+                      Overwrite existing playlist
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      <input
+                        type="checkbox"
+                        checked={overwriteCover}
+                        onChange={(e) => setOverwriteCover(e.target.checked)}
+                      />
+                      Overwrite cover art
+                    </label>
                   </div>
 
                   <div className="queue-header-actions">
