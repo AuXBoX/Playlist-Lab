@@ -5,44 +5,6 @@ Feel free to donate
 
 A comprehensive music playlist management system with Plex Media Server integration. Import playlists from multiple sources, generate smart mixes, and sync them to your Plex server.
 
-## What's New in v1.2.4
-
-### Import Queue System
-- ✅ Background processing - imports run without blocking the UI
-- ✅ Real-time progress tracking with detailed status
-- ✅ Queue management: view pending, processing, and completed imports
-- ✅ Retry failed imports and cancel pending ones
-- ✅ Import history with timestamps
-
-### New Export System
-- ✅ Complete rewrite for better performance and reliability
-- ✅ Enhanced error handling and recovery
-- ✅ Real-time export progress updates
-
-### Schedule Management
-- ✅ "Run Now" button for individual schedules
-- ✅ "Run All" to execute all schedules at once
-- ✅ Manual testing without waiting for scheduled time
-
-### Chart Updates
-- ✅ ARIA Charts - Latest option added
-- ✅ Billboard - Latest option added
-- ✅ Always get the most current chart playlists
-
-### Critical Fixes
-- ✅ Fixed reverse proxy causing Spotify OAuth failures
-- ✅ Fixed UI blocking during playlist imports
-- ✅ Fixed playlist artwork import failures
-- ✅ Fixed missing dependencies on Ubuntu
-- ✅ Fixed shared playlists "Invalid playlist ID" error
-
-### Spotify Improvements
-- ✅ Search Spotify's entire catalog (not just your playlists)
-- ✅ Popup-based OAuth (no more session loss)
-- ✅ Premium subscription requirement clearly indicated
-
-See [Release Notes](docs/RELEASE_NOTES_v1.2.4.md) for complete details.
-
 ## Features
 
 ### Core Features
