@@ -279,12 +279,6 @@ class AutoUpdater {
     }
 
     return new Promise((resolve) => {
-      // Spawn installer directly - no batch file to avoid antivirus false positives
-      // /SILENT = show progress window but no user interaction
-      // /SUPPRESSMSGBOXES = suppress message boxes
-      // /NORESTART = don't restart system (we handle app restart)
-      // /TASKS=launchnow = launch app after install
-      // /LOG = log installation for debugging
       const logPath = path.join(this.dataDir, 'update-install.log');
       
       this.log(`Spawning installer: ${installerPath}`);
@@ -306,12 +300,12 @@ class AutoUpdater {
 
       installer.unref();
 
-      // Wait 3 seconds for installer to start and pass PrepareToInstall
-      // which kills node.exe processes before we exit
+      // Exit quickly - installer is detached and will continue on its own
+      // The installer's PrepareToInstall handles killing remaining node processes
       setTimeout(() => {
         this.log('Installer launched, exiting application...');
         resolve();
-      }, 3000);
+      }, 1000);
     });
   }
 

@@ -562,35 +562,49 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
                       message: 'Update installer launched. The application will restart automatically.' 
                     });
                     
-                    // Wait for response to be sent, then launch installer and exit
+                    // Wait for response to be sent, then shut down and launch installer
                     res.on('finish', (): void => {
-                      // Launch installer with proper silent flags
                       const logPath = path.join(dataDir, 'update-install.log');
-                      logger.info(`[Update] Spawning installer (redirect path): ${installerPath}`);
+                      logger.info('[Update] Response sent, shutting down server before launching installer...');
                       
-                      // Spawn installer directly - no batch file to avoid antivirus false positives
-                      // /SILENT = show progress window but no user interaction
-                      // /SUPPRESSMSGBOXES = suppress message boxes
-                      // /NORESTART = don't restart system (we handle app restart)
-                      // /LOG = log installation for debugging
-                      const installer = spawn(installerPath, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
-                        detached: true,
-                        stdio: 'ignore'
+                      // Close HTTP server first to stop accepting new connections
+                      server.close(() => {
+                        logger.info('[Update] HTTP server closed');
                       });
                       
-                      installer.on('error', (err: Error): void => {
-                        logger.error(`[Update] Installer spawn error: ${err.message}`);
-                      });
+                      // Stop job scheduler
+                      jobScheduler.stop().then(() => {
+                        logger.info('[Update] Job scheduler stopped');
+                      }).catch(() => {});
                       
-                      installer.unref();
-                      logger.info('[Update] Installer spawned, exiting server in 3 seconds...');
+                      // Close HTTPS server if running
+                      if (httpsServer) {
+                        httpsServer.close(() => {
+                          logger.info('[Update] HTTPS server closed');
+                        });
+                      }
                       
-                      // Wait 3 seconds to let the installer start and pass PrepareToInstall
-                      // which kills node.exe processes before we exit
+                      // Wait for connections to drain, then spawn installer
                       setTimeout((): void => {
-                        logger.info('[Update] Exiting server process');
-                        process.exit(0);
-                      }, 3000);
+                        logger.info(`[Update] Spawning installer (redirect path): ${installerPath}`);
+                        
+                        const installer = spawn(installerPath, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
+                          detached: true,
+                          stdio: 'ignore'
+                        });
+                        
+                        installer.on('error', (err: Error): void => {
+                          logger.error(`[Update] Installer spawn error: ${err.message}`);
+                        });
+                        
+                        installer.unref();
+                        logger.info('[Update] Installer spawned, exiting in 1 second...');
+                        
+                        setTimeout((): void => {
+                          logger.info('[Update] Exiting server process');
+                          process.exit(0);
+                        }, 1000);
+                      }, 1500);
                     });
                   });
                 });
@@ -609,35 +623,49 @@ app.post('/api/update/install', async (_req: Request, res: Response): Promise<vo
                   message: 'Update installer launched. The application will restart automatically.' 
                 });
                 
-                // Wait for response to be sent, then launch installer and exit
+                // Wait for response to be sent, then shut down and launch installer
                 res.on('finish', (): void => {
-                  // Launch installer with proper silent flags
-                  // /SILENT = show progress window but no user interaction
-                  // /SUPPRESSMSGBOXES = suppress message boxes
-                  // /NORESTART = don't restart system (we handle app restart)
-                  // /LOG = log installation for debugging
                   const logPath = path.join(dataDir, 'update-install.log');
-                  logger.info(`[Update] Spawning installer: ${installerPath}`);
+                  logger.info('[Update] Response sent, shutting down server before launching installer...');
                   
-                  // Spawn installer directly - no batch file to avoid antivirus false positives
-                  const installer = spawn(installerPath, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
-                    detached: true,
-                    stdio: 'ignore'
+                  // Close HTTP server first to stop accepting new connections
+                  server.close(() => {
+                    logger.info('[Update] HTTP server closed');
                   });
                   
-                  installer.on('error', (err: Error): void => {
-                    logger.error(`[Update] Installer spawn error: ${err.message}`);
-                  });
+                  // Stop job scheduler
+                  jobScheduler.stop().then(() => {
+                    logger.info('[Update] Job scheduler stopped');
+                  }).catch(() => {});
                   
-                  installer.unref();
-                  logger.info('[Update] Installer spawned, exiting server in 3 seconds...');
+                  // Close HTTPS server if running
+                  if (httpsServer) {
+                    httpsServer.close(() => {
+                      logger.info('[Update] HTTPS server closed');
+                    });
+                  }
                   
-                  // Wait 3 seconds to let the installer start and pass PrepareToInstall
-                  // which kills node.exe processes before we exit
+                  // Wait for connections to drain, then spawn installer
                   setTimeout((): void => {
-                    logger.info('[Update] Exiting server process');
-                    process.exit(0);
-                  }, 3000);
+                    logger.info(`[Update] Spawning installer: ${installerPath}`);
+                    
+                    const installer = spawn(installerPath, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${logPath}`], {
+                      detached: true,
+                      stdio: 'ignore'
+                    });
+                    
+                    installer.on('error', (err: Error): void => {
+                      logger.error(`[Update] Installer spawn error: ${err.message}`);
+                    });
+                    
+                    installer.unref();
+                    logger.info('[Update] Installer spawned, exiting in 1 second...');
+                    
+                    setTimeout((): void => {
+                      logger.info('[Update] Exiting server process');
+                      process.exit(0);
+                    }, 1000);
+                  }, 1500);
                 });
               });
               
