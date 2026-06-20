@@ -79,7 +79,7 @@ This is a monorepo containing multiple applications:
 **Option 1: Windows Installer**
 ```cmd
 # Download and run the installer
-PlaylistLabServer-Setup-1.2.4.exe
+PlaylistLabServer-Setup-X.X.X.exe
 ```
 
 **Option 2: Docker (Recommended for Development)**
@@ -133,13 +133,6 @@ The PWA provides an app-like experience with offline support and push notificati
 - Git
 - Plex Media Server with authentication token
 
-### Third-Party Service Requirements
-
-**Spotify Import** (Optional)
-- Spotify Premium subscription required for the app owner
-- Free Spotify accounts cannot browse or search playlists via API
-- See [Spotify Web API Documentation](https://developer.spotify.com/documentation/web-api) for details
-
 ### Reverse Proxy Support
 
 Playlist Lab works seamlessly behind reverse proxies (Nginx, Apache, Caddy, etc.). 
@@ -186,31 +179,6 @@ npm run dev:web     # Web app on port 5173
 - **Frontend**: React, TypeScript, Vite, PWA
 - **Testing**: Jest, fast-check (property-based testing)
 - **Build**: TypeScript, Vite
-
-## Configuration
-
-### Server Environment Variables
-
-Create a `.env` file in `apps/server/` with the following variables:
-
-```env
-# Server Configuration
-PORT=3001
-PUBLIC_URL=http://127.0.0.1:3001
-
-# Session Secret (generate a random string)
-SESSION_SECRET=your-random-secret-here
-
-# Spotify OAuth (Optional - for Spotify import)
-SPOTIFY_CLIENT_ID=your-spotify-client-id
-SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
-SPOTIFY_REDIRECT_URI=http://127.0.0.1:3001/api/spotify/callback
-```
-
-**Important Notes:**
-- Use `127.0.0.1` instead of `localhost` for OAuth redirect URIs (better compatibility)
-- Spotify requires Premium subscription for the app owner to use playlist features
-- See `.env.example` files for complete configuration options
 
 ### Server Installers
 The Windows/macOS/Linux server installers include a system tray application for easy server management. The server runs as a background service and is accessed via web browser at `http://localhost:3001`.
