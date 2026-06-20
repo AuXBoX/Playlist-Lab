@@ -348,6 +348,7 @@ export const MissingTracksPage: FC = () => {
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center',
+                          backgroundColor: idx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.03)',
                         }}
                       >
                         <div style={{ flex: 1 }}>

@@ -152,7 +152,23 @@ router.post('/retry', requireAuth, async (req: Request, res: Response, next: Nex
             }
           } else {
             // Add track to playlist (will be added at the end)
-            await plexService.addToPlaylist(playlist.plex_playlist_id, [trackUri]);
+            try {
+              await plexService.addToPlaylist(playlist.plex_playlist_id, [trackUri]);
+            } catch (plexError: any) {
+              // If the Plex playlist was deleted, try creating a new one
+              if (plexError.message?.includes('not found') || plexError.message?.includes('404')) {
+                logger.warn('Plex playlist not found during retry, creating new one', {
+                  playlistId: playlist.id,
+                  plexPlaylistId: playlist.plex_playlist_id,
+                });
+                const libraryUri = `server://${userServer.server_client_id}/com.plexapp.plugins.library/library/sections/${userServer.library_id}`;
+                const newPlaylist = await plexService.createPlaylist(playlist.name, libraryUri, [trackUri]);
+                db.updatePlaylist(playlist.id, { plex_playlist_id: newPlaylist.ratingKey });
+                playlist.plex_playlist_id = newPlaylist.ratingKey;
+              } else {
+                throw plexError;
+              }
+            }
             
             // If we have position information, move the track to its original position
             if (original.after_track_key) {

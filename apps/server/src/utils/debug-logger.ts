@@ -1,8 +1,25 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
-// Use LOG_DIR environment variable or fallback to a relative path
-const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, '../../logs');
+// Determine log directory:
+// 1. Use LOG_DIR env var if set (set by tray app to AppData location)
+// 2. In production, use AppData\Playlist Lab\logs
+// 3. Otherwise use relative path from source
+function getLogDir(): string {
+  if (process.env.LOG_DIR) {
+    return process.env.LOG_DIR;
+  }
+  
+  const isProduction = process.cwd().includes('Program Files') || process.cwd().includes('Program Files (x86)');
+  if (isProduction) {
+    return path.join(os.homedir(), 'AppData', 'Roaming', 'Playlist Lab', 'logs');
+  }
+  
+  return path.join(__dirname, '../../logs');
+}
+
+const LOG_DIR = getLogDir();
 const DEBUG_LOG_FILE = path.join(LOG_DIR, 'debug.log');
 
 // Ensure logs directory exists
